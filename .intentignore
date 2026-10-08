@@ -1,0 +1,5 @@
+# Capture syntax is documented in README. Exclusions cannot be re-included.
+bin/
+dist/
+*.vsix
+*.exe

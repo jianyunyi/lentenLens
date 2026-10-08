@@ -1,0 +1,141 @@
+// Package codeindex creates a conservative static Go call index without builds.
+package codeindex
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"path"
+	"sort"
+	"strings"
+)
+
+type Function struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Source    string `json:"source"`
+	Calls     []Call `json:"calls"`
+}
+type Call struct {
+	Name    string   `json:"name"`
+	Status  string   `json:"status"`
+	Targets []string `json:"targets"`
+}
+type Index struct {
+	Functions []Function `json:"functions"`
+	Issues    []string   `json:"issues"`
+}
+type unit struct {
+	name   string
+	source string
+	tree   *ast.File
+}
+
+func Build(files map[string]string) Index {
+	out := Index{Functions: []Function{}, Issues: []string{}}
+	set := token.NewFileSet()
+	names := make([]string, 0, len(files))
+	for name := range files {
+		if strings.HasSuffix(name, ".go") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	groups := map[string][]unit{}
+	for _, name := range names {
+		tree, e := parser.ParseFile(set, name, files[name], parser.AllErrors)
+		if e != nil {
+			out.Issues = append(out.Issues, fmt.Sprintf("%s: parse failed: %v", name, e))
+			continue
+		}
+		key := path.Dir(strings.ReplaceAll(name, "\\", "/")) + ":" + tree.Name.Name
+		groups[key] = append(groups[key], unit{name, files[name], tree})
+	}
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		units := groups[key]
+		trees := make([]*ast.File, 0, len(units))
+		for _, u := range units {
+			trees = append(trees, u.tree)
+		}
+		info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}}
+		// No importer is supplied: dependencies are neither fetched nor executed.
+		cfg := types.Config{Error: func(err error) { out.Issues = append(out.Issues, "type check: "+err.Error()) }}
+		_, _ = cfg.Check(key, set, trees, info)
+		targets := map[types.Object]string{}
+		declarations := map[string][]string{}
+		for _, u := range units {
+			for _, d := range u.tree.Decls {
+				if f, ok := d.(*ast.FuncDecl); ok && f.Recv == nil {
+					declarations[f.Name.Name] = append(declarations[f.Name.Name], u.name+":"+f.Name.Name)
+					if obj := info.Defs[f.Name]; obj != nil {
+						targets[obj] = u.name + ":" + f.Name.Name
+					}
+				}
+			}
+		}
+		for _, u := range units {
+			for _, d := range u.tree.Decls {
+				f, ok := d.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				name := f.Name.Name
+				if f.Recv != nil && len(f.Recv.List) > 0 {
+					var b bytes.Buffer
+					_ = format.Node(&b, set, f.Recv.List[0].Type)
+					name = "(" + b.String() + ")." + name
+				}
+				start, end := set.Position(f.Pos()), set.Position(f.End())
+				fn := Function{ID: u.name + ":" + name, Name: name, File: u.name, StartLine: start.Line, EndLine: end.Line, Source: u.source[start.Offset:end.Offset], Calls: []Call{}}
+				if f.Body != nil {
+					ast.Inspect(f.Body, func(n ast.Node) bool {
+						c, ok := n.(*ast.CallExpr)
+						if !ok {
+							return true
+						}
+						var b bytes.Buffer
+						_ = format.Node(&b, set, c.Fun)
+						call := Call{Name: b.String(), Status: "unresolved", Targets: []string{}}
+						if id, ok := c.Fun.(*ast.Ident); ok {
+							obj := info.Uses[id]
+							target, exists := targets[obj]
+							// Type checking may pick one redeclaration arbitrarily, for example
+							// when platform variants are indexed together. Retain all candidates.
+							if candidates := declarations[id.Name]; len(candidates) > 1 && (exists || obj == nil) {
+								call.Status = "ambiguous"
+								call.Targets = append([]string{}, candidates...)
+							} else if exists {
+								call.Status = "resolved"
+								call.Targets = []string{target}
+							}
+						}
+						fn.Calls = append(fn.Calls, call)
+						return true
+					})
+				}
+				out.Functions = append(out.Functions, fn)
+			}
+		}
+	}
+	sort.Slice(out.Functions, func(i, j int) bool {
+		a, b := out.Functions[i], out.Functions[j]
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.StartLine < b.StartLine
+	})
+	sort.Strings(out.Issues)
+	return out
+}
