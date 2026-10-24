@@ -1,8 +1,8 @@
 {
   "name": "intentlens",
   "displayName": "IntentLens",
-  "description": "Go function explanations tied to local source evidence and Claude Code round snapshots.",
-  "version": "0.1.0",
+  "description": "Go function explanations tied to local source evidence and round snapshots.",
+  "version": "0.5.2",
   "publisher": "intentlens-local",
   "license": "UNLICENSED",
   "engines": { "vscode": "^1.90.0" },
@@ -10,19 +10,28 @@
   "main": "./src/extension.js",
   "activationEvents": ["onLanguage:go", "onView:intentlens.rounds"],
   "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "Views are available; CLI execution requires workspace trust." }, "virtualWorkspaces": { "supported": false } },
-  "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/extension.js" },
+  "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js" },
   "contributes": {
     "commands": [
+      { "command": "intentlens.exercises", "title": "IntentLens: 查看本地练习与评分" },
+      { "command": "intentlens.sharedExercises", "title": "IntentLens: 查看团队共享题目" },
+      { "command": "intentlens.shared", "title": "IntentLens: 查看团队共享解释" },
       { "command": "intentlens.inspect", "title": "IntentLens: 查看当前函数解释与证据" },
+      { "command": "intentlens.inspectDetails", "title": "IntentLens: 打开函数完整详情与历史" },
       { "command": "intentlens.refresh", "title": "IntentLens: 刷新轮次与 CodeLens" },
+      { "command": "intentlens.indexStatus", "title": "IntentLens: 查看索引范围与遗漏原因" },
+      { "command": "intentlens.startRound", "title": "IntentLens: 开始记录本轮修改", "description": "以当前磁盘状态开始一个本地轮次" },
+      { "command": "intentlens.stopRound", "title": "IntentLens: 结束记录本轮修改", "description": "以当前磁盘状态结束本地轮次" },
+      { "command": "intentlens.resumeRound", "title": "IntentLens: 恢复未结束的轮次" },
+      { "command": "intentlens.cancelRound", "title": "IntentLens: 取消当前轮次（保留源码）" },
       { "command": "intentlens.status", "title": "IntentLens: 查看状态与预算" },
       { "command": "intentlens.enableModel", "title": "IntentLens: 启用或调整模型分析" },
       { "command": "intentlens.pauseModel", "title": "IntentLens: 暂停模型分析" },
       { "command": "intentlens.hooksConfig", "title": "IntentLens: 预览 Claude Code Hook 配置" }
     ],
     "views": { "explorer": [{ "id": "intentlens.rounds", "name": "IntentLens · 轮次" }] },
-    "viewsWelcome": [{ "view": "intentlens.rounds", "contents": "打开并信任本地 Go 工作区。轮次由 Claude Code hooks 记录。\n[预览 Hook 配置](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)" }],
-    "menus": { "view/title": [{ "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" }] },
+    "viewsWelcome": [{ "view": "intentlens.rounds", "contents": "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\n[开始记录](command:intentlens.startRound)\n[结束记录](command:intentlens.stopRound)\n[恢复未结束轮次](command:intentlens.resumeRound)\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)" }],
+    "menus": { "view/title": [{ "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" }, { "command": "intentlens.startRound", "when": "view == intentlens.rounds", "group": "capture@1" }, { "command": "intentlens.stopRound", "when": "view == intentlens.rounds", "group": "capture@2" }, { "command": "intentlens.resumeRound", "when": "view == intentlens.rounds", "group": "capture@3" }, { "command": "intentlens.cancelRound", "when": "view == intentlens.rounds", "group": "capture@4" }] },
     "configuration": { "title": "IntentLens", "properties": { "intentlens.binaryPath": { "type": "string", "default": "", "scope": "machine-overridable", "restricted": true, "description": "IntentLens executable path. Empty uses bundled bin/intentlens(.exe), then PATH. No shell arguments." } } }
   }
 }
