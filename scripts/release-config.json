@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "target": {
+    "goos": "windows",
+    "goarch": "amd64",
+    "vscode": "win32-x64"
+  },
+  "goVersion": "1.26.3",
+  "goModVersion": "1.24.0",
+  "nodeMajor": 22,
+  "vsceVersion": "4.0.0"
+}
