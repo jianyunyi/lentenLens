@@ -31,6 +31,22 @@ type Call struct {
 type Index struct {
 	Functions []Function `json:"functions"`
 	Issues    []string   `json:"issues"`
+	Coverage  Coverage   `json:"coverage"`
+}
+type CoverageOmission struct {
+	File   string `json:"file"`
+	Reason string `json:"reason"`
+}
+type Coverage struct {
+	Complete        bool               `json:"complete"`
+	Scope           string             `json:"scope"`
+	BudgetBytes     int                `json:"budget_bytes"`
+	CapturedBytes   int                `json:"captured_bytes"`
+	OmittedCount    int                `json:"omitted_count"`
+	ExcludedCount   int                `json:"excluded_count"`
+	Omitted         []CoverageOmission `json:"omitted"`
+	Truncated       bool               `json:"truncated"`
+	OmissionReasons map[string]string  `json:"-"`
 }
 type unit struct {
 	name   string
@@ -39,7 +55,15 @@ type unit struct {
 }
 
 func Build(files map[string]string) Index {
+	out, _ := BuildDetailed(files)
+	return out
+}
+
+// BuildDetailed is the indexing form used by the app coverage layer. The
+// returned maps are deliberately not part of Index's JSON representation.
+func BuildDetailed(files map[string]string) (Index, map[string]string) {
 	out := Index{Functions: []Function{}, Issues: []string{}}
+	omitted := map[string]string{}
 	set := token.NewFileSet()
 	names := make([]string, 0, len(files))
 	for name := range files {
@@ -53,6 +77,7 @@ func Build(files map[string]string) Index {
 		tree, e := parser.ParseFile(set, name, files[name], parser.AllErrors)
 		if e != nil {
 			out.Issues = append(out.Issues, fmt.Sprintf("%s: parse failed: %v", name, e))
+			omitted[name] = "parse_error"
 			continue
 		}
 		key := path.Dir(strings.ReplaceAll(name, "\\", "/")) + ":" + tree.Name.Name
@@ -69,7 +94,7 @@ func Build(files map[string]string) Index {
 		for _, u := range units {
 			trees = append(trees, u.tree)
 		}
-		info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}}
+		info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Instances: map[*ast.Ident]types.Instance{}}
 		// No importer is supplied: dependencies are neither fetched nor executed.
 		cfg := types.Config{Error: func(err error) { out.Issues = append(out.Issues, "type check: "+err.Error()) }}
 		_, _ = cfg.Check(key, set, trees, info)
@@ -108,7 +133,7 @@ func Build(files map[string]string) Index {
 						var b bytes.Buffer
 						_ = format.Node(&b, set, c.Fun)
 						call := Call{Name: b.String(), Status: "unresolved", Targets: []string{}}
-						if id, ok := c.Fun.(*ast.Ident); ok {
+						if id := directCallIdent(c.Fun, info); id != nil {
 							obj := info.Uses[id]
 							target, exists := targets[obj]
 							// Type checking may pick one redeclaration arbitrarily, for example
@@ -137,5 +162,34 @@ func Build(files map[string]string) Index {
 		return a.StartLine < b.StartLine
 	})
 	sort.Strings(out.Issues)
-	return out
+	return out, omitted
+}
+
+// directCallIdent unwraps syntax only when it still denotes a direct call.
+// IndexExpr can also mean a slice/map lookup returning a function value, so
+// explicit type arguments require a confirmed go/types instantiation.
+func directCallIdent(expr ast.Expr, info *types.Info) *ast.Ident {
+	expr = ast.Unparen(expr)
+	var base ast.Expr
+	switch x := expr.(type) {
+	case *ast.Ident:
+		return x
+	case *ast.IndexExpr:
+		base = x.X
+	case *ast.IndexListExpr:
+		base = x.X
+	default:
+		return nil
+	}
+	id, ok := ast.Unparen(base).(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if _, ok := info.Instances[id]; !ok {
+		return nil
+	}
+	if _, ok := info.Uses[id].(*types.Func); !ok {
+		return nil
+	}
+	return id
 }
