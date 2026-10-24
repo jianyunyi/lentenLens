@@ -51,4 +51,5 @@ test('rendering escapes hostile source and claims and separates historical sourc
   assert.match(html, /历史证据原文/);
   assert.match(html, /当前文件/);
   assert.match(html, /uncertain/);
+  assert.match(html, /位置: main\.go:2–3/);
 });

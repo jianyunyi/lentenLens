@@ -19,18 +19,33 @@ import (
 
 func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout)) }
 
+var openApp = app.Open
+
 type input struct {
-	Session  string       `json:"session"`
-	File     string       `json:"file"`
-	Line     int          `json:"line"`
-	Question string       `json:"question"`
-	Settings app.Settings `json:"settings"`
-	Consent  bool         `json:"consent"`
+	ExerciseID          string       `json:"exercise_id"`
+	ParentID            string       `json:"parent_id"`
+	AttemptID           string       `json:"attempt_id"`
+	Mode                string       `json:"mode"`
+	ExplanationID       string       `json:"explanation_id"`
+	ClaimID             string       `json:"claim_id"`
+	Reason              string       `json:"reason"`
+	DraftID             string       `json:"draft_id"`
+	PreviewDigest       string       `json:"preview_digest"`
+	Confirm             bool         `json:"confirm"`
+	ApprovedEvidenceIDs []string     `json:"approved_evidence_ids"`
+	Session             string       `json:"session"`
+	Event               string       `json:"event"`
+	File                string       `json:"file"`
+	Line                int          `json:"line"`
+	Question            string       `json:"question"`
+	Settings            app.Settings `json:"settings"`
+	Consent             bool         `json:"consent"`
+	RoundID             string       `json:"round_id"`
 }
 
 func run(args []string, in io.Reader, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "IntentLens: start | stop | abort | rounds | index | inspect | explain | configure | status | hooks-config | hook")
+		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | explain | configure | status | analyze-round | hooks-config | hook")
 		return 0
 	}
 	command := args[0]
@@ -42,6 +57,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	if e := flags.Parse(args[1:]); e != nil {
 		return fail(out, e)
 	}
+	if command == "integration-info" {
+		return emit(out, integrationInfo())
+	}
 	if command == "hooks-config" {
 		return emit(out, hookConfig())
 	}
@@ -49,27 +67,100 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		handleHook(withoutBOM(in), *state)
 		return 0
 	}
-	a, e := app.Open(*root, *state)
+	a, e := openApp(*root, *state)
 	if e != nil {
 		return fail(out, e)
 	}
 	var request input
 	// Read stdin only for commands that require it; never hang a background worker.
 	switch command {
-	case "start", "stop", "inspect", "explain", "configure":
+	case "capture-event", "capture-abort", "start", "stop", "inspect", "explain", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
 		e = json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request)
 		if e != nil {
 			return fail(out, errors.New("需要有效的 JSON 输入"))
 		}
+	case "analyze-round":
+		// VS Code's runCLI sends the round id as JSON. Background hook
+		// workers pass --round explicitly and must not consume stdin.
+		if strings.TrimSpace(*roundID) == "" {
+			e = json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request)
+			if e != nil {
+				return fail(out, errors.New("需要有效的 JSON 输入"))
+			}
+			*roundID = request.RoundID
+		}
 	}
 	var result any
 	switch command {
+	case "capture-event":
+		if strings.TrimSpace(request.Session) == "" {
+			return fail(out, errors.New("通用事件需要非空 session；开始与结束须使用同一值"))
+		}
+		switch request.Event {
+		case "start":
+			var active app.Active
+			active, e = a.Start(request.Session)
+			result = map[string]any{"id": active.ID, "started": active.Started}
+		case "stop":
+			result, e = a.Stop(request.Session)
+		default:
+			return fail(out, errors.New("通用事件 event 必须为 start 或 stop"))
+		}
+	case "exercise-generate":
+		var generated app.Exercise
+		generated, e = a.GenerateExercise(context.Background(), request.ExplanationID, request.ClaimID, request.File, request.ParentID, "")
+		if e == nil {
+			result, e = a.ExerciseView(generated.ID)
+		}
+	case "exercises":
+		result, e = a.Exercises()
+	case "exercise-view":
+		result, e = a.ExerciseView(request.ExerciseID)
+	case "exercise-plan":
+		result, e = a.PrepareExecution(request.ExerciseID)
+	case "exercise-run":
+		result, e = a.RunExercise(context.Background(), request.ExerciseID, request.PreviewDigest, request.Confirm, request.Mode)
+	case "exercise-apply-preview":
+		result, e = a.PrepareExerciseApply(request.ExerciseID)
+	case "exercise-apply-confirm":
+		e = a.ConfirmExerciseApply(request.ExerciseID, request.PreviewDigest, request.Confirm)
+		result = map[string]bool{"applied": e == nil}
+	case "exercise-share-prepare":
+		result, e = a.PrepareExerciseShare(request.ExerciseID)
+	case "exercise-share-confirm":
+		e = a.ConfirmExerciseShare(request.ExerciseID, request.PreviewDigest, request.Confirm)
+		result = map[string]bool{"shared": e == nil}
+	case "exercise-shared":
+		result, e = a.SharedExercises()
+	case "exercise-import":
+		result, e = a.ImportExercise(request.ExerciseID)
+	case "exercise-feedback":
+		result, e = a.ExerciseFeedback(context.Background(), request.ExerciseID, request.AttemptID, request.Reason, "")
+	case "flag":
+		result, e = a.FlagClaim(request.ExplanationID, request.ClaimID, request.Reason)
+	case "adopt-shared":
+		result, e = a.AdoptShared(request.ExplanationID)
+	case "explanation":
+		result, e = a.ExplanationByID(request.ExplanationID)
+	case "revise":
+		result, e = a.Revise(context.Background(), request.ExplanationID, "")
+	case "share-prepare":
+		result, e = a.PrepareShare(context.Background(), request.ExplanationID, request.ApprovedEvidenceIDs, "")
+	case "share-confirm":
+		result, e = a.ConfirmShare(request.DraftID, request.PreviewDigest, request.Confirm)
+	case "shared":
+		result, e = a.Shared()
 	case "start":
 		var active app.Active
 		active, e = a.Start(request.Session)
 		result = map[string]any{"id": active.ID, "started": active.Started}
 	case "stop":
 		result, e = a.Stop(request.Session)
+	case "capture-status":
+		result, e = a.CaptureState()
+	case "capture-abort":
+		e = a.AbortCapture(request.Session, request.RoundID, request.Confirm)
+		result = map[string]bool{"aborted": e == nil}
 	case "abort":
 		e = a.Abort()
 		result = map[string]bool{"aborted": e == nil}
@@ -80,7 +171,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	case "inspect":
 		result, e = a.Inspect(request.File, request.Line)
 	case "explain":
-		result, e = a.Explain(context.Background(), request.File, request.Line, request.Question, os.Getenv("ANTHROPIC_API_KEY"))
+		result, e = a.Explain(context.Background(), request.File, request.Line, request.Question, "")
 	case "configure":
 		e = a.Configure(request.Settings, request.Consent)
 		result = map[string]bool{"saved": e == nil}
@@ -97,6 +188,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 			result = map[string]any{"settings": s, "usage": u, "state_directory": a.State, "root": a.Root, "diagnostics": diagnostics, "fees": "未配置费率，费用估算不可用"}
 		}
 	case "analyze-round":
+		if strings.TrimSpace(*roundID) == "" {
+			return fail(out, errors.New("需要非空 round_id（可通过 --round 或 JSON 输入提供）"))
+		}
 		e = analyzeRound(a, *roundID)
 		result = map[string]bool{"analyzed": e == nil}
 	default:
@@ -196,10 +290,20 @@ func analyzeRound(a *app.App, id string) error {
 			return err
 		}
 		// One bounded request for the round; whole behavior grouping is generated by the model.
-		_, err = a.ExplainRound(context.Background(), r, idx, os.Getenv("ANTHROPIC_API_KEY"))
+		_, err = a.ExplainRound(context.Background(), r, idx, "")
 		if err != nil {
 			b, _ := json.Marshal(map[string]string{"round": id, "error": err.Error()})
 			_ = os.WriteFile(filepath.Join(a.State, "analysis-diagnostic.json"), b, 0600)
+		} else {
+			// A successful explicit retry supersedes the earlier failure for this
+			// round, but must not erase a diagnostic belonging to another round.
+			name := filepath.Join(a.State, "analysis-diagnostic.json")
+			if raw, readErr := os.ReadFile(name); readErr == nil {
+				var diagnostic map[string]string
+				if json.Unmarshal(raw, &diagnostic) == nil && diagnostic["round"] == id {
+					_ = os.Remove(name)
+				}
+			}
 		}
 		return err
 	}

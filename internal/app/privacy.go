@@ -90,7 +90,11 @@ func (a *App) scrubExcluded() error {
 				return e
 			}
 			for _, ev := range saved.Evidence {
-				if !policy.Allows(ev.File) {
+				allowed, err := a.evidenceAllowed(ev)
+				if err != nil {
+					return err
+				}
+				if !allowed {
 					if e = os.Remove(filepath.Join(a.State, name)); e != nil {
 						return e
 					}
@@ -99,13 +103,36 @@ func (a *App) scrubExcluded() error {
 			}
 		}
 	}
-	return nil
+	// Dependent private records must not outlive revoked source explanations.
+	for _, ent := range entries {
+		name := ent.Name()
+		var sourceID string
+		if strings.HasPrefix(name, "share-draft-") && strings.HasSuffix(name, ".json") {
+			var draft ShareDraft
+			if e = a.read(name, &draft); e != nil {
+				return e
+			}
+			sourceID = draft.SourceID
+		} else if strings.HasPrefix(name, "correction-") && strings.HasSuffix(name, ".json") {
+			var correction Correction
+			if e = a.read(name, &correction); e != nil {
+				return e
+			}
+			sourceID = correction.ExplanationID
+		}
+		if sourceID != "" && !a.revisionExists(sourceID) {
+			if e = os.Remove(filepath.Join(a.State, name)); e != nil {
+				return e
+			}
+		}
+	}
+	return a.scrubExercises()
 }
 
 func (a *App) attachRoundAnalysis(r *Round) error {
 	var diagnostic map[string]string
 	if err := a.read("analysis-diagnostic.json", &diagnostic); err == nil && diagnostic["round"] == r.ID {
-		r.Notes = append(r.Notes, "自动解释未生成："+diagnostic["error"])
+		r.Notes = append(r.Notes, "最近一次轮次解释生成失败："+diagnostic["error"])
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -129,6 +156,9 @@ func (a *App) attachRoundAnalysis(r *Round) error {
 	if r.Analysis == nil {
 		return nil
 	}
+	if e = a.attachCorrections(r.Analysis); e != nil {
+		return e
+	}
 	current, e := capture.Take(a.Root)
 	if e != nil {
 		return e
@@ -136,7 +166,7 @@ func (a *App) attachRoundAnalysis(r *Round) error {
 	r.Analysis.Freshness = "已引用证据未变"
 	for _, c := range r.Changes {
 		f, exists := current.Files[c.Path]
-		if (c.After == nil && exists) || (c.After != nil && (!exists || f.Hash != c.After.Hash)) {
+		if (c.After == nil && !a.pathAbsent(c.Path)) || (c.After != nil && (!exists || f.Hash != c.After.Hash)) {
 			r.Analysis.Freshness = "解释已过期：引用变化或无法定位"
 			break
 		}

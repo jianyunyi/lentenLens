@@ -157,11 +157,19 @@ func (a *App) Config() (Settings, error) {
 	e := a.read("settings.json", &s)
 	if errors.Is(e, os.ErrNotExist) {
 		s.Model.TokenLimit = 200000
-		return s, nil
+		e = nil
+	}
+	if e == nil {
+		s.Model, e = s.Model.Resolved()
 	}
 	return s, e
 }
 func (a *App) Configure(s Settings, consent bool) error {
+	var err error
+	s.Model, err = s.Model.Resolved()
+	if err != nil {
+		return err
+	}
 	if s.Model.Enabled && (!consent || s.Model.Model == "" || s.Model.TokenLimit <= 0) {
 		return errors.New("启用需确认代码发送范围、模型名称和正数 token 预算")
 	}

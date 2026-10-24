@@ -1,12 +1,15 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"intentlens/internal/explain"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,8 +17,10 @@ import (
 )
 
 type App struct {
-	Root  string
-	State string
+	Root        string
+	State       string
+	modelRun    func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
+	exerciseRun func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
 }
 
 func Open(root, state string) (*App, error) {
@@ -73,6 +78,22 @@ func Open(root, state string) (*App, error) {
 	a := &App{Root: root, State: state}
 	if err = a.scrubExcluded(); err != nil {
 		return nil, err
+	}
+	return a, nil
+}
+
+// OpenWithHTTPTransport uses the normal model runner with an in-process HTTP transport.
+// The transport is process-local and is never persisted with project settings.
+func OpenWithHTTPTransport(root, state string, transport http.RoundTripper) (*App, error) {
+	a, err := Open(root, state)
+	if err != nil {
+		return nil, err
+	}
+	if transport != nil {
+		a.modelRun = func(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
+			cfg.HTTPTransport = transport
+			return explain.Run(ctx, cfg, usage, key, question, evidence)
+		}
 	}
 	return a, nil
 }

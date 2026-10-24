@@ -1,0 +1,73 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync, spawnSync } = require('node:child_process');
+const vscode = require('vscode');
+
+// May write only to the explicitly marked disposable test workspace.
+exports.run = async function () {
+  const extension = vscode.extensions.getExtension('intentlens-local.intentlens');
+  assert.ok(extension, 'extension discovered');
+  await extension.activate();
+  assert.ok(vscode.workspace.isTrusted);
+  const root = vscode.workspace.workspaceFolders[0].uri;
+  assert.ok(fs.existsSync(path.join(root.fsPath, '.intentlens-index-fixture')), 'disposable fixture marker required');
+  const file = 'internal/runner/grpc/auth.go';
+  const target = vscode.Uri.joinPath(root, file);
+  const before = fs.readFileSync(target.fsPath);
+  const binary = path.join(extension.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
+  const cli = (command, input = {}) => JSON.parse(execFileSync(binary, [command, '--root', root.fsPath], { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true }));
+  const doc = await vscode.workspace.openTextDocument(target);
+  await vscode.window.showTextDocument(doc);
+  const getLenses = () => vscode.commands.executeCommand('vscode.executeCodeLensProvider', target);
+  const initial = cli('index');
+  assert.equal(initial.functions.length, 1, 'nested worktree and caches cannot become workspace functions');
+  assert.equal(initial.functions[0].file, file);
+  assert.equal(initial.coverage.omitted_count, 0, 'large non-Go text cannot consume Go source budget');
+  assert.ok(initial.coverage.excluded_count > 0);
+  let lenses = await getLenses();
+  assert.ok(lenses.some(lens => lens.command?.command === 'intentlens.inspect'), 'actual source has function entry');
+  assert.ok(lenses.some(lens => lens.command?.command === 'intentlens.indexStatus'), 'excluded scope has visible entry');
+  const thread = await vscode.commands.executeCommand('intentlens.inspect', target, 2);
+  assert.ok(thread);
+  assert.ok(thread.comments[0].body.value.includes('索引范围不完整'), 'inline header declares exclusions');
+  await vscode.commands.executeCommand('intentlens.indexStatus', target);
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.ok(vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.label.includes('索引范围与遗漏原因'))));
+
+  // Real Go source pressure must be reported, not hidden as no functions.
+  const filler = path.join(root.fsPath, 'a-budget');
+  fs.mkdirSync(filler);
+  const head = 'package pressure\n//';
+  const source = head + 'x'.repeat(1048576 - Buffer.byteLength(head));
+  for (let i = 0; i < 16; i++) fs.writeFileSync(path.join(filler, `${i}.go`), source);
+  await new Promise(resolve => setTimeout(resolve, 700));
+  await vscode.commands.executeCommand('intentlens.refresh');
+  const pressured = cli('index');
+  assert.equal(pressured.coverage.complete, false);
+  assert.ok(pressured.coverage.omitted_count > 0);
+  assert.ok(pressured.coverage.omitted.some(item => item.file === file && item.reason === 'snapshot_budget'));
+  lenses = await getLenses();
+  assert.ok(lenses.some(lens => lens.command?.command === 'intentlens.indexStatus'), 'budget omission is actionable, not silent');
+  assert.ok(!lenses.some(lens => lens.command?.command === 'intentlens.inspect'), 'omitted file must not pretend to be indexed');
+  const failed = spawnSync(binary, ['inspect', '--root', root.fsPath], { input: JSON.stringify({ file, line: 2 }), encoding: 'utf8', windowsHide: true });
+  assert.notEqual(failed.status, 0);
+  assert.match(JSON.parse(failed.stdout).error, /索引不完整|预算/);
+  assert.ok(!JSON.parse(failed.stdout).error.includes('当前位置没有可解析的 Go 函数'));
+
+  fs.rmSync(filler, { recursive: true });
+  fs.writeFileSync(path.join(root.fsPath, '.intentignore'), `${file}\n`);
+  await new Promise(resolve => setTimeout(resolve, 700));
+  await vscode.commands.executeCommand('intentlens.refresh');
+  lenses = await getLenses();
+  assert.ok(lenses.some(lens => lens.command?.command === 'intentlens.indexStatus'), 'policy exclusion also has visible diagnostic');
+  const excluded = spawnSync(binary, ['inspect', '--root', root.fsPath], { input: JSON.stringify({ file, line: 2 }), encoding: 'utf8', windowsHide: true });
+  assert.notEqual(excluded.status, 0);
+  assert.match(JSON.parse(excluded.stdout).error, /排除/);
+  assert.deepEqual(fs.readFileSync(target.fsPath), before, 'real fixture source unchanged in every scenario');
+  assert.equal(doc.isDirty, false);
+  assert.equal(cli('status').settings.model.enabled, false);
+  const result = { result: 'PASS', checks: ['nested worktree exclusion', 'large non-Go text cannot consume Go budget', 'real function CodeLens', 'visible incomplete index CodeLens', 'inline coverage warning', 'diagnostic panel', 'real Go budget exhaustion', 'explicit omitted-file error', 'intentional exclusion diagnostic', 'source unchanged'], model_calls: 0 };
+  if (process.env.INTENTLENS_TEST_RESULT) fs.writeFileSync(process.env.INTENTLENS_TEST_RESULT, JSON.stringify(result, null, 2));
+};
