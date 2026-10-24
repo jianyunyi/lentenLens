@@ -3,12 +3,41 @@ const vscode = require('vscode');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const { runCLI, confinedPath, renderInspection, renderRound, page, escapeHTML } = require('./core');
+const { createExerciseUI } = require('./exercises');
+const { createInline } = require('./inline');
+const { createSessions } = require('./sessions');
+const { configureModel } = require('./providers');
+const { createCaptureRecovery } = require('./recovery');
+const { coverageSummary, limitedCoverage } = require('./coverage');
+const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page, escapeHTML } = require('./core');
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
   const panels = new Map(), policyVersions = new Map();
+  const indexDiagnostics = new Map();
+  const sourcePanels = new Set();
+  const indexBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 90);
+  if (indexBar) context.subscriptions.push(indexBar);
+  function invalidateIndex() { indexDiagnostics.clear(); indexBar?.hide(); }
+  function reportIndex(folder, file, data, error) {
+    const detail = { root: folder.uri.fsPath, file, coverage: data?.coverage, error: error?.message };
+    indexDiagnostics.set(folder.uri.fsPath, detail);
+    if (indexBar) {
+      indexBar.text = error ? 'IntentLens: 索引失败' : 'IntentLens: 索引范围不完整';
+      indexBar.tooltip = error ? `索引失败：${error.message}；点击查看原因。` : coverageSummary(data?.coverage);
+      indexBar.command = { command: 'intentlens.indexStatus', title: '查看索引范围与遗漏原因', arguments: [folder.uri] };
+      if (error || !data?.coverage || limitedCoverage(data.coverage)) indexBar.show(); else indexBar.hide();
+    }
+  }
   const guard = fn => async (...args) => { try { return await fn(...args); } catch (error) { vscode.window.showErrorMessage(`IntentLens: ${error.message}`); } };
+  let inlineUI;
+  let documentEpoch = 0;
+  function clearInline() {
+    documentEpoch++;
+    inlineUI?.clear();
+    for (const view of [...sourcePanels]) view.dispose();
+    invalidateIndex();
+  }
   function trusted() { if (!vscode.workspace.isTrusted) throw new Error('请先信任工作区；受限模式不会执行 CLI。'); }
   async function folderFor(uri) {
     trusted();
@@ -29,11 +58,28 @@ function activate(context) {
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const result = await runCLI(binary, folder.uri.fsPath, command, input);
+    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000 });
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
     return result;
   }
-  const refresh = () => { treeChanged.fire(); lensesChanged.fire(); };
+  const sessionState = context.workspaceState || (() => {
+    const values = new Map();
+    return { get: key => values.get(key), update: (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); return Promise.resolve(); } };
+  })();
+  const sessions = createSessions({
+    workspaceState: sessionState,
+    cli: (root, command, input) => {
+      const folder = (vscode.workspace.workspaceFolders || []).find(item => item.uri.scheme === 'file' && item.uri.fsPath === root);
+      if (!folder) throw new Error('本地工作区已关闭，请重新打开后重试。');
+      return cli(folder, command, input);
+    },
+    notify: {
+      info: message => vscode.window.showInformationMessage(message),
+      error: message => vscode.window.showErrorMessage(`IntentLens: ${message}`),
+    },
+  });
+  const recovery = createCaptureRecovery({ vscode, cli, sessions });
+  const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); };
   async function openCurrent(folder, file, line = 1) {
     trusted();
     const target = confinedPath(folder.uri.fsPath, file);
@@ -47,11 +93,12 @@ function activate(context) {
     const document = await vscode.workspace.openTextDocument({ content: source || '', language: file?.endsWith('.go') ? 'go' : 'plaintext' });
     await vscode.window.showTextDocument(document, { preview: false });
   }
-  function panel(title, render, handler, folder) {
+  function panel(title, render, handler, folder, tracksSource = false) {
     const view = vscode.window.createWebviewPanel('intentlens.evidence', title, vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: [] });
     view.webview.html = render(crypto.randomBytes(18).toString('hex'));
     panels.set(view, folder?.uri.fsPath);
-    view.onDidDispose(() => panels.delete(view), undefined, context.subscriptions);
+    if (tracksSource) sourcePanels.add(view);
+    view.onDidDispose(() => { panels.delete(view); sourcePanels.delete(view); }, undefined, context.subscriptions);
     view.webview.onDidReceiveMessage(guard(async message => {
       trusted();
       if (!panels.has(view)) return;
@@ -67,7 +114,65 @@ function activate(context) {
     if (!item) throw new Error('证据已不存在');
     return item;
   }
-  async function inspect(uri, line) {
+  async function explanationAction(folder, entry, message) {
+    if (!entry?.id) throw new Error('解释版本不存在');
+    if (message.action === 'exercise') { await exerciseUI.start(folder, entry, message); return; }
+    if (message.action === 'flag') {
+      const claim = selectedIndex(entry.document?.claims, message.index);
+      const reason = await vscode.window.showInputBox({ prompt: '说明有误或证据不支持的原因（仅保存在本地）' });
+      if (!reason?.trim()) return;
+      await cli(folder, 'flag', { explanation_id: entry.id, claim_id: claim.id, reason });
+    } else if (message.action === 'revise') {
+      return await cli(folder, 'revise', { explanation_id: entry.id });
+    } else if (message.action === 'share') {
+      const privateEvidence = (entry.evidence || []).filter(e => e.visibility === 'local' || (e.kind && e.kind !== 'code'));
+      let selected = [];
+      if (privateEvidence.length) {
+        selected = await vscode.window.showQuickPick(privateEvidence.map(e => ({ label: e.id, description: e.kind, detail: e.source, evidenceID: e.id })), { canPickMany: true, placeHolder: '可选：明确允许共享的私有证据（默认不选）。所选原文将发送给模型并纳入预览。' });
+        if (!selected) return;
+      }
+      const draft = await cli(folder, 'share-prepare', { explanation_id: entry.id, approved_evidence_ids: selected.map(e => e.evidenceID) });
+      let saving = false;
+      const preview = panel('IntentLens · 共享预览', nonce => renderSharePreview(draft, nonce), async action => {
+        if (action.action === 'cancel') { preview.dispose(); return; }
+        if (action.action !== 'confirmShare' || saving) return;
+        saving = true;
+        try {
+          await cli(folder, 'share-confirm', { draft_id: draft.id, preview_digest: draft.digest, confirm: true });
+          preview.dispose();
+          vscode.window.showInformationMessage('IntentLens：共享记录已写入 .intent/shared，可通过 Git 提交。');
+        } finally { saving = false; }
+      }, folder);
+    }
+    refresh();
+  }
+  function showSaved(folder, record) {
+    let busy = false;
+    const view = panel('IntentLens · 本地纠错与修订', nonce => renderSaved(record, nonce), async message => {
+      if (busy) return;
+      busy = true;
+      try {
+        const latest = await cli(folder, 'explanation', { explanation_id: record.id });
+        if (JSON.stringify(latest) !== JSON.stringify(record)) {
+          record = latest;
+          view.webview.html = renderSaved(record, crypto.randomBytes(18).toString('hex'));
+          throw new Error('解释已变化，请重新选择操作');
+        }
+        if (['share', 'revise', 'flag', 'exercise'].includes(message.action)) {
+          const revision = await explanationAction(folder, record, message);
+          if (revision) showSaved(folder, revision);
+          record = await cli(folder, 'explanation', { explanation_id: record.id });
+          if (panels.has(view)) view.webview.html = renderSaved(record, crypto.randomBytes(18).toString('hex'));
+        } else if (['snapshot', 'current'].includes(message.action)) {
+          const ev = selectedIndex(record.evidence, message.index);
+          if (message.action === 'snapshot') await snapshot(ev.source, ev.file);
+          else await openCurrent(folder, ev.file, ev.start_line);
+        }
+      } catch (error) { if (!panels.has(view)) return; throw error; }
+      finally { busy = false; }
+    }, folder);
+  }
+  async function inspect(uri, line, inline = true) {
     uri = uri || vscode.window.activeTextEditor?.document.uri;
     if (!uri) throw new Error('请在 Go 函数中放置光标。');
     const folder = await folderFor(uri);
@@ -77,22 +182,38 @@ function activate(context) {
     const file = path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join('/');
     confinedPath(folder.uri.fsPath, file);
     line = line || (editor?.document.uri.toString() === uri.toString() ? editor.selection.active.line + 1 : 1);
+    const epoch = documentEpoch;
     let info = await cli(folder, 'inspect', { file, line });
+    if (epoch !== documentEpoch) return;
     let busy = false;
-    const view = panel(`IntentLens · ${info.function.name}`, nonce => renderInspection(info, nonce), async message => {
-      if (!['dependency', 'snapshot', 'current', 'explain', 'ask'].includes(message.action)) return;
+    function redraw() {
+      if (inline) view.update(info);
+      else view.webview.html = renderInspection(info, crypto.randomBytes(18).toString('hex'));
+    }
+    const handle = async message => {
+      if (!['details', 'dependency', 'snapshot', 'current', 'explain', 'ask', 'share', 'revise', 'flag', 'exercise'].includes(message.action)) return;
       let latest;
       try { latest = await cli(folder, 'inspect', { file, line }); }
       catch (error) { view.dispose(); throw error; }
       if (!panels.has(view)) return;
       if (JSON.stringify(latest) !== JSON.stringify(info)) {
         info = latest;
-        view.webview.html = renderInspection(info, crypto.randomBytes(18).toString('hex'));
+        redraw();
         throw new Error('证据或排除规则已变化，面板已刷新，请重新选择操作。');
       }
-      if (message.action === 'dependency') {
+      if (message.action === 'details') return inspect(uri, line, false);
+      if (['share', 'revise', 'flag', 'exercise'].includes(message.action)) {
+        if (busy) return;
+        busy = true;
+        try {
+          await explanationAction(folder, selectedIndex(info.history, message.group), message);
+          info = await cli(folder, 'inspect', { file, line });
+          if (panels.has(view)) redraw();
+        } finally { busy = false; }
+      } else if (message.action === 'dependency') {
         const dep = selectedIndex(info.dependencies, message.index);
-        await inspect(vscode.Uri.file(confinedPath(folder.uri.fsPath, dep.file)), dep.start_line);
+        if (inline) await openCurrent(folder, dep.file, dep.start_line);
+        await inspect(vscode.Uri.file(confinedPath(folder.uri.fsPath, dep.file)), dep.start_line, inline);
       } else if (message.action === 'snapshot' || message.action === 'current') {
         const evidence = message.group === 'current' ? info.evidence : selectedIndex(info.history, message.group).evidence;
         const ev = selectedIndex(evidence, message.index);
@@ -102,49 +223,95 @@ function activate(context) {
         if (busy) return;
         let question = '';
         if (message.action === 'ask') {
-          question = await vscode.window.showInputBox({ prompt: '问题将与函数及直接依赖证据发送给 Anthropic；请勿包含密钥。', placeHolder: '这段代码在什么条件下返回错误？' });
+          question = await vscode.window.showInputBox({ prompt: '问题将与函数及直接依赖证据发送给项目配置的模型服务；请勿包含密钥。', placeHolder: '这段代码在什么条件下返回错误？' });
           if (!question?.trim()) return;
         }
+        if (!panels.has(view) || epoch !== documentEpoch) throw new Error('代码或展示范围已变化，请保存后重新打开函数解释再提问。');
         busy = true;
         try {
           await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'IntentLens：生成并检查证据支持', cancellable: false }, () => cli(folder, 'explain', { file, line, question }));
           info = await cli(folder, 'inspect', { file, line });
           if (!panels.has(view)) return;
-          view.webview.html = renderInspection(info, crypto.randomBytes(18).toString('hex'));
+          redraw();
           refresh();
         } finally { busy = false; }
       }
-    }, folder);
+    };
+    let view;
+    if (inline) {
+      inlineUI ||= createInline(vscode, context, guard);
+      view = inlineUI.open(uri, info, guard(handle));
+      panels.set(view, folder.uri.fsPath);
+      view.onDidDispose(() => panels.delete(view));
+      const target = await vscode.window.showTextDocument(uri, { preview: false });
+      target.revealRange(view.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    } else {
+      view = panel(`IntentLens · ${info.function.name}`, nonce => renderInspection(info, nonce), handle, folder, true);
+    }
+    return view.thread;
   }
   async function showRound(folder, round) {
     trusted();
     const id = round.id;
     round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
     if (!round) throw new Error('轮次已不存在或已被排除。');
+    let busy = false;
     const view = panel(`IntentLens · ${round.id}`, nonce => renderRound(round, nonce), async message => {
-      let latest;
-      try { latest = (await cli(folder, 'rounds')).find(entry => entry.id === id); }
-      catch (error) { view.dispose(); throw error; }
-      if (!panels.has(view)) return;
-      if (!latest) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
-      if (JSON.stringify(latest) !== JSON.stringify(round)) {
-        round = latest;
-        view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
-        throw new Error('轮次证据已变化，面板已刷新，请重新选择操作。');
-      }
-      if (message.action === 'snapshot' || message.action === 'current') {
-        if (message.group !== 'analysis') return;
-        const ev = selectedIndex(round.analysis?.evidence, message.index);
-        if (message.action === 'snapshot') await snapshot(ev.source, ev.file);
-        else await openCurrent(folder, ev.file, ev.start_line);
-        return;
-      }
-      if (!['change', 'changeCurrent'].includes(message.action)) return;
-      const change = selectedIndex(round.changes, message.index);
-      if (message.action === 'changeCurrent') return openCurrent(folder, change.path);
-      const before = await vscode.workspace.openTextDocument({ content: change.before?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
-      const after = await vscode.workspace.openTextDocument({ content: change.after?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
-      await vscode.commands.executeCommand('vscode.diff', before.uri, after.uri, `${change.path} — 历史 before / after`);
+      if (busy) return;
+      busy = true;
+      try {
+        let latest;
+        try { latest = (await cli(folder, 'rounds')).find(entry => entry.id === id); }
+        catch (error) { view.dispose(); throw error; }
+        if (!panels.has(view)) return;
+        if (!latest) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
+        if (JSON.stringify(latest) !== JSON.stringify(round)) {
+          round = latest;
+          view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
+          throw new Error('轮次证据已变化，面板已刷新，请重新选择操作。');
+        }
+        if (message.action === 'analyzeRound') {
+          const action = round.analysis ? '重新生成轮次解释' : '生成轮次解释';
+          const answer = await vscode.window.showWarningMessage(`${action}？`, { modal: true, detail: '将按项目模型配置发送本轮允许的历史代码证据，并消耗模型 token 预算。不会使用 IDE 订阅凭据，不会修改源码；新解释会成为本轮展示版本，旧解释仍保存在本地历史。' }, action);
+          if (answer !== action || !panels.has(view)) return;
+          latest = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          if (!panels.has(view)) return;
+          if (!latest) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
+          if (JSON.stringify(latest) !== JSON.stringify(round)) {
+            round = latest;
+            view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
+            throw new Error('轮次证据已变化，面板已刷新，请重新确认生成。');
+          }
+          await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `IntentLens：${action}并检查证据支持`, cancellable: false }, () => cli(folder, 'analyze-round', { round_id: id }));
+          round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          if (panels.has(view)) {
+            if (!round) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
+            view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
+          }
+          refresh();
+          return;
+        }
+        if (['share', 'revise', 'flag', 'exercise'].includes(message.action)) {
+          if (message.group !== 'analysis') return;
+          await explanationAction(folder, round.analysis, message);
+          round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          if (panels.has(view) && round) view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
+          return;
+        }
+        if (message.action === 'snapshot' || message.action === 'current') {
+          if (message.group !== 'analysis') return;
+          const ev = selectedIndex(round.analysis?.evidence, message.index);
+          if (message.action === 'snapshot') await snapshot(ev.source, ev.file);
+          else await openCurrent(folder, ev.file, ev.start_line);
+          return;
+        }
+        if (!['change', 'changeCurrent'].includes(message.action)) return;
+        const change = selectedIndex(round.changes, message.index);
+        if (message.action === 'changeCurrent') return openCurrent(folder, change.path);
+        const before = await vscode.workspace.openTextDocument({ content: change.before?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
+        const after = await vscode.workspace.openTextDocument({ content: change.after?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
+        await vscode.commands.executeCommand('vscode.diff', before.uri, after.uri, `${change.path} — 历史 before / after`);
+      } finally { busy = false; }
     }, folder);
   }
   const provider = {
@@ -174,29 +341,101 @@ function activate(context) {
       if (!vscode.workspace.isTrusted || document.isDirty) return [];
       const folder = vscode.workspace.getWorkspaceFolder(document.uri);
       if (!folder) return [];
+      const file = path.relative(folder.uri.fsPath, document.uri.fsPath).split(path.sep).join('/');
+      const epoch = documentEpoch;
+      const diagnosticLens = title => new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), { title, command: 'intentlens.indexStatus', arguments: [document.uri] });
       try {
         const data = await cli(folder, 'index');
-        if (token.isCancellationRequested) return [];
-        const file = path.relative(folder.uri.fsPath, document.uri.fsPath).split(path.sep).join('/');
-        return (data.functions || []).filter(fn => fn.file === file).map(fn => new vscode.CodeLens(new vscode.Range(fn.start_line - 1, 0, fn.start_line - 1, 0), { title: 'IntentLens · 解释与证据', command: 'intentlens.inspect', arguments: [document.uri, fn.start_line] }));
-      } catch { return []; }
+        if (token.isCancellationRequested || epoch !== documentEpoch) return [];
+        reportIndex(folder, file, data);
+        const lenses = (data.functions || []).filter(fn => fn.file === file).map(fn => new vscode.CodeLens(new vscode.Range(fn.start_line - 1, 0, fn.start_line - 1, 0), { title: 'IntentLens · 在函数下方展开解释', command: 'intentlens.inspect', arguments: [document.uri, fn.start_line] }));
+        if (limitedCoverage(data.coverage)) lenses.unshift(diagnosticLens('IntentLens · 索引范围不完整（查看遗漏与排除原因）'));
+        else if (!data.coverage) lenses.unshift(diagnosticLens('IntentLens · 索引覆盖范围未知（检查 CLI 版本）'));
+        return lenses;
+      } catch (error) {
+        if (token.isCancellationRequested || epoch !== documentEpoch) return [];
+        reportIndex(folder, file, undefined, error);
+        return [diagnosticLens('IntentLens · 索引失败（点击查看原因）')];
+      }
     },
   }));
   function command(name, fn) { context.subscriptions.push(vscode.commands.registerCommand(`intentlens.${name}`, guard(fn))); }
+  command('indexStatus', async uri => {
+    uri ||= vscode.window.activeTextEditor?.document.uri;
+    const folder = await folderFor(uri); if (!folder) return;
+    let detail = indexDiagnostics.get(folder.uri.fsPath);
+    if (!detail) {
+      const file = uri ? path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join('/') : '';
+      const epoch = documentEpoch;
+      try {
+        const data = await cli(folder, 'index');
+        if (epoch !== documentEpoch) return;
+        reportIndex(folder, file, data);
+      } catch (error) {
+        if (epoch !== documentEpoch) return;
+        reportIndex(folder, file, undefined, error);
+      }
+      detail = indexDiagnostics.get(folder.uri.fsPath);
+    }
+    panel('IntentLens · 索引范围与遗漏原因', nonce => renderIndexStatus(detail, nonce), async () => {}, folder, true);
+  });
+  const exerciseUI = createExerciseUI({ vscode, cli, panel, folderFor });
+  command('exercises', () => exerciseUI.list());
+  command('sharedExercises', () => exerciseUI.list(true));
+  command('openExercise', async (folder, id) => exerciseUI.show(folder, await cli(folder, 'exercise-view', { exercise_id: id })));
   command('inspect', inspect);
+  command('inspectDetails', (uri, line) => inspect(uri, line, false));
   command('openRound', showRound);
   command('refresh', refresh);
+  command('startRound', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    await sessions.start(folder.uri.fsPath);
+    refresh();
+  });
+  command('stopRound', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    await sessions.stop(folder.uri.fsPath);
+    refresh();
+  });
+  command('resumeRound', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    await recovery.resume(folder);
+    refresh();
+  });
+  command('cancelRound', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    await recovery.cancel(folder);
+    refresh();
+  });
+  command('shared', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    const records = await cli(folder, 'shared');
+    if (!records.length) { vscode.window.showInformationMessage('IntentLens：没有可显示的共享记录。'); return; }
+    const chosen = await vscode.window.showQuickPick(records.map(record => ({ label: record.function_id, description: `${record.created} · ${record.freshness}`, record })), { placeHolder: '选择共享解释版本' });
+    if (!chosen) return;
+    let record = chosen.record;
+    const view = panel('IntentLens · 团队共享解释', nonce => renderShared(record, nonce), async message => {
+      const latest = (await cli(folder, 'shared')).find(r => r.id === record.id);
+      if (!latest) { view.dispose(); throw new Error('共享记录已移除或被排除'); }
+      if (JSON.stringify(latest) !== JSON.stringify(record)) {
+        record = latest;
+        view.webview.html = renderShared(record, crypto.randomBytes(18).toString('hex'));
+        throw new Error('共享记录已变化，请重新选择操作');
+      }
+      if (message.action === 'adopt') {
+        showSaved(folder, await cli(folder, 'adopt-shared', { explanation_id: record.id }));
+        return;
+      }
+      if (!['snapshot', 'current'].includes(message.action)) return;
+      const ev = selectedIndex(record.evidence, message.index);
+      if (message.action === 'snapshot') await snapshot(ev.source, ev.file);
+      else await openCurrent(folder, ev.file, ev.start_line);
+    }, folder);
+  });
   command('enableModel', async () => {
     const folder = await folderFor(); if (!folder) return;
     const status = await cli(folder, 'status');
-    const model = await vscode.window.showInputBox({ title: 'Anthropic 模型', prompt: '输入账户可用的准确模型 ID。', value: status.settings?.model?.model || '', validateInput: value => value.trim() ? null : '模型 ID 不能为空' });
-    if (!model) return;
-    const limit = await vscode.window.showInputBox({ title: '项目累计 token 上限', value: String(status.settings?.model?.token_limit || 200000), validateInput: value => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? null : '输入正整数' });
-    if (!limit) return;
-    const consent = await vscode.window.showWarningMessage(`启用 ${folder.name} 的 Anthropic 分析？函数/依赖源码证据、轮次 before/after 及你的问题会发送到 Anthropic；停止 hook 可自动分析轮次。模型 ${model}，项目累计预算 ${limit} tokens（不是费用上限）。密钥仅从 ANTHROPIC_API_KEY 环境变量读取。`, { modal: true }, '同意并启用');
-    if (consent !== '同意并启用') return;
-    await cli(folder, 'configure', { settings: { model: { enabled: true, model: model.trim(), token_limit: Number(limit) } }, consent: true });
-    vscode.window.showInformationMessage('IntentLens：模型分析已启用。'); refresh();
+    if (await configureModel(vscode, folder, status, cli)) refresh();
   });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;
@@ -215,9 +454,13 @@ function activate(context) {
     const config = await cli(folder, 'hooks-config');
     panel('IntentLens · Claude Code hooks', nonce => page('Hook 配置预览', `<p>手动合并以下配置到 Claude Code 设置；保留已有 hooks。扩展不会覆盖设置。</p><p>确保 Claude Code 进程的 PATH 中有 intentlens 可执行文件。VS Code 的 intentlens.binaryPath 不会更改终端 PATH。配置后在新的 Claude Code 会话中验证 UserPromptSubmit / Stop。</p><pre>${escapeHTML(JSON.stringify(config, null, 2))}</pre>`, nonce), async () => {});
   });
-  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(refresh), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => { clearInline(); refresh(); }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
+  context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
+    if (event.document.uri.scheme === 'file' && event.contentChanges.length) clearInline();
+  }));
   const policyWatcher = vscode.workspace.createFileSystemWatcher('**/.intentignore');
   const policyChanged = guard(async uri => {
+    clearInline();
     const folder = vscode.workspace.getWorkspaceFolder(uri);
     if (!folder || folder.uri.scheme !== 'file') return;
     const root = folder.uri.fsPath;
@@ -227,5 +470,7 @@ function activate(context) {
     if (vscode.workspace.isTrusted) await cli(folder, 'status');
   });
   context.subscriptions.push(policyWatcher, policyWatcher.onDidCreate(policyChanged), policyWatcher.onDidChange(policyChanged), policyWatcher.onDidDelete(policyChanged));
+  const sourceWatcher = vscode.workspace.createFileSystemWatcher('**/*.go');
+  context.subscriptions.push(sourceWatcher, sourceWatcher.onDidCreate(clearInline), sourceWatcher.onDidChange(clearInline), sourceWatcher.onDidDelete(clearInline));
 }
 module.exports = { activate };
