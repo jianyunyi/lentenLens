@@ -1,6 +1,7 @@
 /bin/
 /extension/bin/
 /dist/
+/.work/
 node_modules/
 *.vsix
 !/intentlens-0.1.0-win32-x64.vsix
