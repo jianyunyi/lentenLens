@@ -128,7 +128,7 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 			return Exercise{}, errors.New("新版本必须关联同一行为的原题")
 		}
 	}
-	snap, err := capture.Take(a.Root)
+	snap, _, err := capture.TakeGo(a.Root)
 	if err != nil {
 		return Exercise{}, err
 	}
@@ -193,7 +193,7 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 	if err != nil || latest.Freshness != "已引用证据未变" || len(latest.Corrections) > 0 {
 		return Exercise{}, errors.New("生成期间依据变化，题目未保存")
 	}
-	current, err := capture.Take(a.Root)
+	current, _, err := capture.TakeGo(a.Root)
 	if err != nil {
 		return Exercise{}, err
 	}
