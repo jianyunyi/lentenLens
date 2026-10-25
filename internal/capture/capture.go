@@ -185,7 +185,9 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			if d.Type()&os.ModeSymlink != 0 {
 				if target, statErr := os.Stat(p); statErr == nil && target.IsDir() {
 					c.ExcludedCount++
-					return filepath.SkipDir
+					// WalkDir does not follow symlinks. SkipDir on a non-directory
+					// entry would skip the remaining entries in its parent.
+					return nil
 				}
 			}
 			if strings.HasSuffix(rel, ".go") {
