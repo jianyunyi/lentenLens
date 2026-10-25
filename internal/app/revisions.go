@@ -159,10 +159,12 @@ func (a *App) Revise(ctx context.Context, id, key string) (Explanation, error) {
 }
 
 func (a *App) freshness(evidence []explain.Evidence) string {
-	snap, err := capture.Take(a.Root)
+	// Use the same Go-only budget as indexing, including for mixed round evidence.
+	snap, _, err := capture.TakeGo(a.Root)
 	if err != nil {
 		return "解释已过期：无法检查当前依据"
 	}
+	var textSnapshot *capture.Snapshot
 	after := map[string]bool{}
 	for _, e := range evidence {
 		if codeEvidence(e) && e.Role != "before" {
@@ -181,6 +183,17 @@ func (a *App) freshness(evidence []explain.Evidence) string {
 			continue
 		}
 		f, exists := snap.Files[e.File]
+		if e.Role != "before" && !strings.HasSuffix(e.File, ".go") {
+			// Round explanations can also reference ordinary non-Go text.
+			if textSnapshot == nil {
+				text, err := capture.Take(a.Root)
+				if err != nil {
+					return "解释已过期：无法检查当前依据"
+				}
+				textSnapshot = &text
+			}
+			f, exists = textSnapshot.Files[e.File]
+		}
 		if e.Role == "before" {
 			if !after[e.File] && !a.pathAbsent(e.File) {
 				return "解释已过期：已删除文件再次出现"
