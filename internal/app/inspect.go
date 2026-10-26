@@ -120,6 +120,9 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 	}
 	if !found {
+		if a.pathAbsent(file) {
+			return result, errors.New("源码文件不存在，无法定位当前函数")
+		}
 		if reason, ok := parseOmissions[file]; ok {
 			return result, indexOmissionError(reason)
 		}

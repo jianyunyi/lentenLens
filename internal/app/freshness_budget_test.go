@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"intentlens/internal/capture"
+	"intentlens/internal/codeindex"
 	"intentlens/internal/exercise"
 	"intentlens/internal/explain"
 	"os"
@@ -71,6 +72,12 @@ func TestFunctionFreshnessAgreesUnderTextBudgetPressure(t *testing.T) {
 	if err != nil || !strings.Contains(loaded.Freshness, "过期") {
 		t.Fatalf("deleted source not stale: %+v %v", loaded, err)
 	}
+	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err == nil {
+		t.Fatal("deleted explanation can be shared")
+	}
+	if _, err := a.Inspect("z.go", 2); err == nil || !strings.Contains(err.Error(), "源码文件不存在") {
+		t.Fatalf("deleted source not identified: %v", err)
+	}
 }
 
 func TestFreshnessKeepsNonGoRoundEvidence(t *testing.T) {
@@ -114,4 +121,108 @@ func TestGenerateExerciseIgnoresUnrelatedTextBudget(t *testing.T) {
 	if e.Spec.Baseline["z.go"] != "package p\nfunc F() int { return 1 }\n" || len(e.Spec.Baseline) != 1 {
 		t.Fatalf("incorrect package baseline: %+v", e.Spec.Baseline)
 	}
+}
+
+func TestDeletedDependencyFreshnessAgreesUnderTextBudget(t *testing.T) {
+	a, root := fixture(t)
+	seedExplanation(t, a, root)
+	if err := os.Remove(filepath.Join(root, "main.go")); err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, "z.go", "package p\nfunc F() int { return Helper() }\n")
+	put(t, root, "helper.go", "package p\nfunc Helper() int { return 1 }\n")
+	exhaustTextSnapshotBudget(t, root)
+	saved, err := a.Explain(context.Background(), "z.go", 2, "", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range saved.Evidence {
+		if ev.File == "helper.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fixture did not capture dependency")
+	}
+	check := func(fresh bool) {
+		t.Helper()
+		info, err := a.Inspect("z.go", 2)
+		if err != nil || len(info.History) != 1 {
+			t.Fatalf("history unavailable: %+v %v", info, err)
+		}
+		loaded, err := a.ExplanationByID(saved.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.History[0].Freshness != loaded.Freshness || (loaded.Freshness == "已引用证据未变") != fresh {
+			t.Fatalf("dependency freshness disagrees: %s / %s", info.History[0].Freshness, loaded.Freshness)
+		}
+	}
+	check(true)
+	if err := os.Remove(filepath.Join(root, "helper.go")); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err == nil {
+		t.Fatal("explanation with deleted dependency can be shared")
+	}
+}
+
+func TestNonGoRoundEvidenceBeyondBudgetIsConservativelyStale(t *testing.T) {
+	a, root := fixture(t)
+	seedExplanation(t, a, root)
+	if _, err := a.Start("s"); err != nil {
+		t.Fatal(err)
+	}
+	text := "documented behavior\n"
+	put(t, root, "z-notes.txt", text)
+	round, err := a.Stop("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := a.ExplainRound(context.Background(), round, codeindex.Index{}, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(fresh bool) {
+		t.Helper()
+		rounds, err := a.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := a.ExplanationByID(saved.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rounds) != 1 || rounds[0].Analysis == nil {
+			t.Fatal("missing round explanation")
+		}
+		if rounds[0].Analysis.Freshness != loaded.Freshness || (loaded.Freshness == "已引用证据未变") != fresh {
+			t.Fatalf("non-Go freshness disagrees: %s / %s", rounds[0].Analysis.Freshness, loaded.Freshness)
+		}
+		if !fresh && !strings.Contains(loaded.Freshness, "过期") {
+			t.Fatal("unknown evidence marked current")
+		}
+	}
+	check(true)
+	fillNonGoBudget(t, root)
+	snap, err := capture.Take(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := snap.Files["z-notes.txt"]; ok {
+		t.Fatal("fixture did not omit non-Go evidence")
+	}
+	check(false)
+	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err == nil {
+		t.Fatal("uncaptured non-Go evidence can be shared")
+	}
+	// Returning the evidence to the capture window must restore its fresh state.
+	for i := 0; i < capture.MaxSnapshotBytes/capture.MaxFileBytes; i++ {
+		if err := os.Remove(filepath.Join(root, fmt.Sprintf("a%02d.txt", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(true)
 }
