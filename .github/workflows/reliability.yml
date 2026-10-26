@@ -1,0 +1,106 @@
+name: reliability
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.versions.outputs.go }}
+      node: ${{ steps.versions.outputs.node }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: versions
+        run: node -e "const c=require('./scripts/release-config.json');require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'go='+c.goVersion+'\nnode='+c.nodeMajor+'\n')"
+  test:
+    needs: config
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ needs.config.outputs.go }}
+          cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ needs.config.outputs.node }}
+      - name: Go tests (Windows junction may not skip)
+        run: node scripts/ci-go-tests.cjs go-tests.jsonl
+      - run: go vet ./...
+      - run: go build ./...
+      - run: npm test
+        working-directory: extension
+      - run: npm run check
+        working-directory: extension
+      - run: node --test scripts/preflight.test.cjs
+      - run: node --test scripts/soak.test.cjs
+      - name: Windows CLI smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bin -Force | Out-Null
+          go build -trimpath -o bin/intentlens.exe ./cmd/intentlens
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/smoke.ps1 -WorkDirectory (Join-Path $env:RUNNER_TEMP 'intentlens-smoke')
+      - name: Race regressions
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/app -run 'TestLock|TestApplyCrash|TestStagedSource|TestCriticalRecordShapes|TestRoundAndExplanation|TestApplyIgnores' -count=1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: go-events-${{ runner.os }}
+          path: go-tests.jsonl
+          if-no-files-found: error
+          retention-days: 7
+  minimum-go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.0'
+          cache: false
+      - run: go test ./... -count=1
+      - run: go vet ./...
+  candidate:
+    needs: [config, test, minimum-go]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: ${{ needs.config.outputs.go }}
+          cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ needs.config.outputs.node }}
+      - name: Package and verify candidate
+        shell: pwsh
+        run: |
+          ./scripts/package-release.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'intentlens-candidate')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $candidates = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'intentlens-candidate') -Filter '*.vsix')
+          if ($candidates.Count -ne 1) { throw 'Expected one candidate.' }
+          ./scripts/test-release-integrity.ps1 -Vsix $candidates[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-x64-candidate
+          path: ${{ runner.temp }}/intentlens-candidate/*
+          if-no-files-found: error
+          retention-days: 7

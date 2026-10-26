@@ -120,6 +120,9 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 	}
 	if !found {
+		if a.pathAbsent(file) {
+			return result, errors.New("源码文件不存在，无法定位当前函数")
+		}
 		if reason, ok := parseOmissions[file]; ok {
 			return result, indexOmissionError(reason)
 		}
@@ -178,20 +181,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 				visible = false
 				break
 			}
-			if !codeEvidence(ev) {
-				continue
-			}
-			matched := false
-			for _, f := range idx.Functions {
-				if f.File == ev.File && hash(f.Source) == ev.Hash {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				saved.Freshness = "解释已过期：引用变化或无法定位"
-			}
 		}
+		saved.Freshness = a.freshnessFromSnapshot(saved.Evidence, snap)
 		if visible {
 			if e = a.attachCorrections(&saved); e != nil {
 				return result, e

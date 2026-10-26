@@ -229,7 +229,7 @@ try {
     if (-not $packageCreated) { throw 'vsce reported success but did not create the expected package.' }
 
     $verifier = Join-Path $PSScriptRoot 'verify-vsix.ps1'
-    $powershellExe = Join-Path $PSHOME 'powershell.exe'
+    $powershellExe = (Get-Process -Id $PID).Path
     & $powershellExe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $verifier -Vsix $vsixPath -SourceExtension $stageRoot -RepositoryRoot $repoRoot
     if ($LASTEXITCODE -ne 0) { throw "VSIX integrity verification failed with exit code $LASTEXITCODE." }
 
@@ -249,3 +249,4 @@ finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }
 }
+

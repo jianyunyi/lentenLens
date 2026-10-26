@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -34,19 +35,18 @@ func Args() []string { return []string{"test", "-json", "-count=1", "-timeout=10
 func Tool() (Executable, error) {
 	path, err := exec.LookPath("go")
 	if err != nil {
-		return Executable{}, errors.New("需要本机 Go 1.24+；不会自动安装或下载")
+		return Executable{}, errors.New("需要本机 Go 1.25+；不会自动安装或下载")
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
 		return Executable{}, err
 	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return Executable{}, err
-	}
+	// Keep the absolute lookup path: Windows tool caches may be reached through
+	// junctions that EvalSymlinks cannot canonicalize across volumes. Hashing and
+	// verifying the executable at this same path still binds execution to its bytes.
 	f, err := os.Open(path)
 	if err != nil {
-		return Executable{}, err
+		return Executable{}, fmt.Errorf("open Go executable %q: %w", path, err)
 	}
 	defer f.Close()
 	h := sha256.New()

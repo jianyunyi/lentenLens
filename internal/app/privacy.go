@@ -159,24 +159,13 @@ func (a *App) attachRoundAnalysis(r *Round) error {
 	if e = a.attachCorrections(r.Analysis); e != nil {
 		return e
 	}
-	current, e := capture.Take(a.Root)
-	if e != nil {
-		return e
-	}
-	r.Analysis.Freshness = "已引用证据未变"
-	for _, c := range r.Changes {
-		f, exists := current.Files[c.Path]
-		if (c.After == nil && !a.pathAbsent(c.Path)) || (c.After != nil && (!exists || f.Hash != c.After.Hash)) {
-			r.Analysis.Freshness = "解释已过期：引用变化或无法定位"
-			break
-		}
-	}
+	r.Analysis.Freshness = a.freshness(r.Analysis.Evidence)
 	return nil
 }
 
 func (a *App) Diagnostics() ([]map[string]string, error) {
 	out := []map[string]string{}
-	for _, name := range []string{"hook-diagnostic.json", "analysis-diagnostic.json"} {
+	for _, name := range []string{"hook-diagnostic.json", "analysis-diagnostic.json", "recovery-diagnostic.json"} {
 		var item map[string]string
 		if err := a.read(name, &item); err == nil {
 			out = append(out, item)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"intentlens/internal/capture"
 	"intentlens/internal/exercise"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -219,7 +218,7 @@ func (a *App) PrepareExerciseApply(id string) (ExerciseApply, error) {
 	if err != nil {
 		return ExerciseApply{}, err
 	}
-	snap, err := capture.Take(a.Root)
+	snap, _, err := capture.TakeGo(a.Root)
 	if err != nil {
 		return ExerciseApply{}, err
 	}
@@ -265,40 +264,5 @@ func (a *App) ConfirmExerciseApply(id, previewDigest string, confirmed bool) err
 	if previewDigest != plan.Digest {
 		return errors.New("答案或目标已变化，请重新预览")
 	}
-	root, err := os.OpenRoot(a.Root)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	written := []ExerciseChange{}
-	for _, change := range plan.Changes {
-		currentFile, e := root.Open(change.File)
-		var current []byte
-		if e == nil {
-			current, e = io.ReadAll(io.LimitReader(currentFile, 60001))
-			currentFile.Close()
-		}
-		if e != nil || string(current) != change.Before {
-			return errors.New("应用期间目标变化，已停止；请检查已应用文件")
-		}
-		f, e := root.OpenFile(change.File, os.O_WRONLY|os.O_TRUNC, 0)
-		if e == nil {
-			_, e = f.WriteString(change.After)
-			closeErr := f.Close()
-			if e == nil {
-				e = closeErr
-			}
-		}
-		if e != nil {
-			for _, old := range append(written, change) {
-				if f, e := root.OpenFile(old.File, os.O_WRONLY|os.O_TRUNC, 0); e == nil {
-					_, _ = f.WriteString(old.Before)
-					_ = f.Close()
-				}
-			}
-			return errors.New("应用写入失败，已尝试恢复原内容，请检查目标文件")
-		}
-		written = append(written, change)
-	}
-	return nil
+	return a.applyChanges(plan)
 }

@@ -1,0 +1,47 @@
+{
+  "result": "PASS",
+  "iterations": 100,
+  "durationMs": 3343.669203,
+  "environment": {
+    "platform": "linux",
+    "arch": "x64",
+    "node": "v24.22.1"
+  },
+  "binarySha256": "efed6f51e66828a52293b13232221f7ff6775ed821cf885c7a4324b1e9916d03",
+  "modelCalls": 0,
+  "stateBytes": 77812,
+  "harnessRssBytes": 62930944,
+  "latency": {
+    "start": {
+      "samples": 100,
+      "p50Ms": 6.298027000000047,
+      "p95Ms": 8.496417999999721,
+      "maxMs": 13.377564
+    },
+    "stop": {
+      "samples": 100,
+      "p50Ms": 6.6924300000000585,
+      "p95Ms": 8.787524000000303,
+      "maxMs": 10.395927999999913
+    },
+    "index": {
+      "samples": 100,
+      "p50Ms": 5.3585519999996905,
+      "p95Ms": 7.632180000000062,
+      "maxMs": 8.505166000000372
+    },
+    "inspect": {
+      "samples": 100,
+      "p50Ms": 5.639012000000093,
+      "p95Ms": 8.402594000000136,
+      "maxMs": 10.809639999999945
+    },
+    "rounds": {
+      "samples": 100,
+      "p50Ms": 7.8453810000000885,
+      "p95Ms": 15.12208899999996,
+      "maxMs": 17.095017999999982
+    }
+  },
+  "limits": "Synthetic fixture; harness RSS is not CLI peak memory; this is not long-term or real-user acceptance."
+}

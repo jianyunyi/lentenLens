@@ -102,7 +102,7 @@ func TestWindowsJunctionDenied(t *testing.T) {
 	write(t, outside, "secret.txt", "hidden")
 	link := filepath.Join(r, "junction")
 	if out, e := exec.Command("cmd", "/c", "mklink", "/J", link, outside).CombinedOutput(); e != nil {
-		t.Skipf("junction unavailable: %v %s", e, out)
+		t.Fatalf("junction unavailable: %v %s", e, out)
 	}
 	s, e := Take(r)
 	if e != nil {

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"intentlens/internal/explain"
 	"net/http"
 	"os"
@@ -17,10 +16,12 @@ import (
 )
 
 type App struct {
-	Root        string
-	State       string
-	modelRun    func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
-	exerciseRun func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
+	applyStageFault func() error    // Test seam before a source rename.
+	applyFault      func(int) error // In-process failure injection; never serialized.
+	Root            string
+	State           string
+	modelRun        func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
+	exerciseRun     func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
 }
 
 func Open(root, state string) (*App, error) {
@@ -76,6 +77,9 @@ func Open(root, state string) (*App, error) {
 		return nil, errors.New("项目私有状态目录不能是链接")
 	}
 	a := &App{Root: root, State: state}
+	if err = a.recoverState(); err != nil {
+		return nil, err
+	}
 	if err = a.scrubExcluded(); err != nil {
 		return nil, err
 	}
@@ -111,17 +115,6 @@ func newID() string {
 	return hex.EncodeToString(b[:])
 }
 
-func (a *App) lock(name string) (func(), error) {
-	p := filepath.Join(a.State, name+".lock")
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("项目操作进行中；若上次进程异常退出，请检查本地 %s 锁", name)
-	}
-	_, _ = fmt.Fprintf(f, "pid=%d\n", os.Getpid())
-	_ = f.Close()
-	return func() { _ = os.Remove(p) }, nil
-}
-
 func (a *App) read(name string, v any) error {
 	info, e := os.Lstat(filepath.Join(a.State, name))
 	if e != nil {
@@ -130,35 +123,32 @@ func (a *App) read(name string, v any) error {
 	if !info.Mode().IsRegular() {
 		return errors.New("本地记录必须是普通文件")
 	}
+	if info.Size() > maxStateRecordBytes {
+		return errors.New("本地记录超过读取范围")
+	}
 	b, e := os.ReadFile(filepath.Join(a.State, name))
 	if e != nil {
 		return e
 	}
+	if name == "usage.json" || name == "settings.json" {
+		return validateStateRecord(name, b, v)
+	}
 	return json.Unmarshal(b, v)
 }
 func (a *App) write(name string, v any) error {
-	b, e := json.MarshalIndent(v, "", "  ")
-	if e != nil {
-		return e
+	release, err := a.lock("state")
+	if err != nil {
+		return err
 	}
-	f, e := os.CreateTemp(a.State, ".tmp-")
-	if e != nil {
-		return e
+	defer release()
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
 	}
-	p := f.Name()
-	defer os.Remove(p)
-	if e = f.Chmod(0600); e == nil {
-		_, e = f.Write(b)
+	root, err := os.OpenRoot(a.State)
+	if err != nil {
+		return err
 	}
-	if e == nil {
-		e = f.Sync()
-	}
-	closeErr := f.Close()
-	if e == nil {
-		e = closeErr
-	}
-	if e != nil {
-		return e
-	}
-	return os.Rename(p, filepath.Join(a.State, name))
+	defer root.Close()
+	return atomicReplace(root, name, b, 0600, nil)
 }

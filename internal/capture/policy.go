@@ -18,7 +18,7 @@ type Policy struct{ patterns []string }
 // Every matched path and its descendants are excluded, including directory rules.
 // Negation is deliberately unsupported so exclusions cannot be re-included.
 func LoadPolicy(root string) (Policy, error) {
-	p := Policy{patterns: []string{".git", ".intent", ".intentignore", ".worktrees", ".cache", ".pnpm-store", "node_modules", "vendor", ".env*", "*.pem", "*.key"}}
+	p := Policy{patterns: []string{".git", ".intent", ".intentlens-write-*", ".intentignore", ".worktrees", ".cache", ".pnpm-store", "node_modules", "vendor", ".env*", "*.pem", "*.key"}}
 	name := filepath.Join(root, ".intentignore")
 	info, err := os.Lstat(name)
 	if errors.Is(err, os.ErrNotExist) {

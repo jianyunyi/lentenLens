@@ -1,0 +1,54 @@
+# 可靠性阶段报告
+
+当前阶段：S3 等待远程验证；状态：进行中；未关闭阻断项：ISSUE-005（待 Windows 验证）；延期风险：真实团队试用、沙箱、ISSUE-006 历史性能；待决定：无；下一步：检查 PR #5 的 Windows/候选包 CI 结果。
+
+基线 main 53d1720；对应本地源码快照 HEAD 00487c4，102 个文本文件经上一轮逐文件 blob 对照；发布二进制不纳入本地源码快照。
+
+## S1 基线
+故障探针已确认遗留 capture.lock 和坏解释 JSON 均阻断 Open；源码 O_TRUNC 风险经静态确认。当前先冻结 AC-001–006，不以删减测试调整验收。
+检查点：基线快照 + git diff；告警：无；需要决定：无；未做：真实状态迁移、公开发行、团队联系。
+
+## 2026-10-26 · S1 · 异常恢复与安全应用
+结论：通过；独立复核：review_reliability（未参与实现）通过。需要决定：无。
+AC-001/002/003 smoke：Linux 全量 go test ./... -count=1、go vet ./...、go build ./... PASS；针对性 -race PASS；Windows amd64 build PASS（运行 NOT RUN）。
+故障验证：真实子进程强退后锁释放；替换后和 Rename 前退出后重开恢复；外部修改拒绝覆盖；写失败回滚；隔离与策略撤销；critical null/shape 拒绝；umask 权限保留。
+独立复核发现并关闭四项：空白/null/缺字段用量接受、源码暂存残留、私有暂存残留、umask 权限改变；补充进程崩溃与安全形状回归。返工：5 轮修改→复验（复核修复后字段缺失编译失败、补字段通过、暂存/权限补齐通过、critical shape 修复后函数重名编译失败、改名通过）；阻塞 0 次。
+度量（对 HEAD 的本阶段 diff，报告追加前）：{'docs': [6, 72, 3], 'implementation': [13, 748, 78], 'tests': [2, 423, 0]}
+检查点：基线 HEAD + S1 工作区，文件摘要由阶段前后 git diff/本地检查点确定；未部署、未合并。未做：Windows 实跑、断电/文件系统故障注入。风险：比较到替换没有跨编辑器 CAS；应用前关闭并发编辑，不能承诺任意不合作 writer 的绝对保护。
+新增状态恢复处理的代价：启动扫描记录和 OS 锁；性能影响由 S4 基准记录。
+
+## 2026-10-26 · S2 · 预算与新鲜度一致性
+结论：通过；需要决定：无；独立复核：不适用（复用 S1 已复核恢复路径）。
+实现：PrepareExerciseApply 使用 TakeGo；轮次统一 freshness；Inspect 复用现有 Go snapshot 调用同一 freshnessFromSnapshot，避免重复扫描；缺少证据不再显示新鲜。
+AC-004 + 前序 smoke：新增三项及函数/练习预算、非 Go 证据、锁、崩溃、暂存清理回归共 9 个顶层测试 PASS；全量 app 测试 PASS。
+度量（S1 检查点到 S2，报告自身更新另计）：{'internal/app/privacy.go': [1, 12], 'internal/app/consistency_test.go': [108, 0], 'docs/production/stage-report.md': [9, 0], 'internal/app/exercise_execution.go': [1, 1]}
+返工 0 轮；阻塞 0 次；告警/新错误：本轮检查未发现。未做：大仓库端到端 UI 时延测量，归 S4。检查点：基线 + S1/S2 diff，回退需先处理残留应用日志。
+
+## 2026-10-26 · S3 · Windows CI 与候选包检查
+结论：实现与本地检查通过，远程运行阻塞；独立复核：review_reliability。
+已完成：只读权限、不可变 action SHA、Windows/Linux 测试与 vet/build、Windows 冒烟、最低 Go 版本检查、候选 VSIX 内容校验及 core.js 修改/清单缺失拒绝测试。未加入自动发布。
+本地 actionlint、JS 语法、61 个扩展测试、7 个预检测试 PASS。独立故障探针 5 类（正常、失败事件、非零退出、无测试、坏 JSON）正确传递退出状态；真实 CLI 三轮 soak 集成 PASS。
+AC-005 Windows 实跑/PowerShell 打包/候选包验证：NOT RUN。Linux 不代替 Windows；尚未修改 main 必需检查规则。候选包自带哈希不等于任意恶意包签名认证。
+阻塞事件 B-001：GitHub create_tree 批量上传 32 个源码/项目文件被 automatic approval review 拒绝，理由为本轮未明确授权该载荷的远程导出及目标信任；未创建远程分支/PR，未用其他通道绕过。此前仓库 PR 创建授权未被此轮自动审批接受，需要用户针对本批差异明确确认。
+返工 0 轮；阻塞 1 次（授权）；需要决定：允许将可审阅的完整差异上传到 jianyunyi/lentenLens 新分支并创建草稿 PR。
+
+## 2026-10-26 · S4 · 试用准备与合成性能基线
+结论：本地基线和试用协议完成；真实团队与长期验收 NOT RUN，不宣称生产就绪。
+产物：team-trial.md、recovery-runbook.md、performance_test.go、soak.cjs/soak.test.cjs；原始数据位于 evidence/。
+Linux/AMD EPYC 9V74/Go 1.25.0：1000 个 Go 文件索引 21.5–23.6 ms/op；Inspect 25.1–35.4 ms/op。20 条历史 List 0.925–0.950 ms/op，200 条 22.7–26.3 ms/op。每组 1 次迭代、3 次重复，是初始测量，不是稳定统计或目标 Windows SLA。
+100 轮合成场景 PASS，3.34 秒；1000 轮 PASS，299.83 秒，0 模型调用，最终状态 780525 字节。1000 轮的命令 P95：start 40.0 ms、stop 40.0 ms、index 38.0 ms、inspect 55.0 ms、rounds 496.2 ms。每轮启动独立 CLI 进程，含逐次增长的历史；不能解释为固定规模下的延迟分布。报告的 RSS 是 Node harness，不能当 CLI 峰值内存。
+发现历史扩展成本增长，新增 ISSUE-006；尚未在真实目标机器冻结 SLA，没有以宽松阈值伪造通过。
+试用方案建议 3–5 位用户、2 周观察，具体人员/日期/阈值未确定；本任务未联系任何人或开启真实源码/模型试用。AC-006 合成检查 PASS，真实验收 NOT RUN。返工 1 轮（基准输出行尾空白导致 diff --check 失败后规范化复验）；依赖阻塞沿用 B-001，不重复计数。
+
+S2 度量补充校正：原检查点字典仅含 S1 已改文件，漏列 S2 首次修改的 inspect/revisions；完整源码/测试差异为 {'internal/app/consistency_test.go': [108, 0], 'internal/app/inspect.go': [2, 14], 'internal/app/privacy.go': [1, 12], 'internal/app/exercise_execution.go': [1, 1], 'internal/app/revisions.go': [7, 0]}。该校正只补齐度量，不改变测试与验收标准。
+
+## 最终本地复验与交付
+Go 1.25.0/Linux：129 个顶层测试 PASS、1 个 Windows 专属用例 SKIP；计入子测试 246 次 PASS。go vet/build PASS；Windows app 测试二进制交叉编译 PASS（实际运行 NOT RUN）。扩展 61/61、预检 7/7、真实 CLI soak 集成 1/1 PASS；actionlint 与 git diff --check PASS。
+后续小范围加固：授权/用量形状校验同时用于关键 read；单条读取上限调整为 256 MiB，并运行 critical/quarantine/crash 定向测试及上述全量复验。
+基准原始输出仅规范化了行尾空白，数值未改变。soak 报告记录所测二进制 SHA-256；长短两次跑相同二进制，后续关键 read 加固另经定向和全量复验，不把它们冒充不同版本的性能对比。
+S3/S4 按交付物统计：CI 工作流/执行器/PowerShell 测试、Go 基准、soak 执行器及集成测试；具体文件增删行见交付包 diffstat.json。阶段隔离提交 N/A（采用连续工作区和 S1 源码检查点，未创建虚假提交）；最终完整差异与 SHA-256 清单均在交付包，排除工具下载/二进制/私有 fixture。
+告警：npm 对运行环境 http-proxy 配置发出弃用提示，测试未失败；Windows/候选包/真实试用状态未虚报。未完成项：B-001 上传授权、ISSUE-005 Windows 实跑、真实长期验收、ISSUE-006 扩展性能；不对生产就绪作承诺。
+
+## 2026-10-26 · 上传检查点
+用户明确回复“上传”，授权本批载荷写入 jianyunyi/lentenLens 新分支并创建草稿 PR，B-001 已解除。已建立 fix/production-reliability，源码提交 84ae463c550d066a248c224268bd51639c24cbee，草稿 PR https://github.com/jianyunyi/lentenLens/pull/5 。远程比较：35 个文件、1977 行增加/107 行删除，与已审阅交付范围一致；未删除额外路径，未合并 main。
+本补充仅更新三份阶段文档的当前授权状态，代码及本地测试结论不变。首次查询尚无 workflow run 记录，Windows/PowerShell/候选包与真实团队试用仍不标 PASS。
