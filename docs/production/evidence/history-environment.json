@@ -1,0 +1,14 @@
+{
+  "sourceSha256": "4d573b6fc703b4ad5a2c049c21e5a408d7bb89885ce60e3f6979d9cf5da4b1b9",
+  "dirty": true,
+  "commit": "09e288ccf77df1120ed2d3dc825690971cd4c440",
+  "go": "go version go1.26.3 linux/amd64",
+  "platform": "linux",
+  "arch": "x64",
+  "osRelease": "6.18.55",
+  "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "logicalCpus": 9,
+  "node": "v24.22.1",
+  "iterations": 1000,
+  "limits": "Synthetic fixture; shared CI measurements are not target-machine or real-team acceptance."
+}

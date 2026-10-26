@@ -80,6 +80,13 @@ func (a *App) attachCorrections(e *Explanation) error {
 			e.Corrections = append(e.Corrections, c)
 		}
 	}
+	applyCorrections(e, e.Corrections)
+	return nil
+}
+
+// applyCorrections receives only corrections associated with this explanation.
+func applyCorrections(e *Explanation, corrections []Correction) {
+	e.Corrections = append([]Correction(nil), corrections...)
 	sort.Slice(e.Corrections, func(i, j int) bool { return e.Corrections[i].ID < e.Corrections[j].ID })
 	for i := range e.Document.Claims {
 		for _, c := range e.Corrections {
@@ -88,7 +95,6 @@ func (a *App) attachCorrections(e *Explanation) error {
 			}
 		}
 	}
-	return nil
 }
 
 func (a *App) FlagClaim(id, claimID, reason string) (Correction, error) {

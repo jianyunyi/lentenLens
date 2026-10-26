@@ -129,40 +129,6 @@ func (a *App) scrubExcluded() error {
 	return a.scrubExercises()
 }
 
-func (a *App) attachRoundAnalysis(r *Round) error {
-	var diagnostic map[string]string
-	if err := a.read("analysis-diagnostic.json", &diagnostic); err == nil && diagnostic["round"] == r.ID {
-		r.Notes = append(r.Notes, "最近一次轮次解释生成失败："+diagnostic["error"])
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	entries, e := os.ReadDir(a.State)
-	if e != nil {
-		return e
-	}
-	for _, ent := range entries {
-		if !strings.HasPrefix(ent.Name(), "explanation-") || !strings.HasSuffix(ent.Name(), ".json") {
-			continue
-		}
-		var saved Explanation
-		if e = a.read(ent.Name(), &saved); e != nil {
-			return e
-		}
-		if saved.FunctionID == "round:"+r.ID && (r.Analysis == nil || saved.Created > r.Analysis.Created) {
-			copy := saved
-			r.Analysis = &copy
-		}
-	}
-	if r.Analysis == nil {
-		return nil
-	}
-	if e = a.attachCorrections(r.Analysis); e != nil {
-		return e
-	}
-	r.Analysis.Freshness = a.freshness(r.Analysis.Evidence)
-	return nil
-}
-
 func (a *App) Diagnostics() ([]map[string]string, error) {
 	out := []map[string]string{}
 	for _, name := range []string{"hook-diagnostic.json", "analysis-diagnostic.json", "recovery-diagnostic.json"} {

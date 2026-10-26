@@ -143,10 +143,10 @@ func (a *App) List() ([]Round, error) {
 			}
 		}
 		r.Changes = filtered
-		if e = a.attachRoundAnalysis(&r); e != nil {
-			return nil, e
-		}
 		rounds = append(rounds, r)
+	}
+	if e = a.attachRoundAnalyses(rounds, entries); e != nil {
+		return nil, e
 	}
 	sort.Slice(rounds, func(i, j int) bool { return rounds[i].Started > rounds[j].Started })
 	return rounds, nil

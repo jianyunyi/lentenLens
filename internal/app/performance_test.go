@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"intentlens/internal/capture"
+	"intentlens/internal/explain"
 	"os"
 	"path/filepath"
 	"testing"
@@ -76,5 +77,44 @@ func BenchmarkRoundHistory(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// Explained histories exercise the per-round explanation/correction join as well
+// as directory scanning; plain histories catch overhead without any model data.
+func BenchmarkRoundHistoryJoin(b *testing.B) {
+	for _, explained := range []bool{false, true} {
+		for _, n := range []int{20, 200, 1000} {
+			b.Run(fmt.Sprintf("explained=%t/%d", explained, n), func(b *testing.B) {
+				a, _ := benchmarkProject(b, 1)
+				source := "package p\nfunc F0(x int) int { return x + 0 }\n"
+				for i := 0; i < n; i++ {
+					id := fmt.Sprintf("%024x", i+1)
+					if err := a.write("round-"+id+".json", Round{ID: id, Started: fmt.Sprintf("%06d", i)}); err != nil {
+						b.Fatal(err)
+					}
+					if explained {
+						e := Explanation{ID: id, FunctionID: "round:" + id, Created: "2026-10-26", Evidence: []explain.Evidence{{File: "f0000.go", Role: "after", Source: source, Hash: hash(source)}}}
+						if err := a.write("explanation-"+id+".json", e); err != nil {
+							b.Fatal(err)
+						}
+						if err := a.write("correction-"+id+".json", Correction{ID: id, ExplanationID: id, ClaimID: "c1"}); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					rounds, err := a.List()
+					if err != nil || len(rounds) != n {
+						b.Fatalf("history: %d %v", len(rounds), err)
+					}
+					if explained && (rounds[0].Analysis == nil || len(rounds[0].Analysis.Corrections) != 1 || rounds[0].Analysis.Freshness != "已引用证据未变") {
+						b.Fatal("history semantics changed")
+					}
+				}
+			})
+		}
 	}
 }

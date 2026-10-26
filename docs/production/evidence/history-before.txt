@@ -1,0 +1,24 @@
+goos: linux
+goarch: amd64
+pkg: intentlens/internal/app
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkRoundHistoryJoin/explained=false/20-8         	       1	   1099188 ns/op	  196288 B/op	    2108 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/20-8         	       1	    864617 ns/op	  188072 B/op	    2106 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/20-8         	       1	    909788 ns/op	  188072 B/op	    2106 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/200-8        	       1	  29815227 ns/op	 7547816 B/op	   92906 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/200-8        	       1	  31828348 ns/op	 7547928 B/op	   92907 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/200-8        	       1	  31161626 ns/op	 7547832 B/op	   92907 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/1000-8       	       1	 920945445 ns/op	153384016 B/op	 2066274 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/1000-8       	       1	 747688607 ns/op	153355440 B/op	 2066247 allocs/op
+BenchmarkRoundHistoryJoin/explained=false/1000-8       	       1	 897230778 ns/op	153423416 B/op	 2066274 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/20-8          	       1	  14394204 ns/op	 2544688 B/op	   27013 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/20-8          	       1	  12829288 ns/op	 2544688 B/op	   27013 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/20-8          	       1	  15173712 ns/op	 2536328 B/op	   27009 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/200-8         	       1	1473617650 ns/op	219827464 B/op	 2251557 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/200-8         	       1	2227174229 ns/op	218522280 B/op	 2251561 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/200-8         	       1	1948652697 ns/op	218601144 B/op	 2251627 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/1000-8        	       1	53142111740 ns/op	5434673816 B/op	55275155 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/1000-8        	       1	68583672070 ns/op	5434981840 B/op	55275365 allocs/op
+BenchmarkRoundHistoryJoin/explained=true/1000-8        	       1	44949031463 ns/op	5370374168 B/op	55275072 allocs/op
+PASS
+ok  	intentlens/internal/app	215.524s
