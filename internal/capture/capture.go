@@ -182,13 +182,16 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
 		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
-			if d.Type()&os.ModeSymlink != 0 {
-				if target, statErr := os.Stat(p); statErr == nil && target.IsDir() {
-					c.ExcludedCount++
-					// WalkDir does not follow symlinks. SkipDir on a non-directory
-					// entry would skip the remaining entries in its parent.
-					return nil
+			// Windows junctions can be ModeIrregular rather than ModeSymlink.
+			// Both exclude a directory from the index and must affect coverage.
+			if target, statErr := os.Stat(p); statErr == nil && target.IsDir() {
+				c.ExcludedCount++
+				if d.IsDir() {
+					return filepath.SkipDir
 				}
+				// WalkDir does not follow non-directory link entries. SkipDir
+				// here would skip the remaining entries in their parent.
+				return nil
 			}
 			if strings.HasSuffix(rel, ".go") {
 				addCoverageOmission(&c, rel, "unsafe_path")

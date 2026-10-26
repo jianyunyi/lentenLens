@@ -20,15 +20,15 @@ func TestToolThroughWindowsJunction(t *testing.T) {
 	}
 	base := t.TempDir()
 	link := filepath.Join(base, "toolchain")
-	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, filepath.Dir(path)).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, filepath.Dir(filepath.Dir(path))).CombinedOutput(); err != nil {
 		t.Fatalf("create toolchain junction: %v: %s", err, out)
 	}
-	t.Setenv("PATH", link)
+	t.Setenv("PATH", filepath.Join(link, "bin"))
 	tool, err := Tool()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tool.Path != filepath.Join(link, filepath.Base(path)) {
+	if tool.Path != filepath.Join(link, "bin", filepath.Base(path)) {
 		t.Fatalf("lookup path not retained: %s", tool.Path)
 	}
 	dir := filepath.Join(base, "workspace")
