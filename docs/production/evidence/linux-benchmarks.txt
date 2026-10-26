@@ -1,0 +1,24 @@
+goos: linux
+goarch: amd64
+pkg: intentlens/internal/app
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkIndexWorkspace/100-8 	       1	   2531594 ns/op	  919768 B/op	   11738 allocs/op
+BenchmarkIndexWorkspace/100-8 	       1	   2145052 ns/op	  919400 B/op	   11732 allocs/op
+BenchmarkIndexWorkspace/100-8 	       1	   2380565 ns/op	  919496 B/op	   11734 allocs/op
+BenchmarkIndexWorkspace/1000-8         	       1	  23621893 ns/op	 9592304 B/op	  116161 allocs/op
+BenchmarkIndexWorkspace/1000-8         	       1	  21475039 ns/op	 9581344 B/op	  116148 allocs/op
+BenchmarkIndexWorkspace/1000-8         	       1	  23143480 ns/op	 9582200 B/op	  116145 allocs/op
+BenchmarkInspectWorkspace/100-8        	       1	   2531613 ns/op	  964696 B/op	   11837 allocs/op
+BenchmarkInspectWorkspace/100-8        	       1	   2152242 ns/op	  956464 B/op	   11835 allocs/op
+BenchmarkInspectWorkspace/100-8        	       1	   2412246 ns/op	  956464 B/op	   11835 allocs/op
+BenchmarkInspectWorkspace/1000-8       	       1	  25061641 ns/op	10136624 B/op	  116266 allocs/op
+BenchmarkInspectWorkspace/1000-8       	       1	  35373348 ns/op	10135952 B/op	  116256 allocs/op
+BenchmarkInspectWorkspace/1000-8       	       1	  26481876 ns/op	10120208 B/op	  116260 allocs/op
+BenchmarkRoundHistory/20-8             	       1	    949825 ns/op	  249920 B/op	    2909 allocs/op
+BenchmarkRoundHistory/20-8             	       1	    925949 ns/op	  241656 B/op	    2906 allocs/op
+BenchmarkRoundHistory/20-8             	       1	    925048 ns/op	  241656 B/op	    2906 allocs/op
+BenchmarkRoundHistory/200-8            	       1	  22745307 ns/op	 8075312 B/op	  101084 allocs/op
+BenchmarkRoundHistory/200-8            	       1	  24666919 ns/op	 8067096 B/op	  101082 allocs/op
+BenchmarkRoundHistory/200-8            	       1	  26250145 ns/op	 8075568 B/op	  101087 allocs/op
+PASS
+ok  	intentlens/internal/app	1.797s

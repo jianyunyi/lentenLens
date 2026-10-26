@@ -164,6 +164,13 @@ func (a *App) freshness(evidence []explain.Evidence) string {
 	if err != nil {
 		return "解释已过期：无法检查当前依据"
 	}
+	return a.freshnessFromSnapshot(evidence, snap)
+}
+
+func (a *App) freshnessFromSnapshot(evidence []explain.Evidence, snap capture.Snapshot) string {
+	if len(evidence) == 0 {
+		return "解释已过期：缺少可检查依据"
+	}
 	var textSnapshot *capture.Snapshot
 	after := map[string]bool{}
 	for _, e := range evidence {

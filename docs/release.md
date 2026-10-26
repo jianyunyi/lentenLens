@@ -2,7 +2,7 @@
 
 ## 可复现的 Windows x64 包
 
-扩展版本以 `extension/package.json` 为准。当前打包目标固定为 `windows/amd64`（VS Code target `win32-x64`）；Go 工具链固定为 1.26.3，源码 `go.mod` 必须仍声明 Go 1.24.0；Node.js 至少 22；`@vscode/vsce` 固定为 4.0.0，完整传递依赖由 `scripts/release-tools/package-lock.json` 锁定。打包器会核对这些声明，不会静默改用其它 Go 版本或目标。
+扩展版本以 `extension/package.json` 为准。当前打包目标固定为 `windows/amd64`（VS Code target `win32-x64`）；Go 工具链固定为 1.26.3，源码 `go.mod` 必须仍声明 Go 1.25.0；Node.js 至少 22；`@vscode/vsce` 固定为 4.0.0，完整传递依赖由 `scripts/release-tools/package-lock.json` 锁定。打包器会核对这些声明，不会静默改用其它 Go 版本或目标。
 
 在项目根目录执行：
 
@@ -30,3 +30,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vsix.ps1 `
 ## 尚待所有者决定
 
 哈希通过只代表包内内容与清单一致，不表示可以公开发布。当前 `publisher` 仍为 `intentlens-local`，`license` 仍为 `UNLICENSED`；打包清单会保留这两个值并列出阻断项。公开发布前，项目所有者须提供正式 Marketplace publisher ID，并选择法律适用的许可证、更新 manifest 且提供匹配的 `LICENSE` 文件。打包脚本不会替所有者决定或虚构这些身份/法律信息。
+
+## 自动化候选包门禁
+
+`.github/workflows/reliability.yml` 在 PR、main push 和手动触发时执行 Linux/Windows 检查；保留 Go JSON 事件，Windows junction 测试必须实际 PASS。使用 release-config.json 固定的发行 Go 版本和 Node major，另以 Go 1.25.0 验证最低源码版本。候选包作业依赖全部测试，再执行现有打包/校验与两类损坏拒绝回归，仅保留 7 天制品。
+
+工作流存在不代表某次运行通过，也不自动建立分支保护。仓库所有者应在收到真实运行结果后将相应 test、minimum-go、candidate 检查绑定为 main 必需检查。不能以 Linux 交叉编译替代 Windows 测试。校验保证可信流水线候选包的内容一致性，不是任意恶意包的签名认证。
