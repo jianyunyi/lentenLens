@@ -8,12 +8,16 @@ const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
 const { configureModel } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
+const { createCallPathProvider } = require('./callpath');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page, escapeHTML } = require('./core');
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
   const panels = new Map(), policyVersions = new Map();
+  let callPathProvider;
+  let callPathView;
+  let callPathState;
   const indexDiagnostics = new Map();
   const sourcePanels = new Set();
   const indexBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 90);
@@ -34,7 +38,9 @@ function activate(context) {
   let documentEpoch = 0;
   function clearInline() {
     documentEpoch++;
+    callPathState = undefined;
     inlineUI?.clear();
+    callPathProvider?.clear();
     for (const view of [...sourcePanels]) view.dispose();
     invalidateIndex();
   }
@@ -80,12 +86,16 @@ function activate(context) {
   });
   const recovery = createCaptureRecovery({ vscode, cli, sessions });
   const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); };
-  async function openCurrent(folder, file, line = 1) {
+  async function openCurrent(folder, file, line = 1, column = 0) {
     trusted();
     const target = confinedPath(folder.uri.fsPath, file);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
     const editor = await vscode.window.showTextDocument(doc);
-    const pos = new vscode.Position(Math.max(0, Math.min(doc.lineCount - 1, Number(line || 1) - 1)), 0);
+    const lineIndex = Math.max(0, Math.min(doc.lineCount - 1, Number(line || 1) - 1));
+    // Go token columns count UTF-8 bytes (1-based); VS Code uses UTF-16 code
+    // units (0-based), so subtracting one alone is wrong after non-ASCII text.
+    const character = column > 0 ? Buffer.from(doc.lineAt(lineIndex).text, 'utf8').subarray(0, column - 1).toString('utf8').length : 0;
+    const pos = new vscode.Position(lineIndex, character);
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
   }
@@ -335,6 +345,9 @@ function activate(context) {
     },
   };
   context.subscriptions.push(treeChanged, lensesChanged, vscode.window.createTreeView('intentlens.rounds', { treeDataProvider: provider }));
+  callPathProvider = createCallPathProvider(vscode);
+  callPathView = vscode.window.createTreeView('intentlens.callPath', { treeDataProvider: callPathProvider });
+  context.subscriptions.push(callPathProvider, callPathView);
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
     async provideCodeLenses(document, token) {
@@ -360,6 +373,53 @@ function activate(context) {
     },
   }));
   function command(name, fn) { context.subscriptions.push(vscode.commands.registerCommand(`intentlens.${name}`, guard(fn))); }
+  async function focusCallPath() {
+    if (callPathView?.show) { await callPathView.show(true); return; }
+    if (vscode.commands.executeCommand) await vscode.commands.executeCommand('workbench.view.extension.intentlens');
+  }
+  async function loadCallPath() {
+    await focusCallPath();
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') throw new Error('请在本地 Go 文件中放置光标。');
+    if (editor.document.isDirty) throw new Error('请先保存文件；调用路径仅使用磁盘上的代码。');
+    const folder = await folderFor(editor.document.uri);
+    if (!folder) return;
+    const file = path.relative(folder.uri.fsPath, editor.document.uri.fsPath).split(path.sep).join('/');
+    confinedPath(folder.uri.fsPath, file);
+    const line = editor.selection.active.line + 1;
+    const epoch = documentEpoch;
+    callPathProvider.clear();
+    const requestEpoch = (callPathState?.requestEpoch || 0) + 1;
+    callPathState = { requestEpoch, folderRoot: folder.uri.fsPath, input: { file, line } };
+    const data = await cli(folder, 'call-path', { file, line });
+    if (epoch !== documentEpoch || callPathState?.requestEpoch !== requestEpoch) return;
+    callPathProvider.setData(data);
+    callPathState = { requestEpoch, folderRoot: folder.uri.fsPath, input: { file, line }, data };
+    return data;
+  }
+  command('callPath', loadCallPath);
+  command('refreshCallPath', loadCallPath);
+  command('openCallPathSite', async call => {
+    if (!call || typeof call.file !== 'string' || !Number.isInteger(call.line) || call.line < 1 || !Number.isInteger(call.column) || call.column < 0 || call.column > 100000000) throw new Error('源码调用点证据无效。');
+    const state = callPathState;
+    if (!state?.data || !state.folderRoot || !state.input) throw new Error('调用路径已失效，请重新加载。');
+    const folder = (vscode.workspace.workspaceFolders || []).find(item => item.uri.scheme === 'file' && item.uri.fsPath === state.folderRoot);
+    if (!folder) throw new Error('调用路径来源工作区已关闭，请重新加载。');
+    const current = await cli(folder, 'call-path', state.input);
+    if (state !== callPathState) throw new Error('调用路径已失效，请重新加载。');
+    if (JSON.stringify(current) !== JSON.stringify(state.data)) {
+      callPathState = undefined;
+      callPathProvider.clear();
+      throw new Error('源码证据已变化，请重新加载调用路径。');
+    }
+    const evidence = (current.calls || []).some(candidate => candidate && candidate.file === call.file && candidate.line === call.line && candidate.column === call.column && candidate.name === call.name && candidate.caller_id === call.caller_id && candidate.source === call.source);
+    const functionEvidence = typeof call.function_id === 'string' && (current.functions || []).some(fn => fn && fn.file === call.file && fn.start_line === call.line && fn.id === call.function_id && fn.source === call.source);
+    if (!evidence && !functionEvidence) throw new Error('源码证据已变化或不属于当前调用路径，请重新加载。');
+    const target = confinedPath(folder.uri.fsPath, call.file);
+    const dirty = (vscode.workspace.textDocuments || []).find(doc => doc.uri?.scheme === 'file' && doc.uri.fsPath === target && doc.isDirty);
+    if (dirty) throw new Error('请先保存目标文件；脏文件不会被打开。');
+    await openCurrent(folder, call.file, call.line, call.column || 0);
+  });
   command('indexStatus', async uri => {
     uri ||= vscode.window.activeTextEditor?.document.uri;
     const folder = await folderFor(uri); if (!folder) return;

@@ -27,6 +27,10 @@ type Call struct {
 	Name    string   `json:"name"`
 	Status  string   `json:"status"`
 	Targets []string `json:"targets"`
+	File    string   `json:"file"`
+	Line    int      `json:"line"`
+	Column  int      `json:"column"`
+	Source  string   `json:"source"`
 }
 type Index struct {
 	Functions []Function `json:"functions"`
@@ -122,7 +126,7 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 					_ = format.Node(&b, set, f.Recv.List[0].Type)
 					name = "(" + b.String() + ")." + name
 				}
-				start, end := set.Position(f.Pos()), set.Position(f.End())
+				start, end := set.PositionFor(f.Pos(), false), set.PositionFor(f.End(), false)
 				fn := Function{ID: u.name + ":" + name, Name: name, File: u.name, StartLine: start.Line, EndLine: end.Line, Source: u.source[start.Offset:end.Offset], Calls: []Call{}}
 				if f.Body != nil {
 					ast.Inspect(f.Body, func(n ast.Node) bool {
@@ -132,7 +136,12 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 						}
 						var b bytes.Buffer
 						_ = format.Node(&b, set, c.Fun)
-						call := Call{Name: b.String(), Status: "unresolved", Targets: []string{}}
+						pos, end := set.PositionFor(c.Pos(), false), set.PositionFor(c.End(), false)
+						source := ""
+						if pos.Offset >= 0 && end.Offset <= len(u.source) && pos.Offset <= end.Offset {
+							source = u.source[pos.Offset:end.Offset]
+						}
+						call := Call{Name: b.String(), Status: "unresolved", Targets: []string{}, File: u.name, Line: pos.Line, Column: pos.Column, Source: source}
 						if id := directCallIdent(c.Fun, info); id != nil {
 							obj := info.Uses[id]
 							target, exists := targets[obj]
