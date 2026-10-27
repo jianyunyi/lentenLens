@@ -45,7 +45,7 @@ type input struct {
 
 func run(args []string, in io.Reader, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | explain | configure | status | analyze-round | hooks-config | hook")
+		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | call-path | explain | configure | status | analyze-round | hooks-config | hook")
 		return 0
 	}
 	command := args[0]
@@ -74,7 +74,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	var request input
 	// Read stdin only for commands that require it; never hang a background worker.
 	switch command {
-	case "capture-event", "capture-abort", "start", "stop", "inspect", "explain", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
+	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
 		e = json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request)
 		if e != nil {
 			return fail(out, errors.New("需要有效的 JSON 输入"))
@@ -170,6 +170,8 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		result, e = a.Index()
 	case "inspect":
 		result, e = a.Inspect(request.File, request.Line)
+	case "call-path":
+		result, e = a.CallPath(request.File, request.Line)
 	case "explain":
 		result, e = a.Explain(context.Background(), request.File, request.Line, request.Question, "")
 	case "configure":

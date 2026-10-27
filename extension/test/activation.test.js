@@ -31,12 +31,17 @@ test('extension registers trusted local commands, Go CodeLens, and rounds view',
     assert.ok(commands.has('intentlens.stopRound'));
     assert.ok(commands.has('intentlens.resumeRound'));
     assert.ok(commands.has('intentlens.cancelRound'));
+    assert.ok(commands.has('intentlens.callPath'));
+    assert.ok(commands.has('intentlens.refreshCallPath'));
     const manifest = require('../package.json');
     for (const name of ['startRound', 'stopRound', 'resumeRound', 'cancelRound']) {
       const id = `intentlens.${name}`;
       assert.ok(manifest.contributes.commands.some(item => item.command === id));
       assert.ok(manifest.contributes.menus['view/title'].some(item => item.command === id));
     }
+    for (const name of ['callPath', 'refreshCallPath']) assert.ok(manifest.contributes.commands.some(item => item.command === `intentlens.${name}`));
+    assert.equal(manifest.contributes.commands.find(item => item.command === 'intentlens.refreshCallPath').icon, '$(refresh)');
+    assert.ok(manifest.contributes.viewsWelcome.some(item => item.view === 'intentlens.callPath' && item.contents.includes('command:intentlens.callPath')));
     assert.ok(registrations.includes('intentlens.rounds'));
     assert.ok(registrations.some(x => x.language === 'go' && x.scheme === 'file'));
   } finally { Module._load = original; }
