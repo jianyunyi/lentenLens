@@ -41,6 +41,23 @@ jobs:
         run: node scripts/ci-go-tests.cjs go-tests.jsonl
       - run: go vet ./...
       - run: go build ./...
+      - name: Call-path acceptance (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bin
+          go build -trimpath -o bin/intentlens ./cmd/intentlens
+          node scripts/callpath-acceptance.cjs bin/intentlens
+      - name: Call-path acceptance (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bin -Force | Out-Null
+          go build -trimpath -o bin/intentlens.exe ./cmd/intentlens
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/callpath-acceptance.cjs bin/intentlens.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Ensure no tracked VSIX artifacts
+        run: node scripts/no-tracked-vsix.cjs
       - run: npm test
         working-directory: extension
       - run: npm run check
