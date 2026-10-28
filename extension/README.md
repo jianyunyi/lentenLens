@@ -26,6 +26,12 @@
 
 CLI 对应命令为 `call-path`，输入与 `inspect` 相同：`{"file":"main.go","line":12}`。开发时在仓库根目录运行 `scripts/callpath-oracle-benchmark.sh /tmp/callpath-metrics.json`，以及 `node scripts/callpath-acceptance.cjs /absolute/path/to/intentlens`。这两项仅测试已知答案的合成源码，不测量真实模型回答准确率。
 
+## 查看本地模型回答与证据
+
+在 Activity Bar 的 IntentLens 容器中打开 **模型回答与证据**，并将光标放在已保存的 Go 函数中。面板只读显示该函数本地保存的解释历史、结论状态、未确定项和引用证据；点击引用可打开生成时保存的源码快照。移动光标或切换文件后，面板按新的函数刷新。
+
+打开或刷新面板不会生成回答、联网或发送模型请求。没有已保存解释时会明确显示空状态；如需生成解释，请使用现有的显式命令和确认流程。
+
 ## Skill 与其它 IDE
 
 源码仓库的 `.cursor/skills/intentlens/SKILL.md` 提供显式 Skill 入口；其它宿主按自己的目录约定加载同一个 Skill。Skill 和能启动本地进程的 IDE 可运行 `intentlens integration-info` 获取 JSON 协议，调用 `capture-event`、`inspect`、`rounds` 等。这里只交付 VS Code 原生扩展及通用 CLI，不声称所有 IDE 已有原生扩展。
