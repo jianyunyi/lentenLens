@@ -9,6 +9,7 @@ const { createSessions } = require('./sessions');
 const { configureModel } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
 const { createCallPathProvider } = require('./callpath');
+const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page, escapeHTML } = require('./core');
 
@@ -18,6 +19,7 @@ function activate(context) {
   let callPathProvider;
   let callPathView;
   let callPathState;
+  let modelAnswerProvider;
   const indexDiagnostics = new Map();
   const sourcePanels = new Set();
   const indexBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 90);
@@ -41,6 +43,7 @@ function activate(context) {
     callPathState = undefined;
     inlineUI?.clear();
     callPathProvider?.clear();
+    modelAnswerProvider?.refresh();
     for (const view of [...sourcePanels]) view.dispose();
     invalidateIndex();
   }
@@ -85,7 +88,7 @@ function activate(context) {
     },
   });
   const recovery = createCaptureRecovery({ vscode, cli, sessions });
-  const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); };
+  const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); modelAnswerProvider?.refresh(); };
   async function openCurrent(folder, file, line = 1, column = 0) {
     trusted();
     const target = confinedPath(folder.uri.fsPath, file);
@@ -347,7 +350,10 @@ function activate(context) {
   context.subscriptions.push(treeChanged, lensesChanged, vscode.window.createTreeView('intentlens.rounds', { treeDataProvider: provider }));
   callPathProvider = createCallPathProvider(vscode);
   callPathView = vscode.window.createTreeView('intentlens.callPath', { treeDataProvider: callPathProvider });
-  context.subscriptions.push(callPathProvider, callPathView);
+  const modelAnswerChanged = new vscode.EventEmitter();
+  modelAnswerProvider = createModelAnswerProvider({ vscode, treeChanged: modelAnswerChanged, getCurrentTarget: getCurrentModelTarget });
+  const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });
+  context.subscriptions.push(callPathProvider, callPathView, modelAnswerChanged, modelAnswerView);
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
     async provideCodeLenses(document, token) {
@@ -373,6 +379,26 @@ function activate(context) {
     },
   }));
   function command(name, fn) { context.subscriptions.push(vscode.commands.registerCommand(`intentlens.${name}`, guard(fn))); }
+  async function getCurrentModelTarget() {
+    if (!vscode.workspace.isTrusted) return { message: '请先信任本地工作区；受限模式不会执行 CLI。' };
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return { message: '打开已保存的 Go 文件，并将光标放在需要查看的函数中。' };
+    if (editor.document.uri.scheme !== 'file' || editor.document.languageId !== 'go') return { message: '请切换到工作区内的 Go 源文件。' };
+    if (editor.document.isDirty) return { message: '请先保存当前 Go 文件；侧栏只读取磁盘上的静态源码。' };
+    const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+    if (!folder || folder.uri.scheme !== 'file') return { message: '当前 Go 文件不属于本地工作区。' };
+    const file = path.relative(folder.uri.fsPath, editor.document.uri.fsPath).split(path.sep).join('/');
+    confinedPath(folder.uri.fsPath, file);
+    const line = editor.selection.active.line + 1;
+    const version = editor.document.version;
+    const epoch = documentEpoch;
+    const info = await cli(folder, 'inspect', { file, line });
+    const active = vscode.window.activeTextEditor;
+    if (epoch !== documentEpoch || !active || active.document.uri.toString() !== editor.document.uri.toString() || active.selection.active.line + 1 !== line || active.document.version !== version || active.document.isDirty) {
+      return { message: '当前文件或光标已变化；请重新展开侧栏查看最新本地回答。' };
+    }
+    return { folder, file, line, info };
+  }
   async function focusCallPath() {
     if (callPathView?.show) { await callPathView.show(true); return; }
     if (vscode.commands.executeCommand) await vscode.commands.executeCommand('workbench.view.extension.intentlens');
@@ -399,6 +425,11 @@ function activate(context) {
   }
   command('callPath', loadCallPath);
   command('refreshCallPath', loadCallPath);
+  command('refreshModelAnswer', () => modelAnswerProvider?.refresh());
+  command('openModelEvidence', async (_folder, evidence) => {
+    if (!evidence || typeof evidence.source !== 'string') throw new Error('本地引用证据无效。');
+    await snapshot(evidence.source, evidence.file);
+  });
   command('openCallPathSite', async call => {
     if (!call || typeof call.file !== 'string' || !Number.isInteger(call.line) || call.line < 1 || !Number.isInteger(call.column) || call.column < 0 || call.column > 100000000) throw new Error('源码调用点证据无效。');
     const state = callPathState;
@@ -515,6 +546,8 @@ function activate(context) {
     panel('IntentLens · Claude Code hooks', nonce => page('Hook 配置预览', `<p>手动合并以下配置到 Claude Code 设置；保留已有 hooks。扩展不会覆盖设置。</p><p>确保 Claude Code 进程的 PATH 中有 intentlens 可执行文件。VS Code 的 intentlens.binaryPath 不会更改终端 PATH。配置后在新的 Claude Code 会话中验证 UserPromptSubmit / Stop。</p><pre>${escapeHTML(JSON.stringify(config, null, 2))}</pre>`, nonce), async () => {});
   });
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => { clearInline(); refresh(); }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
+  if (vscode.window.onDidChangeActiveTextEditor) context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => modelAnswerProvider?.refresh()));
+  if (vscode.window.onDidChangeTextEditorSelection) context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => modelAnswerProvider?.refresh()));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
     if (event.document.uri.scheme === 'file' && event.contentChanges.length) clearInline();
   }));

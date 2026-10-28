@@ -8,9 +8,9 @@
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "main": "./src/extension.js",
-  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath"],
+  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onView:intentlens.modelAnswer", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath", "onCommand:intentlens.refreshModelAnswer"],
   "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "Views are available; CLI execution requires workspace trust." }, "virtualWorkspaces": { "supported": false } },
-  "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/callpath.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js" },
+  "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/callpath.js && node --check src/sidebar.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js" },
   "contributes": {
     "commands": [
       { "command": "intentlens.exercises", "title": "IntentLens: 查看本地练习与评分" },
@@ -20,6 +20,7 @@
       { "command": "intentlens.inspectDetails", "title": "IntentLens: 打开函数完整详情与历史" },
       { "command": "intentlens.callPath", "title": "IntentLens: 显示调用路径" },
       { "command": "intentlens.refreshCallPath", "title": "IntentLens: 刷新调用路径", "icon": "$(refresh)" },
+      { "command": "intentlens.refreshModelAnswer", "title": "IntentLens: 刷新模型回答与证据", "icon": "$(refresh)" },
       { "command": "intentlens.refresh", "title": "IntentLens: 刷新轮次与 CodeLens" },
       { "command": "intentlens.indexStatus", "title": "IntentLens: 查看索引范围与遗漏原因" },
       { "command": "intentlens.startRound", "title": "IntentLens: 开始记录本轮修改", "description": "以当前磁盘状态开始一个本地轮次" },
@@ -32,9 +33,27 @@
       { "command": "intentlens.hooksConfig", "title": "IntentLens: 预览 Claude Code Hook 配置" }
     ],
     "viewsContainers": { "activitybar": [{ "id": "intentlens", "title": "IntentLens", "icon": "./media/callpath.svg" }] },
-    "views": { "explorer": [{ "id": "intentlens.rounds", "name": "IntentLens · 轮次" }], "intentlens": [{ "id": "intentlens.callPath", "name": "调用路径（源码证据）" }] },
-    "viewsWelcome": [{ "view": "intentlens.rounds", "contents": "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\n[开始记录](command:intentlens.startRound)\n[结束记录](command:intentlens.stopRound)\n[恢复未结束轮次](command:intentlens.resumeRound)\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)" }, { "view": "intentlens.callPath", "contents": "在本地 Go 文件中放置光标后加载调用路径；受限工作区不会执行 CLI。\n[显示调用路径](command:intentlens.callPath)\n[刷新调用路径](command:intentlens.refreshCallPath)" }],
-    "menus": { "view/title": [{ "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" }, { "command": "intentlens.refreshCallPath", "when": "view == intentlens.callPath", "group": "navigation" }, { "command": "intentlens.startRound", "when": "view == intentlens.rounds", "group": "capture@1" }, { "command": "intentlens.stopRound", "when": "view == intentlens.rounds", "group": "capture@2" }, { "command": "intentlens.resumeRound", "when": "view == intentlens.rounds", "group": "capture@3" }, { "command": "intentlens.cancelRound", "when": "view == intentlens.rounds", "group": "capture@4" }] },
+    "views": {
+      "explorer": [{ "id": "intentlens.rounds", "name": "IntentLens · 轮次" }],
+      "intentlens": [
+        { "id": "intentlens.callPath", "name": "调用路径（源码证据）" },
+        { "id": "intentlens.modelAnswer", "name": "模型回答与证据" }
+      ]
+    },
+    "viewsWelcome": [
+      { "view": "intentlens.rounds", "contents": "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\n[开始记录](command:intentlens.startRound)\n[结束记录](command:intentlens.stopRound)\n[恢复未结束轮次](command:intentlens.resumeRound)\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)" },
+      { "view": "intentlens.callPath", "contents": "在本地 Go 文件中放置光标后加载调用路径；受限工作区不会执行 CLI。\n[显示调用路径](command:intentlens.callPath)\n[刷新调用路径](command:intentlens.refreshCallPath)" },
+      { "view": "intentlens.modelAnswer", "contents": "只读显示当前函数已保存在本地的回答、历史版本和引用证据。打开或刷新视图不会发起模型请求。\n[刷新模型回答与证据](command:intentlens.refreshModelAnswer)" }
+    ],
+    "menus": { "view/title": [
+      { "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" },
+      { "command": "intentlens.refreshCallPath", "when": "view == intentlens.callPath", "group": "navigation" },
+      { "command": "intentlens.refreshModelAnswer", "when": "view == intentlens.modelAnswer", "group": "navigation" },
+      { "command": "intentlens.startRound", "when": "view == intentlens.rounds", "group": "capture@1" },
+      { "command": "intentlens.stopRound", "when": "view == intentlens.rounds", "group": "capture@2" },
+      { "command": "intentlens.resumeRound", "when": "view == intentlens.rounds", "group": "capture@3" },
+      { "command": "intentlens.cancelRound", "when": "view == intentlens.rounds", "group": "capture@4" }
+    ] },
     "configuration": { "title": "IntentLens", "properties": { "intentlens.binaryPath": { "type": "string", "default": "", "scope": "machine-overridable", "restricted": true, "description": "IntentLens executable path. Empty uses bundled bin/intentlens(.exe), then PATH. No shell arguments." } } }
   }
 }
