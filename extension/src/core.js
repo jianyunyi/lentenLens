@@ -6,17 +6,18 @@ const { coverageLines } = require('./coverage');
 
 function runCLI(binary, root, command, input = {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: process.env });
-    let stdout = '', stderr = '', size = 0, settled = false, terminationError;
+    const child = (options.spawnProcess || spawn)(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: process.env, signal: options.signal });
+    let stdout = '', stderr = '', size = 0, settled = false, terminationError, childError;
     const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
     const timer = setTimeout(() => { terminationError = new Error('IntentLens CLI timed out'); child.kill(); }, options.timeout || 180000);
-    child.on('error', error => finish(error));
+    child.on('error', error => { childError = error; });
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', data => { size += Buffer.byteLength(data); if (size > 32 * 1024 * 1024) { terminationError = new Error('CLI response exceeds 32 MiB'); child.kill(); } else stdout += data; });
     child.stderr.on('data', data => { if (stderr.length < 8192) stderr += data.toString(); });
     child.on('close', code => {
       if (settled) return;
+      if (childError) return finish(childError);
       if (terminationError) return finish(terminationError);
       let value;
       try { value = JSON.parse(stdout); } catch { return finish(new Error(`CLI returned invalid JSON (exit ${code}): ${stderr.slice(0, 500)}`)); }

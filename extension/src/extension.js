@@ -61,13 +61,13 @@ function activate(context) {
     const chosen = await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })), { placeHolder: '选择本次操作的工作区根目录' });
     return chosen?.folder;
   }
-  async function cli(folder, command, input) {
+  async function cli(folder, command, input, options = {}) {
     trusted();
     const configured = vscode.workspace.getConfiguration('intentlens', folder.uri).get('binaryPath', '');
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000 });
+    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal });
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
     return result;
   }
@@ -353,7 +353,7 @@ function activate(context) {
   const modelAnswerChanged = new vscode.EventEmitter();
   modelAnswerProvider = createModelAnswerProvider({ vscode, treeChanged: modelAnswerChanged, getCurrentTarget: getCurrentModelTarget });
   const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });
-  context.subscriptions.push(callPathProvider, callPathView, modelAnswerChanged, modelAnswerView);
+  context.subscriptions.push(callPathProvider, callPathView, modelAnswerProvider, modelAnswerChanged, modelAnswerView);
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
     async provideCodeLenses(document, token) {
@@ -379,7 +379,7 @@ function activate(context) {
     },
   }));
   function command(name, fn) { context.subscriptions.push(vscode.commands.registerCommand(`intentlens.${name}`, guard(fn))); }
-  async function getCurrentModelTarget() {
+  async function getCurrentModelTarget({ signal } = {}) {
     if (!vscode.workspace.isTrusted) return { message: '请先信任本地工作区；受限模式不会执行 CLI。' };
     const editor = vscode.window.activeTextEditor;
     if (!editor) return { message: '打开已保存的 Go 文件，并将光标放在需要查看的函数中。' };
@@ -392,7 +392,7 @@ function activate(context) {
     const line = editor.selection.active.line + 1;
     const version = editor.document.version;
     const epoch = documentEpoch;
-    const info = await cli(folder, 'inspect', { file, line });
+    const info = await cli(folder, 'inspect', { file, line }, { signal });
     const active = vscode.window.activeTextEditor;
     if (epoch !== documentEpoch || !active || active.document.uri.toString() !== editor.document.uri.toString() || active.selection.active.line + 1 !== line || active.document.version !== version || active.document.isDirty) {
       return { message: '当前文件或光标已变化；请重新展开侧栏查看最新本地回答。' };
