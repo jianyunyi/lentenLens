@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
 let core;
 try { core = require('../src/core'); } catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
 test('CLI bridge preserves JSON and root with spaces without a shell', async t => {
@@ -50,6 +52,57 @@ test('CLI bridge terminates a running local process when its signal is aborted',
   await new Promise(resolve => setTimeout(resolve, 25));
   controller.abort();
   await assert.rejects(request, error => error.name === 'AbortError' || error.code === 'ABORT_ERR');
+});
+test('CLI bridge waits for child close after abort error before temp-directory cleanup', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-abort-close-'));
+  const heldPath = path.join(root, 'child-held.txt');
+  let heldFd = fs.openSync(heldPath, 'w');
+  let child, childClosed = false;
+  const closeChild = () => {
+    if (childClosed) return;
+    if (heldFd !== undefined) { fs.closeSync(heldFd); heldFd = undefined; }
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    childClosed = true;
+    child.emit('close', null, 'SIGTERM');
+  };
+  t.after(() => {
+    if (child) closeChild();
+    else if (heldFd !== undefined) fs.closeSync(heldFd);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const controller = new AbortController();
+  const spawnProcess = (_binary, _args, { signal }) => {
+    child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    signal.addEventListener('abort', () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      error.code = 'ABORT_ERR';
+      child.emit('error', error);
+    }, { once: true });
+    return child;
+  };
+  let settled = false;
+  const request = core.runCLI(process.execPath, root, 'inspect', {}, {
+    signal: controller.signal,
+    spawnProcess,
+  }).finally(() => { settled = true; });
+
+  controller.abort();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'AbortError must remain pending until child close');
+  assert.notEqual(heldFd, undefined, 'the simulated child resource stays open before close');
+
+  closeChild();
+  await assert.rejects(request, error => error.name === 'AbortError' || error.code === 'ABORT_ERR');
+  assert.equal(heldFd, undefined);
+  assert.doesNotThrow(() => fs.rmSync(root, { recursive: true, force: false }));
 });
 test('rendering escapes hostile source and claims and separates historical source', () => {
   assert.ok(core, 'core module implemented');
