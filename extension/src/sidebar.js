@@ -11,30 +11,84 @@ function placeholder(vscode, message) {
   return item;
 }
 
-function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget }) {
+const CANCELLED = Symbol('cancelled');
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+}
+
+function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debounceMs = 150, schedule = setTimeout, cancelScheduled = clearTimeout }) {
   let currentTarget;
   let targetLoaded = false;
   let generation = 0;
+  let pending;
+  let disposed = false;
   const state = vscode.TreeItemCollapsibleState;
 
+  function cancelPending() {
+    const request = pending;
+    if (!request) return;
+    pending = undefined;
+    if (request.timer !== undefined) cancelScheduled(request.timer);
+    request.controller?.abort();
+    request.resolve(CANCELLED);
+  }
+
   function refresh() {
+    if (disposed) return;
     generation++;
     targetLoaded = false;
     currentTarget = undefined;
+    cancelPending();
     treeChanged.fire(undefined);
   }
 
-  async function target() {
-    if (!targetLoaded) {
-      const requestedGeneration = generation;
-      const value = await getCurrentTarget();
-      if (requestedGeneration === generation) {
-        currentTarget = value;
-        targetLoaded = true;
+  function target(requestedGeneration) {
+    if (disposed || requestedGeneration !== generation) return Promise.resolve(CANCELLED);
+    if (targetLoaded) return Promise.resolve(currentTarget);
+    if (pending?.generation === requestedGeneration) return pending.promise;
+    cancelPending();
+
+    let resolveRequest, rejectRequest;
+    const request = {
+      generation: requestedGeneration,
+      timer: undefined,
+      controller: undefined,
+      promise: new Promise((resolve, reject) => { resolveRequest = resolve; rejectRequest = reject; }),
+      resolve: value => resolveRequest(value),
+      reject: error => rejectRequest(error),
+    };
+    pending = request;
+    request.timer = schedule(() => {
+      request.timer = undefined;
+      if (disposed || pending !== request || request.generation !== generation) {
+        request.resolve(CANCELLED);
+        return;
       }
-      return value;
-    }
-    return currentTarget;
+      const controller = new AbortController();
+      request.controller = controller;
+      Promise.resolve()
+        .then(() => getCurrentTarget({ signal: controller.signal }))
+        .then(value => {
+          if (disposed || pending !== request || request.generation !== generation || controller.signal.aborted) {
+            request.resolve(CANCELLED);
+            return;
+          }
+          currentTarget = value;
+          targetLoaded = true;
+          pending = undefined;
+          request.resolve(value);
+        }, error => {
+          if (disposed || pending !== request || request.generation !== generation || controller.signal.aborted || isAbortError(error)) {
+            if (pending === request) pending = undefined;
+            request.resolve(CANCELLED);
+            return;
+          }
+          pending = undefined;
+          request.reject(error);
+        });
+    }, debounceMs);
+    return request.promise;
   }
 
   function explanationItem(entry, index, active) {
@@ -77,12 +131,22 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget }) {
     onDidChangeTreeData: treeChanged.event,
     getTreeItem: item => item,
     refresh,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      generation++;
+      targetLoaded = false;
+      currentTarget = undefined;
+      cancelPending();
+    },
     async getChildren(item) {
+      if (disposed) return [];
       try {
         if (!item) {
           const requestedGeneration = generation;
-          const active = await target();
-          if (requestedGeneration !== generation) return [placeholder(vscode, '当前文件或光标已变化，请重新展开侧栏。')];
+          const active = await target(requestedGeneration);
+          if (disposed) return [];
+          if (requestedGeneration !== generation || active === CANCELLED) return [placeholder(vscode, '当前文件或光标已变化，请重新展开侧栏。')];
           if (!active) return [placeholder(vscode, '打开已保存的 Go 文件，并将光标放在需要查看的函数中。')];
           if (active.message) return [placeholder(vscode, active.message)];
           const fn = active.info?.function;
@@ -118,6 +182,8 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget }) {
         }
         return [];
       } catch (error) {
+        if (disposed) return [];
+        if (isAbortError(error)) return [placeholder(vscode, '当前文件或光标已变化，请重新展开侧栏。')];
         return [placeholder(vscode, `无法读取本地模型回答：${error.message || String(error)}`)];
       }
     },

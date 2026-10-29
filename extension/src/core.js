@@ -6,7 +6,7 @@ const { coverageLines } = require('./coverage');
 
 function runCLI(binary, root, command, input = {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: process.env });
+    const child = spawn(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: process.env, signal: options.signal });
     let stdout = '', stderr = '', size = 0, settled = false, terminationError;
     const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
     const timer = setTimeout(() => { terminationError = new Error('IntentLens CLI timed out'); child.kill(); }, options.timeout || 180000);

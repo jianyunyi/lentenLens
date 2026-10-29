@@ -40,6 +40,17 @@ test('CLI bridge preserves UTF-8 across stream chunks and rejects malformed or s
   await assert.rejects(core.runCLI(process.execPath, root, 'invalid', {}, { prefixArgs: [script] }), /invalid JSON/);
   await assert.rejects(core.runCLI(process.execPath, root, 'wait', {}, { prefixArgs: [script], timeout: 100 }), /timed out/);
 });
+test('CLI bridge terminates a running local process when its signal is aborted', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-abort-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const script = path.join(root, 'wait.cjs');
+  fs.writeFileSync(script, 'setTimeout(() => {}, 10000);');
+  const controller = new AbortController();
+  const request = core.runCLI(process.execPath, root, 'inspect', {}, { prefixArgs: [script], signal: controller.signal });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  controller.abort();
+  await assert.rejects(request, error => error.name === 'AbortError' || error.code === 'ABORT_ERR');
+});
 test('rendering escapes hostile source and claims and separates historical source', () => {
   assert.ok(core, 'core module implemented');
   const hostile = '<img src=x onerror="alert(1)">';
