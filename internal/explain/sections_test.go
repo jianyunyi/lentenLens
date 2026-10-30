@@ -15,7 +15,7 @@ func TestClaimSectionsPreserveEvidenceChecks(t *testing.T) {
 		if calls == 2 {
 			text = `{"checks":[{"claim_id":"a","status":"supported"},{"claim_id":"b","status":"unsupported"},{"claim_id":"c","status":"uncertain"}]}`
 		}
-		json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]string{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 2, "output_tokens": 2}})
+		json.NewEncoder(w).Encode(map[string]any{"stop_reason": "end_turn", "content": []any{map[string]string{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 2, "output_tokens": 2}})
 	}))
 	doc, _, err := Run(context.Background(), Config{Enabled: true, Model: "fixture", Endpoint: "https://model.invalid", HTTPTransport: server, TokenLimit: 1000000}, Usage{}, "key", "fixture", []Evidence{{ID: "e", Source: "return 1"}})
 	if err != nil {

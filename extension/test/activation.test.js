@@ -9,14 +9,15 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   const file = path.join(__dirname, '../src/extension.js');
   assert.ok(fs.existsSync(file), 'extension entry exists');
   const registrations = [], commands = new Map();
-  const cliCalls = [], errors = [];
+  const cliCalls = [], errors = [], infos = [];
+  let modelResult = { tested: true, actual_tokens: 9, fallback: false, project_data_sent: false };
   const disposable = { dispose() {} };
   const state = new Map();
   const workspaceState = { get: key => state.get(key), update: (key, value) => { if (value === undefined) state.delete(key); else state.set(key, value); return Promise.resolve(); } };
   const folder = { name: 'fixture', uri: { scheme: 'file', fsPath: '/fixture/project' } };
   const vscode = {
     workspace: { isTrusted: false, workspaceFolders: [], getConfiguration: () => ({ get: () => '' }), createFileSystemWatcher: () => ({ ...disposable, onDidCreate: () => disposable, onDidChange: () => disposable, onDidDelete: () => disposable }), onDidChangeTextDocument: () => ({ dispose() {} }), onDidGrantWorkspaceTrust: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable, workspaceState },
-    window: { createTreeView: name => { registrations.push(name); return disposable; }, showErrorMessage: message => errors.push(message), showWarningMessage: async () => '发送此模型的测试请求', showInformationMessage() {} },
+    window: { createTreeView: name => { registrations.push(name); return disposable; }, showErrorMessage: message => errors.push(message), showWarningMessage: async () => '发送此模型的测试请求', showInformationMessage: message => infos.push(message) },
     commands: { registerCommand: (name, fn) => { commands.set(name, fn); return disposable; } },
     languages: { registerCodeLensProvider: selector => { registrations.push(selector); return disposable; } },
     EventEmitter: class { event = () => {}; fire() {} dispose() {} },
@@ -27,7 +28,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   core.runCLI = async (_binary, _root, command, input, options) => {
     cliCalls.push({ command, input, options });
     if (command === 'status') return { settings: { model: { enabled: true, provider: 'openai-compatible', base_url: 'https://api.fixture/v1', model: 'returned-model-id', api_key_env: 'INTENTLENS_API_KEY' } }, usage: {} };
-    if (command === 'test-model') return { actual_tokens: 9 };
+    if (command === 'test-model') return modelResult;
     throw new Error(`unexpected CLI command ${command}`);
   };
   Module._load = function (id, ...args) { return id === 'vscode' ? vscode : original.call(this, id, ...args); };
@@ -64,5 +65,9 @@ test('extension registers testModel in manifest, activates it, and dispatches to
     assert.deepEqual(cliCalls[1].input, {});
     assert.equal(cliCalls[1].options.env.INTENTLENS_API_KEY, 'fixture-api-key');
     assert.deepEqual(errors, []);
+    assert.match(infos[0], /返回完整且符合固定格式/);
+    modelResult = { tested: false, actual_tokens: 9, fallback: false, project_data_sent: false };
+    await commands.get('intentlens.testModel')();
+    assert.match(errors[0], /未确认模型返回完整/);
   } finally { Module._load = original; core.runCLI = originalRunCLI; }
 });

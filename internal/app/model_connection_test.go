@@ -113,3 +113,60 @@ func TestTestModelChecksBudgetBeforeRequest(t *testing.T) {
 		t.Fatal("request sent despite insufficient token reserve")
 	}
 }
+
+func TestTestModelAcceptsCombinedTextPartsAcrossProviders(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		response string
+	}{
+		{"anthropic", `{"stop_reason":"end_turn","content":[{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"text","text":"ok\"}"}],"usage":{"input_tokens":1,"output_tokens":1}}`},
+		{"openai", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"text","text":"ok\"}"}]}}],"usage":{"total_tokens":2}}`},
+		{"openai-compatible", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"text","text":"ok\"}"}]}}],"usage":{"total_tokens":2}}`},
+		{"gemini", `{"candidates":[{"finishReason":"STOP","content":{"parts":[{"thought":true,"text":"not answer"},{"text":"{\"intentlens_connection_test\":\""},{"text":"ok\"}"}]}}],"usageMetadata":{"totalTokenCount":2}}`},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			a, _ := fixture(t)
+			hits := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer server.Close()
+			t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-api-key")
+			cfg := Settings{Model: explain.Config{Enabled: true, Provider: tc.provider, BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
+			if err := a.Configure(cfg, true); err != nil {
+				t.Fatal(err)
+			}
+			tokens, err := a.TestModel(context.Background())
+			if err != nil || tokens != 2 || hits != 1 {
+				t.Fatalf("tokens=%d requests=%d err=%v", tokens, hits, err)
+			}
+			usage, err := a.Usage()
+			if err != nil || usage.ActualTokens != 2 || usage.UncertainTokens != 0 {
+				t.Fatalf("usage not settled after complete response: %+v %v", usage, err)
+			}
+		})
+	}
+}
+
+func TestTestModelDoesNotAcceptExtraTextOrObjectFieldsAsComplete(t *testing.T) {
+	a, _ := fixture(t)
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"intentlens_connection_test\":\"ok\",\"extra\":\"partial\"}"}}],"usage":{"total_tokens":2}}`))
+	}))
+	defer server.Close()
+	t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-api-key")
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
+	if err := a.Configure(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.TestModel(context.Background()); err == nil || !strings.Contains(err.Error(), "未完整匹配固定探针文本") {
+		t.Fatalf("unexpected success or unclear partial-response error: %v", err)
+	}
+	usage, err := a.Usage()
+	if err != nil || hits != 1 || usage.ActualTokens != 0 || usage.UncertainTokens != explain.ConnectionTestReservation() {
+		t.Fatalf("failed probe not conservatively accounted: requests=%d usage=%+v err=%v", hits, usage, err)
+	}
+}
