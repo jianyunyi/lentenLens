@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 )
 
 type ExecutionPlan struct {
@@ -27,6 +26,8 @@ type ExecutionPlan struct {
 	Limits       string              `json:"limits"`
 	Digest       string              `json:"digest"`
 }
+
+const exerciseExecutionLimits = "执行已关闭：当前没有经过验证的 OS 沙箱；任何确认或旧授权都不会启动本机 Go 测试。"
 
 func (a *App) PrepareExecution(id string) (ExecutionPlan, error) {
 	e, err := a.loadExercise(id)
@@ -60,7 +61,7 @@ func (a *App) PrepareExecution(id string) (ExecutionPlan, error) {
 	if err != nil {
 		return ExecutionPlan{}, err
 	}
-	plan := ExecutionPlan{ExerciseID: id, Version: e.Version, Tool: tool, Args: exercise.Args(), Directories: []string{}, Workspace: answer, Scope: append(exercise.Scope(files), exercise.Scope(exercise.Files(e.Spec, true))...), SourceDigest: exercise.Hash(files), PolicyHash: policy.Hash(), Platform: runtime.GOOS + "/" + runtime.GOARCH, Limits: "只执行本题单包 Go 测试；测试超时 10s，单进程总超时 60s，输出上限 1 MiB；模块下载关闭，不继承模型密钥。独立目录只隔离文件，不是 OS 沙箱，无法保证代码不访问网络或目录外资源。"}
+	plan := ExecutionPlan{ExerciseID: id, Version: e.Version, Tool: tool, Args: exercise.Args(), Directories: []string{}, Workspace: answer, Scope: append(exercise.Scope(files), exercise.Scope(exercise.Files(e.Spec, true))...), SourceDigest: exercise.Hash(files), PolicyHash: policy.Hash(), Platform: runtime.GOOS + "/" + runtime.GOARCH, Limits: exerciseExecutionLimits}
 	for _, stage := range []string{"baseline", "missing", "reference", "answer-check"} {
 		plan.Directories = append(plan.Directories, filepath.Join(dir, stage))
 	}
@@ -68,125 +69,8 @@ func (a *App) PrepareExecution(id string) (ExecutionPlan, error) {
 	return plan, nil
 }
 
-// resetExerciseStage touches only a named child of the canonical private exercise directory.
-func resetExerciseStage(base, dir string, files map[string]string) error {
-	if filepath.Dir(dir) != base || !contained(base, dir) {
-		return errors.New("执行目录越界")
-	}
-	if info, err := os.Lstat(dir); err == nil {
-		if !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
-			return errors.New("执行目录不能是链接")
-		}
-		resolved, err := filepath.EvalSymlinks(dir)
-		if err != nil || resolved != dir {
-			return errors.New("执行路径不安全")
-		}
-		if err = os.RemoveAll(dir); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return exercise.Materialize(dir, files)
-}
-func (a *App) RunExercise(ctx context.Context, id, previewDigest string, confirmed bool, mode string) (ExerciseDisplay, error) {
-	if mode != "validate" && mode != "score" {
-		return ExerciseDisplay{}, errors.New("未知执行模式")
-	}
-	unlock, err := a.lock("exercise")
-	if err != nil {
-		return ExerciseDisplay{}, err
-	}
-	defer unlock()
-	plan, err := a.PrepareExecution(id)
-	if err != nil {
-		return ExerciseDisplay{}, err
-	}
-	if plan.Digest != previewDigest {
-		return ExerciseDisplay{}, errors.New("命令、目录、依赖或范围变化，请重新预览并确认执行")
-	}
-	var previous ExecutionPlan
-	if !confirmed {
-		if a.read("exercise-auth-"+id+".json", &previous) != nil || previous.Digest != plan.Digest {
-			return ExerciseDisplay{}, errors.New("尚未确认本次练习的命令、目录与执行范围")
-		}
-	} else if err = a.write("exercise-auth-"+id+".json", plan); err != nil {
-		return ExerciseDisplay{}, err
-	}
-	e, err := a.loadExercise(id)
-	if err != nil {
-		return ExerciseDisplay{}, err
-	}
-	dir, err := a.exerciseDirectory(id)
-	if err != nil {
-		return ExerciseDisplay{}, err
-	}
-	run := func(stage int, files map[string]string) (exercise.Result, error) {
-		if _, err := a.loadExercise(id); err != nil {
-			return exercise.Result{}, err
-		}
-		policy, err := capture.LoadPolicy(a.Root)
-		if err != nil || policy.Hash() != plan.PolicyHash {
-			return exercise.Result{}, errors.New("执行前排除范围变化，请重新确认")
-		}
-		if err := resetExerciseStage(dir, plan.Directories[stage], files); err != nil {
-			return exercise.Result{}, err
-		}
-		return exercise.Run(ctx, plan.Tool, plan.Directories[stage], filepath.Join(dir, "cache")), nil
-	}
-	if mode == "validate" {
-		validation := ExerciseValidation{Status: "failed", Version: e.Version, Results: []exercise.Result{}, Execution: &plan}
-		base, err := run(0, e.Spec.Baseline)
-		if err != nil {
-			return ExerciseDisplay{}, err
-		}
-		validation.Results = append(validation.Results, base)
-		red, err := run(1, exercise.Files(e.Spec, false))
-		if err != nil {
-			return ExerciseDisplay{}, err
-		}
-		validation.Results = append(validation.Results, red)
-		if len(e.Spec.Reference) > 0 {
-			green, err := run(2, exercise.Files(e.Spec, true))
-			if err != nil {
-				return ExerciseDisplay{}, err
-			}
-			validation.Results = append(validation.Results, green)
-			if exercise.Validated(e.Spec, base, red, green) {
-				validation.Status = "validated"
-			}
-		} else {
-			validation.Status = "unverified_reference_unavailable"
-		}
-		if _, err = a.loadExercise(id); err != nil {
-			return ExerciseDisplay{}, err
-		}
-		if err = a.write("exercise-validation-"+id+".json", validation); err != nil {
-			return ExerciseDisplay{}, err
-		}
-	} else {
-		files, err := a.readExerciseAnswer(e, plan.Workspace)
-		if err != nil {
-			return ExerciseDisplay{}, err
-		}
-		if exercise.Hash(files) != plan.SourceDigest {
-			return ExerciseDisplay{}, errors.New("作答代码在确认后变化，请重新预览并确认执行")
-		}
-		result, err := run(3, files)
-		if err != nil {
-			return ExerciseDisplay{}, err
-		}
-		view, err := a.ExerciseView(id)
-		if err != nil {
-			return view, err
-		}
-		attempt := ExerciseAttempt{ID: newID(), Version: e.Version, Created: time.Now().UTC().Format(time.RFC3339Nano), Files: files, Result: result, Behavior: exercise.Behavior(e.Spec, result), Provisional: view.Validation.Status != "validated", Feedback: "尚未请求模型理由反馈；测试结果不代表完全理解", Execution: plan}
-		view.Attempts = append(view.Attempts, attempt)
-		if err = a.write("exercise-attempts-"+id+".json", view.Attempts); err != nil {
-			return view, err
-		}
-	}
-	return a.ExerciseView(id)
+func (a *App) RunExercise(_ context.Context, _ string, _ string, _ bool, _ string) (ExerciseDisplay, error) {
+	return ExerciseDisplay{}, exercise.ErrSandboxUnavailable
 }
 
 type ExerciseChange struct {
@@ -242,6 +126,9 @@ func (a *App) PrepareExerciseApply(id string) (ExerciseApply, error) {
 		plan.Changes = append(plan.Changes, ExerciseChange{path, baseline, src})
 	}
 	sort.Slice(plan.Changes, func(i, j int) bool { return plan.Changes[i].File < plan.Changes[j].File })
+	if len(plan.Changes) > 1 {
+		return ExerciseApply{}, errors.New("多文件应用已关闭；一次仅允许单个源码文件，未改动任何文件")
+	}
 	if len(plan.Changes) == 0 {
 		return plan, errors.New("没有可应用的源码修改")
 	}

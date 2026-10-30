@@ -43,11 +43,16 @@ func TestReliabilityProcessHelper(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a.applyFault = func(int) error { os.Exit(93); return nil }
+		a.applyFault = func(index int) error {
+			if mode == "apply-crash" {
+				os.Exit(93)
+			}
+			return nil
+		}
 		if mode == "apply-stage-crash" {
 			a.applyStageFault = func() error { os.Exit(94); return nil }
 		}
-		if err = a.applyChanges(ExerciseApply{PolicyHash: policy.Hash(), Changes: []ExerciseChange{{"a.go", "old-a", "new-a"}, {"b.go", "old-b", "new-b"}}}); err != nil {
+		if err = a.applyChanges(ExerciseApply{PolicyHash: policy.Hash(), Changes: []ExerciseChange{{"a.go", "old-a", "new-a"}}}); err != nil {
 			t.Fatal(err)
 		}
 		t.Fatal("crash was not reached")
@@ -189,19 +194,18 @@ func TestCorruptBudgetAndConsentStayFailClosed(t *testing.T) {
 
 func TestApplyCrashRecoveryAndExternalConflict(t *testing.T) {
 	for _, conflict := range []bool{false, true} {
-		t.Run(fmt.Sprint(conflict), func(t *testing.T) {
+		t.Run(fmt.Sprintf("conflict=%t", conflict), func(t *testing.T) {
 			a, root := fixture(t)
 			put(t, root, "a.go", "old-a")
-			put(t, root, "b.go", "old-b")
 			cmd := helperCommand(t, "apply-crash", root, filepath.Dir(a.State))
 			out, err := cmd.CombinedOutput()
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() != 93 {
 				t.Fatalf("crash helper failed: %v %s", err, out)
 			}
-			b, _ := os.ReadFile(filepath.Join(root, "a.go"))
-			if string(b) != "new-a" {
-				t.Fatal("fixture did not crash after first replacement")
+			after, _ := os.ReadFile(filepath.Join(root, "a.go"))
+			if string(after) != "new-a" {
+				t.Fatal("fixture did not crash after the single-file replacement")
 			}
 			if conflict {
 				put(t, root, "a.go", "external-edit")
@@ -211,8 +215,8 @@ func TestApplyCrashRecoveryAndExternalConflict(t *testing.T) {
 				if err == nil {
 					t.Fatal("external conflict silently overwritten")
 				}
-				b, _ = os.ReadFile(filepath.Join(root, "a.go"))
-				if string(b) != "external-edit" {
+				after, _ = os.ReadFile(filepath.Join(root, "a.go"))
+				if string(after) != "external-edit" {
 					t.Fatal("external edit overwritten")
 				}
 				if _, err = os.Stat(filepath.Join(a.State, applyJournalName)); err != nil {
@@ -222,11 +226,9 @@ func TestApplyCrashRecoveryAndExternalConflict(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, name := range []string{"a", "b"} {
-					b, _ = os.ReadFile(filepath.Join(root, name+".go"))
-					if string(b) != "old-"+name {
-						t.Fatal("partial application not restored")
-					}
+				after, _ = os.ReadFile(filepath.Join(root, "a.go"))
+				if string(after) != "old-a" {
+					t.Fatal("single-file application was not restored")
 				}
 				if _, err = os.Stat(filepath.Join(a.State, applyJournalName)); !errors.Is(err, os.ErrNotExist) {
 					t.Fatal("completed recovery retained journal")
@@ -236,24 +238,44 @@ func TestApplyCrashRecoveryAndExternalConflict(t *testing.T) {
 	}
 }
 
-func TestApplyFailureRollsBackAndPreservesPermissions(t *testing.T) {
+func TestApplyRejectsMultipleFilesWithoutAnyWrite(t *testing.T) {
 	a, root := fixture(t)
 	put(t, root, "a.go", "old-a")
 	put(t, root, "b.go", "old-b")
+	policy, err := capture.LoadPolicy(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := ExerciseApply{PolicyHash: policy.Hash(), Changes: []ExerciseChange{{"a.go", "old-a", "new-a"}, {"b.go", "old-b", "new-b"}}}
+	if err = a.applyChanges(plan); err == nil || !strings.Contains(err.Error(), "多文件应用已关闭") {
+		t.Fatalf("multi-file apply was not rejected: %v", err)
+	}
+	for _, name := range []string{"a", "b"} {
+		got, readErr := os.ReadFile(filepath.Join(root, name+".go"))
+		if readErr != nil || string(got) != "old-"+name {
+			t.Fatalf("refusal partially modified %s.go: %q %v", name, got, readErr)
+		}
+	}
+	if _, err = os.Stat(filepath.Join(a.State, applyJournalName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refusal created or retained an apply journal: %v", err)
+	}
+}
+
+func TestApplyFailureRollsBackAndPreservesPermissions(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "a.go", "old-a")
 	if err := os.Chmod(filepath.Join(root, "a.go"), 0640); err != nil {
 		t.Fatal(err)
 	}
 	policy, _ := capture.LoadPolicy(root)
-	plan := ExerciseApply{PolicyHash: policy.Hash(), Changes: []ExerciseChange{{"a.go", "old-a", "new-a"}, {"b.go", "old-b", "new-b"}}}
+	plan := ExerciseApply{PolicyHash: policy.Hash(), Changes: []ExerciseChange{{"a.go", "old-a", "new-a"}}}
 	a.applyFault = func(int) error { return errors.New("injected failure") }
 	if err := a.applyChanges(plan); err == nil {
 		t.Fatal("injected failure ignored")
 	}
-	for _, name := range []string{"a", "b"} {
-		b, _ := os.ReadFile(filepath.Join(root, name+".go"))
-		if string(b) != "old-"+name {
-			t.Fatal("failed write changed source")
-		}
+	b, _ := os.ReadFile(filepath.Join(root, "a.go"))
+	if string(b) != "old-a" {
+		t.Fatal("failed write changed source")
 	}
 	a.applyFault = nil
 	if err := a.applyChanges(plan); err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"intentlens/internal/exercise"
 	"intentlens/internal/explain"
 	"os"
@@ -28,56 +29,45 @@ func seedExercise(t *testing.T, a *App, root string) Exercise {
 	}
 	return e
 }
-func TestExerciseAuthorizationValidationScoreAndApply(t *testing.T) {
+
+func TestExecutionPlanStatesRunnerIsClosed(t *testing.T) {
 	a, root := fixture(t)
 	e := seedExercise(t, a, root)
 	plan, err := a.PrepareExecution(e.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, false, "validate"); err == nil {
-		t.Fatal("executed without consent")
+	if exercise.OSSandboxAvailable() || !strings.Contains(plan.Limits, "执行已关闭") || !strings.Contains(plan.Limits, "没有经过验证的 OS 沙箱") {
+		t.Fatalf("closed sandbox status missing: %q", plan.Limits)
 	}
-	view, err := a.RunExercise(context.Background(), e.ID, plan.Digest, true, "validate")
+}
+
+func TestExerciseRunFailsClosedAndSingleFileApplyWorks(t *testing.T) {
+	a, root := fixture(t)
+	e := seedExercise(t, a, root)
+	plan, err := a.PrepareExecution(e.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Validation.Status != "validated" {
-		t.Fatalf("validation: %+v", view.Validation)
+	for _, confirmed := range []bool{false, true} {
+		if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, confirmed, "validate"); !errors.Is(err, exercise.ErrSandboxUnavailable) {
+			t.Fatalf("runner was not fail-closed for confirmed=%t: %v", confirmed, err)
+		}
 	}
-	view, err = a.RunExercise(context.Background(), e.ID, plan.Digest, false, "score")
-	if err != nil {
+	for _, name := range []string{"exercise-auth-" + e.ID + ".json", "exercise-validation-" + e.ID + ".json", "exercise-attempts-" + e.ID + ".json"} {
+		if _, err = os.Stat(filepath.Join(a.State, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("closed run created %s", name)
+		}
+	}
+	if err = os.WriteFile(filepath.Join(plan.Workspace, "main.go"), []byte(e.Spec.Reference["main.go"]), 0600); err != nil {
 		t.Fatal(err)
-	}
-	if view.Attempts[0].Result.Passed {
-		t.Fatal("unmodified answer passed")
-	}
-	if err = os.WriteFile(filepath.Join(view.Workspace, "main.go"), []byte(e.Spec.Reference["main.go"]), 0600); err != nil {
-		t.Fatal(err)
-	}
-	changedPlan, err := a.PrepareExecution(e.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changedPlan.Digest == plan.Digest {
-		t.Fatal("source changes did not invalidate the execution plan")
-	}
-	if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, false, "score"); err == nil {
-		t.Fatal("stale preview was accepted after source changed")
-	}
-	if _, err = a.RunExercise(context.Background(), e.ID, changedPlan.Digest, false, "score"); err == nil {
-		t.Fatal("previous authorization was reused for changed source")
-	}
-	view, err = a.RunExercise(context.Background(), e.ID, changedPlan.Digest, true, "score")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !view.Attempts[len(view.Attempts)-1].Result.Passed {
-		t.Fatal("reference answer failed")
 	}
 	preview, err := a.PrepareExerciseApply(e.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(preview.Changes) != 1 {
+		t.Fatalf("expected a single-file application preview, got %d files", len(preview.Changes))
 	}
 	if err = a.ConfirmExerciseApply(e.ID, preview.Digest, false); err == nil {
 		t.Fatal("unconfirmed apply")
@@ -90,7 +80,38 @@ func TestExerciseAuthorizationValidationScoreAndApply(t *testing.T) {
 		t.Fatal("answer not applied")
 	}
 }
-func TestExerciseViewHidesReferenceAndChangedTestsCannotPass(t *testing.T) {
+
+func TestPrepareExerciseApplyRejectsMultipleFilesWithoutChangingSources(t *testing.T) {
+	a, root := fixture(t)
+	e := seedExercise(t, a, root)
+	e.Spec.Baseline["helper.go"] = "package p\nfunc Helper() int { return 0 }\n"
+	e.Spec.Reference["helper.go"] = "package p\nfunc Helper() int { return 1 }\n"
+	e.Version = exercise.Version(e.Spec)
+	put(t, root, "helper.go", e.Spec.Baseline["helper.go"])
+	if err := a.write("exercise-"+e.ID+".json", e); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := a.PrepareExecution(e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, plan.Workspace, "main.go", e.Spec.Reference["main.go"])
+	put(t, plan.Workspace, "helper.go", e.Spec.Reference["helper.go"])
+	if _, err = a.PrepareExerciseApply(e.ID); err == nil || !strings.Contains(err.Error(), "多文件应用已关闭") {
+		t.Fatalf("multi-file preview was not rejected: %v", err)
+	}
+	for name, want := range map[string]string{"main.go": e.Spec.Baseline["main.go"], "helper.go": e.Spec.Baseline["helper.go"]} {
+		got, readErr := os.ReadFile(filepath.Join(root, name))
+		if readErr != nil || string(got) != want {
+			t.Fatalf("preview refusal changed %s: %q %v", name, got, readErr)
+		}
+	}
+	if _, err = os.Stat(filepath.Join(a.State, applyJournalName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preview refusal created an apply journal: %v", err)
+	}
+}
+
+func TestExerciseViewHidesReferenceAndRunFailsClosed(t *testing.T) {
 	a, root := fixture(t)
 	e := seedExercise(t, a, root)
 	v, err := a.ExerciseView(e.ID)
@@ -103,15 +124,8 @@ func TestExerciseViewHidesReferenceAndChangedTestsCannotPass(t *testing.T) {
 	if raw["reference"] != nil || v.Spec.Reference != nil {
 		t.Fatal("reference disclosed")
 	}
-	plan, err := a.PrepareExecution(e.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(plan.Workspace, exercise.AcceptanceFile), []byte("package p"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, true, "score"); err == nil {
-		t.Fatal("tampered tests accepted")
+	if _, err = a.RunExercise(context.Background(), e.ID, "", true, "score"); !errors.Is(err, exercise.ErrSandboxUnavailable) {
+		t.Fatalf("runner was not fail-closed: %v", err)
 	}
 }
 
@@ -120,13 +134,6 @@ func TestExerciseScopeConflictFlagAndVersionBoundaries(t *testing.T) {
 	e := seedExercise(t, a, root)
 	plan, err := a.PrepareExecution(e.ID)
 	if err != nil {
-		t.Fatal(err)
-	}
-	put(t, plan.Workspace, "extra_test.go", "package p\n")
-	if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, true, "score"); err == nil {
-		t.Fatal("expanded scope accepted")
-	}
-	if err = os.Remove(filepath.Join(plan.Workspace, "extra_test.go")); err != nil {
 		t.Fatal(err)
 	}
 	put(t, plan.Workspace, "main.go", e.Spec.Reference["main.go"])
@@ -176,7 +183,8 @@ func TestExerciseSharingAndRevocationKeepPersonalStateLocal(t *testing.T) {
 	if _, err = a.PrepareExerciseShare(e.ID); err == nil {
 		t.Fatal("unvalidated exercise shared")
 	}
-	if _, err = a.RunExercise(context.Background(), e.ID, plan.Digest, true, "validate"); err != nil {
+	validation := ExerciseValidation{Status: "validated", Version: e.Version, Results: []exercise.Result{}}
+	if err = a.write("exercise-validation-"+e.ID+".json", validation); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.write("exercise-attempts-"+e.ID+".json", []ExerciseAttempt{{ID: newID(), Version: e.Version, Reason: "PRIVATE_REASON", Feedback: "PRIVATE_FEEDBACK", Files: map[string]string{"main.go": "PRIVATE_ANSWER"}}}); err != nil {

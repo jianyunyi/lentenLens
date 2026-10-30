@@ -4,9 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 )
 
 func fixture() Spec {
@@ -37,39 +35,6 @@ func TestSpecRejectsExternalImportsAndUnsafeChanges(t *testing.T) {
 	}
 }
 
-func TestRealValidationAndScore(t *testing.T) {
-	s := fixture()
-	base := t.TempDir()
-	tool, err := Tool()
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := func(name string, files map[string]string) Result {
-		dir := filepath.Join(base, name)
-		if err := Materialize(dir, files); err != nil {
-			t.Fatal(err)
-		}
-		return Run(context.Background(), tool, dir, filepath.Join(base, "cache"))
-	}
-	original := run("original", s.Baseline)
-	red := run("red", Files(s, false))
-	green := run("green", Files(s, true))
-	if !Validated(s, original, red, green) {
-		t.Fatalf("validation failed: %+v %+v %+v", original, red, green)
-	}
-	if len(Behavior(s, green)) != 1 || Behavior(s, green)[0].Status != "pass" {
-		t.Fatal("score wrong")
-	}
-	s.Acceptance = strings.ReplaceAll(s.Acceptance, "Value(-1)", "Undefined(-1)")
-	broken := run("broken", Files(s, false))
-	if Validated(s, original, broken, green) {
-		t.Fatal("compile failure accepted as expected red")
-	}
-	if _, err := os.Stat(filepath.Join(base, "original", "go.mod")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestVersionBindsRequirementsBaselineAndTests(t *testing.T) {
 	s := fixture()
 	first := Version(s)
@@ -89,41 +54,28 @@ func TestVersionBindsRequirementsBaselineAndTests(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsChangedToolBeforeExecution(t *testing.T) {
-	tool, err := Tool()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tool.SHA256[0] == '0' {
-		tool.SHA256 = "1" + tool.SHA256[1:]
-	} else {
-		tool.SHA256 = "0" + tool.SHA256[1:]
-	}
+func TestRunFailsClosedWithoutVerifiedSandbox(t *testing.T) {
 	base := t.TempDir()
 	cache := filepath.Join(base, "cache")
-	result := Run(context.Background(), tool, filepath.Join(base, "missing-workspace"), cache)
-	if result.Passed || result.Failure != "tool_changed" {
-		t.Fatalf("changed tool was not rejected: %+v", result)
+	result := Run(context.Background(), Executable{Path: filepath.Join(base, "must-not-start")}, filepath.Join(base, "missing-workspace"), cache)
+	if result.Passed || result.Failure != "sandbox_unavailable" || result.ExitCode != -1 {
+		t.Fatalf("runner did not fail closed: %+v", result)
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
-		t.Fatal("tool identity failure created an execution cache")
+		t.Fatalf("closed runner created cache or child-process state: %v", err)
 	}
 }
 
-func TestRunnerCancellationNeverReportsPassing(t *testing.T) {
-	tool, err := Tool()
-	if err != nil {
-		t.Fatal(err)
+func TestClosedSandboxGateDoesNotInvokeChildProcessCallback(t *testing.T) {
+	childStarted := false
+	result := runWhenSandboxVerified(false, func() Result {
+		childStarted = true
+		return Result{Passed: true}
+	})
+	if childStarted {
+		t.Fatal("closed sandbox gate invoked the child-process callback")
 	}
-	base := t.TempDir()
-	dir := filepath.Join(base, "run")
-	if err = Materialize(dir, fixture().Baseline); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	result := Run(ctx, tool, dir, filepath.Join(base, "cache"))
-	if result.Passed || result.Failure != "timeout" {
-		t.Fatalf("cancelled run reported %+v", result)
+	if result.Passed || result.Failure != "sandbox_unavailable" {
+		t.Fatalf("closed sandbox gate returned unexpected result: %+v", result)
 	}
 }
