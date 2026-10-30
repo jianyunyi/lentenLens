@@ -3,8 +3,32 @@
   "displayName": "IntentLens",
   "description": "Go function explanations tied to local source evidence and round snapshots.",
   "version": "0.5.2",
-  "publisher": "intentlens-local",
-  "license": "UNLICENSED",
+  "publisher": "intentlens",
+  "license": "MIT",
+  "author": {
+    "name": "IntentLens Contributors",
+    "email": "16671100373@163.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jianyunyi/lentenLens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jianyunyi/lentenLens/issues",
+    "email": "16671100373@163.com"
+  },
+  "homepage": "https://github.com/jianyunyi/lentenLens#readme",
+  "keywords": [
+    "go",
+    "golang",
+    "ai",
+    "code-analysis",
+    "code-understanding",
+    "documentation",
+    "explanations",
+    "llm",
+    "code-review"
+  ],
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "main": "./src/extension.js",

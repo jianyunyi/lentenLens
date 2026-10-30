@@ -1,0 +1,218 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.5.3)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  discussions: write
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      
+      - name: Verify go.mod
+        run: |
+          $goModVersion = Select-String -Path go.mod -Pattern '^go\s+(\d+\.\d+\.\d+)' | ForEach-Object { $_.Matches.Groups[1].Value }
+          if ($goModVersion -ne "1.24.0") {
+            Write-Error "go.mod must declare Go 1.24.0"
+            exit 1
+          }
+      
+      - name: Run all tests
+        run: |
+          go test -race ./...
+          go vet ./...
+      
+      - name: Run extension tests
+        working-directory: extension
+        run: |
+          npm test
+          npm run check
+      
+      - name: Verify version consistency
+        shell: pwsh
+        run: |
+          $packageJson = Get-Content extension/package.json | ConvertFrom-Json
+          $packageVersion = $packageJson.version
+          $tagVersion = "${{ github.ref_name }}".TrimStart('v')
+          
+          if ($packageVersion -ne $tagVersion) {
+            Write-Error "Version mismatch: package.json=$packageVersion, tag=$tagVersion"
+            exit 1
+          }
+
+  build:
+    name: Build Release Artifacts
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.3'
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      
+      - name: Install @vsce/vsce
+        run: npm install -g @vscode/vsce@4.0.0
+      
+      - name: Build release package
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1 -OutputDirectory dist
+      
+      - name: Verify package integrity
+        shell: pwsh
+        working-directory: dist
+        run: |
+          if (-not (Test-Path "intentlens-*.vsix")) {
+            Write-Error "VSIX package not found"
+            exit 1
+          }
+          
+          if (-not (Test-Path "manifest.json")) {
+            Write-Error "Manifest not found"
+            exit 1
+          }
+          
+          if (-not (Test-Path "intentlens.exe")) {
+            Write-Error "CLI executable not found"
+            exit 1
+          }
+      
+      - name: Generate checksums
+        shell: pwsh
+        working-directory: dist
+        run: |
+          Get-ChildItem -File | ForEach-Object {
+            $hash = Get-FileHash -Algorithm SHA256 -Path $_.FullName
+            "$($hash.Hash.ToLower())  $($_.Name)" | Out-File -Append -Encoding utf8 SHA256SUMS.txt
+          }
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/*
+          retention-days: 90
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist
+      
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_NUMBER="${VERSION#v}"
+          
+          # Extract changelog section for this version
+          awk "/## \[$VERSION_NUMBER\]/,/## \[/" CHANGELOG.md | sed '$d' > release-notes.md
+          
+          # If empty, use unreleased section
+          if [ ! -s release-notes.md ]; then
+            awk '/## \[Unreleased\]/,/## \[/' CHANGELOG.md | sed '$d' > release-notes.md
+          fi
+          
+          # Add warning if pre-release
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            echo "⚠️ **This is a pre-release version. Use with caution.**" | cat - release-notes.md > temp && mv temp release-notes.md
+          fi
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            dist/*.vsix
+            dist/*.exe
+            dist/manifest.json
+            dist/SHA256SUMS.txt
+          draft: false
+          prerelease: ${{ inputs.prerelease || false }}
+          discussion_category_name: Announcements
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update latest release tag
+        if: ${{ !inputs.prerelease }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f latest
+          git push origin latest --force
+
+  publish-marketplace:
+    name: Publish to VS Code Marketplace (Manual)
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: false  # Disabled by default - enable when ready
+    environment:
+      name: vscode-marketplace
+    steps:
+      - name: Placeholder
+        run: |
+          echo "VS Code Marketplace publishing is disabled"
+          echo "To enable:"
+          echo "1. Create a Personal Access Token at https://dev.azure.com"
+          echo "2. Add it as VSCE_PAT secret"
+          echo "3. Set 'if: false' to 'if: true' in this job"
+          echo "4. Run: vsce publish --packagePath dist/*.vsix"
+
+  notify:
+    name: Notify Release
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify on success
+        if: needs.create-release.result == 'success'
+        run: |
+          echo "✅ Release ${{ github.ref_name }} published successfully!"
+          echo "Download: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+      
+      - name: Notify on failure
+        if: needs.create-release.result != 'success'
+        run: |
+          echo "❌ Release ${{ github.ref_name }} failed!"
+          exit 1

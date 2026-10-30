@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write  # For CodeQL
+  pull-requests: write    # For PR comments
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Go format check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Go files are not formatted:"
+            gofmt -l .
+            exit 1
+          fi
+      
+      - name: Go vet
+        run: go vet ./...
+      
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+  test:
+    name: ${{ matrix.os }} / Go + extension
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Go tests
+        run: go test ./...
+      - name: Go vet
+        run: go vet ./...
+      - name: Synthetic capture performance check
+        run: go test -run '^$' -bench '^BenchmarkTakeGoSynthetic$' -benchtime=1x -benchmem ./internal/capture
+
+      - name: Extension tests (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: extension
+        run: npm.cmd test
+      - name: Extension tests (Unix)
+        if: runner.os != 'Windows'
+        working-directory: extension
+        run: npm test
+
+      - name: Extension syntax checks (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: extension
+        run: npm.cmd run check
+      - name: Extension syntax checks (Unix)
+        if: runner.os != 'Windows'
+        working-directory: extension
+        run: npm run check
+
+      - name: Offline preflight tests
+        working-directory: extension
+        run: node --test ../scripts/preflight.test.cjs
+
+      - name: Generate coverage report (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          go test -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -html=coverage.out -o coverage.html
+      
+      - name: Upload coverage to Codecov (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      
+      - name: Upload coverage artifacts (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.out
+            coverage.html
+          retention-days: 30

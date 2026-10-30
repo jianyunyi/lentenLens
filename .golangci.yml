@@ -1,0 +1,96 @@
+run:
+  timeout: 10m
+  modules-download-mode: readonly
+  skip-dirs:
+    - .git
+    - .github
+    - .work
+    - vendor
+    - node_modules
+    - scripts/release-tools/node_modules
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Standard Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis
+    - unused        # Find unused code
+    - gofmt         # Check formatting
+    - goimports     # Check imports
+    - misspell      # Find misspellings
+    - gocritic      # Comprehensive checks
+    - gocyclo       # Check cyclomatic complexity
+    - dupl          # Find duplicated code
+    - gosec         # Security issues
+    - unconvert     # Unnecessary conversions
+    - unparam       # Unused function parameters
+    - prealloc      # Slice preallocation
+    - nolintlint    # Linter directive issues
+  disable:
+    - typecheck     # Can be flaky with generics
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  govet:
+    check-shadowing: true
+    enable-all: true
+  
+  gocyclo:
+    min-complexity: 15
+  
+  dupl:
+    threshold: 100
+  
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (covered by errcheck)
+      - G304  # File path injection (too many false positives)
+  
+  misspell:
+    locale: US
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - commentFormatting
+      - whyNoLint
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - gocritic
+    
+    # Exclude known issues in auto-generated code
+    - path: extension/
+      linters:
+        - all
+    
+    # Exclude specific issues
+    - linters:
+        - staticcheck
+      text: "SA1019:"  # Ignore deprecation warnings for now
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true

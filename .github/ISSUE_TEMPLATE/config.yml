@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/jianyunyi/lentenLens/discussions
+    about: Ask questions, share ideas, or discuss with the community
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/jianyunyi/lentenLens/security/advisories/new
+    about: Report security vulnerabilities privately (or email 16671100373@163.com)
+  - name: 📖 Documentation
+    url: https://github.com/jianyunyi/lentenLens#readme
+    about: Read the documentation and guides
