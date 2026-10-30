@@ -263,7 +263,7 @@ func handleHook(in io.Reader, state string) {
 			if err == nil && cfg.Model.Enabled {
 				executable, err := os.Executable()
 				if err == nil {
-					cmd := exec.Command(executable, "analyze-round", "--root", a.Root, "--state", filepath.Dir(a.State), "--round", r.ID)
+					cmd := exec.Command(executable, "analyze-round", "--root", a.Root, "--state", filepath.Dir(a.State), "--round", r.ID) // #nosec G204 G702 -- executable is this process; arguments are passed separately without a shell.
 					hideWindow(cmd)
 					if err = cmd.Start(); err == nil {
 						_ = cmd.Process.Release()
@@ -278,7 +278,9 @@ func handleHook(in io.Reader, state string) {
 	}
 	if e != nil {
 		b, _ := json.Marshal(map[string]string{"time": time.Now().UTC().Format(time.RFC3339), "event": event.Event, "error": e.Error()})
-		_ = os.WriteFile(filepath.Join(a.State, "hook-diagnostic.json"), b, 0600)
+		if writeErr := os.WriteFile(filepath.Join(a.State, "hook-diagnostic.json"), b, 0o600); writeErr != nil { // #nosec G703 -- a.State is canonical and the diagnostic filename is constant.
+			return
+		}
 	}
 }
 

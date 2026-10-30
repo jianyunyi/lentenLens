@@ -116,7 +116,11 @@ func newID() string {
 }
 
 func (a *App) read(name string, v any) error {
-	info, e := os.Lstat(filepath.Join(a.State, name))
+	if !filepath.IsLocal(name) || filepath.Base(name) != name {
+		return errors.New("本地记录文件名无效")
+	}
+	path := filepath.Join(a.State, name)
+	info, e := os.Lstat(path) // #nosec G703 -- name is restricted to one local filename under the private state directory.
 	if e != nil {
 		return e
 	}
@@ -126,7 +130,7 @@ func (a *App) read(name string, v any) error {
 	if info.Size() > maxStateRecordBytes {
 		return errors.New("本地记录超过读取范围")
 	}
-	b, e := os.ReadFile(filepath.Join(a.State, name))
+	b, e := os.ReadFile(path) // #nosec G304 G703 -- path uses the same validated local filename under the private state directory.
 	if e != nil {
 		return e
 	}

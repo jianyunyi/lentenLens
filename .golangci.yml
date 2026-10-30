@@ -1,96 +1,103 @@
+version: "2"
+
 run:
-  timeout: 10m
   modules-download-mode: readonly
-  skip-dirs:
-    - .git
-    - .github
-    - .work
-    - vendor
-    - node_modules
-    - scripts/release-tools/node_modules
 
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
-    - govet         # Standard Go vet
-    - ineffassign   # Detect ineffectual assignments
-    - staticcheck   # Advanced static analysis
-    - unused        # Find unused code
-    - gofmt         # Check formatting
-    - goimports     # Check imports
-    - misspell      # Find misspellings
-    - gocritic      # Comprehensive checks
-    - gocyclo       # Check cyclomatic complexity
-    - dupl          # Find duplicated code
-    - gosec         # Security issues
-    - unconvert     # Unnecessary conversions
-    - unparam       # Unused function parameters
-    - prealloc      # Slice preallocation
-    - nolintlint    # Linter directive issues
-  disable:
-    - typecheck     # Can be flaky with generics
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  
-  govet:
-    check-shadowing: true
-    enable-all: true
-  
-  gocyclo:
-    min-complexity: 15
-  
-  dupl:
-    threshold: 100
-  
-  gosec:
-    excludes:
-      - G104  # Audit errors not checked (covered by errcheck)
-      - G304  # File path injection (too many false positives)
-  
-  misspell:
-    locale: US
-  
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-    disabled-checks:
-      - commentFormatting
-      - whyNoLint
+    - dupl
+    - gocritic
+    - gocyclo
+    - gosec
+    - misspell
+    - nolintlint
+    - prealloc
+    - unconvert
+    - unparam
+  settings:
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    gocritic:
+      disabled-checks:
+        - commentFormatting
+        - whyNoLint
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    gocyclo:
+      min-complexity: 15
+    gosec:
+      excludes:
+        - G104 # unchecked close errors are covered by errcheck
+        - G304 # filesystem paths are constrained by the application state roots
+    govet:
+      enable-all: true
+      enable:
+        - shadow
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - gocritic
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - all
+        path: extension/
+      - linters:
+          - staticcheck
+        text: 'SA1019:'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - '(^|/)\.git/'
+      - '^\.github/'
+      - '^\.work/'
+      - '^vendor/'
+      - '^node_modules/'
+      - '^scripts/release-tools/node_modules/'
 
 issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-        - gocritic
-    
-    # Exclude known issues in auto-generated code
-    - path: extension/
-      linters:
-        - all
-    
-    # Exclude specific issues
-    - linters:
-        - staticcheck
-      text: "SA1019:"  # Ignore deprecation warnings for now
-  
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
 
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - '(^|/)\.git/'
+      - '^\.github/'
+      - '^\.work/'
+      - '^vendor/'
+      - '^node_modules/'
+      - '^scripts/release-tools/node_modules/'
+
 output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
+  formats:
+    text:
+      path: stdout
+      colors: true
+      print-issued-lines: true
+      print-linter-name: true
