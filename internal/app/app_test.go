@@ -19,6 +19,16 @@ func fixture(t *testing.T) (*App, string) {
 	return a, root
 }
 
+func TestReadRejectsNonLocalName(t *testing.T) {
+	a, _ := fixture(t)
+	for _, name := range []string{"../outside.json", filepath.Join("nested", "record.json"), ".."} {
+		var record map[string]any
+		if err := a.read(name, &record); err == nil {
+			t.Fatalf("read(%q) unexpectedly succeeded", name)
+		}
+	}
+}
+
 func TestIgnoreChangePurgesDiskAndDoesNotReappear(t *testing.T) {
 	a, root := fixture(t)
 	put(t, root, "secret.go", "package p\nfunc Secret() { println(\"PRIVATE_SENTINEL\") }\n")

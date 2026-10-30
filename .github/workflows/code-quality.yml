@@ -107,16 +107,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
       
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
-          args: --timeout=10m
+          version: v2.13
+          args: --timeout=10m --new-from-merge-base=origin/main
 
   test-coverage-check:
     name: Test Coverage Analysis

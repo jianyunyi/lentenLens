@@ -218,7 +218,7 @@ func (s *Store) Start() (Active, error) {
 
 func (s *Store) End() (Round, error) {
 	var result Round
-	err := s.transact(func(st *state, p capture.Policy) error {
+	err := s.transact(func(st *state, _ capture.Policy) error {
 		if st.Active == nil {
 			return fmt.Errorf("no active round; run start before editing")
 		}
@@ -227,7 +227,7 @@ func (s *Store) End() (Round, error) {
 			return err
 		}
 		// Read policy again in Take; filter the baseline with that same latest policy.
-		p, err = capture.LoadPolicy(s.Root)
+		p, err := capture.LoadPolicy(s.Root)
 		if err != nil {
 			return err
 		}
