@@ -64,8 +64,8 @@ func (c Config) Resolved() (Config, error) {
 	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(c.APIKeyEnv) {
 		return c, errors.New("密钥环境变量名无效")
 	}
-	if c.Provider == "gemini" && c.Model != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`).MatchString(c.Model) {
-		return c, errors.New("Gemini 模型 ID 应为名称，不含 URL 或 models/ 前缀")
+	if c.Provider == "gemini" && c.Model != "" && !regexp.MustCompile(`^(models/)?[A-Za-z0-9][A-Za-z0-9._-]*$`).MatchString(c.Model) {
+		return c, errors.New("Gemini 模型 ID 应为模型名称或 API 返回的 models/<name> 资源名")
 	}
 	return c, nil
 }
@@ -94,7 +94,11 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 		}
 		payload[field] = outputLimit
 	case "gemini":
-		endpoint += "/models/" + cfg.Model + ":generateContent"
+		modelResource := cfg.Model
+		if !strings.HasPrefix(modelResource, "models/") {
+			modelResource = "models/" + modelResource
+		}
+		endpoint += "/" + modelResource + ":generateContent"
 		payload = map[string]any{"systemInstruction": map[string]any{"parts": []any{map[string]string{"text": system}}}, "contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}, "generationConfig": map[string]any{"maxOutputTokens": outputLimit, "responseMimeType": "application/json"}}
 	}
 	if cfg.Provider == "openai-compatible" && (mode == ModeLight || mode == ModeFast) && isDeepSeekBaseURL(cfg.BaseURL) {

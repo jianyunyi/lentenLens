@@ -24,7 +24,7 @@ func integrationInfo() any {
 			"automatic_model_analysis": false,
 		},
 		"local_commands": []string{"start", "stop", "capture-status", "capture-abort", "rounds", "index", "inspect", "call-path", "status", "shared", "exercises", "exercise-view", "exercise-shared"},
-		"model_commands": []string{"explain", "analyze-round", "revise", "share-prepare", "exercise-generate", "exercise-feedback"},
+		"model_commands": []string{"explain", "analyze-round", "revise", "share-prepare", "exercise-generate", "exercise-feedback", "test-model"},
 		"round_analysis": "analyze-round --round <captured-round-id>, or stdin JSON {round_id: captured-round-id} when --round is omitted; requires project model consent and budget",
 		"claude_adapter": map[string]string{"configuration": "hooks-config", "event_command": "hook", "requirement": "optional; Claude lifecycle events only"},
 		"limitations": []string{

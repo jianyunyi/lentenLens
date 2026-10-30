@@ -44,9 +44,9 @@ CLI 对应命令为 `call-path`，输入与 `inspect` 相同：`{"file":"main.go
 
 源码或排除规则变化会移除内联内容，保存后重新点击加载。旧解释不会自动重写，需主动重新生成才能获得新的内容组织。
 
-默认只有本地证据。执行 `IntentLens: 启用或调整模型分析` 后选择 OpenAI、Anthropic、Gemini、DeepSeek、通义千问或其他兼容服务；填写 Base URL、准确模型 ID、密钥环境变量名、项目累计 token 上限，并选择复核策略（默认 `light`）。取消不保存。API 密钥通过启动 VS Code 时继承的指定环境变量提供；界面只输入变量名称，不输入密钥本身。修改环境变量后完全重启 VS Code。切换厂商不清空预算。`fast` 仅用于小范围且不做独立复核；较大输入自动升级为 `strict`。完整阈值说明位于项目源码的 `docs/verification-modes.md`。
+默认只有本地证据。执行 `IntentLens: 启用或调整模型分析` 后选择 OpenAI、Anthropic、Gemini、DeepSeek、通义千问或其他兼容服务，填写 Base URL 并在密码输入框输入 API Key。确认后，扩展只向所选地址的 `GET /models` 发送模型列表请求；Key 仅放在该 provider 的认证请求头中，不传项目代码。模型 ID 必须从此次返回项中选择，不能手动填写或跳过查询；失败、空列表或取消都不保存。最终确认后 Key 存入 VS Code SecretStorage，配置文件只存模型 ID 与安全环境变量名。设置项目累计 token 上限并选择复核策略（默认 `light`）。切换厂商不清空预算。`fast` 仅用于小范围且不做独立复核；较大输入自动升级为 `strict`。完整阈值说明位于项目源码的 `docs/verification-modes.md`。
 
-基础地址不含末端 /chat/completions 或 /messages，远程必须 HTTPS，本机 loopback 可 HTTP。模型服务须支持对应文本协议和用量字段；不保证任意厂商/模型可用。当前不支持 Azure 部署专属路径、Responses-only、Bedrock 签名、Vertex OAuth。未知用量保留未决占用，没有自动重试。旧 Anthropic 配置继续兼容；真实账户未实测。
+基础地址不含末端 `/models`、`/chat/completions` 或 `/messages`，远程必须 HTTPS，本机 loopback 可 HTTP。Gemini 选择器保留 API 返回的 `models/<name>` 资源 ID。模型服务须支持对应文本协议和用量字段；不保证任意厂商/模型可用。当前不支持 Azure 部署专属路径、Responses-only、Bedrock 签名、Vertex OAuth。未知用量保留未决占用，没有自动重试。旧 Anthropic 配置继续兼容；真实账户未实测。
 
 函数面板支持生成解释和自由提问。解释按 claim 展示证据引用与 supported / unsupported / uncertain 状态，保留模型未能确认的内容。模型支持检查也可能出错。查看状态命令显示实际 token、保守未决占用与 CLI 返回的费用说明；token 上限不是货币费用上限。暂停命令阻止新的分析，已经发出的请求可能仍完成。
 

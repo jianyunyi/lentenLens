@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,14 @@ func TestHookConfigurationMatchesOfficialLifecycle(t *testing.T) {
 	}
 	if cfg.Hooks["UserPromptSubmit"] == nil || cfg.Hooks["Stop"] == nil {
 		t.Fatal("missing lifecycle events")
+	}
+}
+
+func TestTestModelCommandIsRegisteredAndDoesNotReadStdin(t *testing.T) {
+	var out bytes.Buffer
+	code := run([]string{"test-model", "--root", t.TempDir(), "--state", t.TempDir()}, failOnRead{}, &out)
+	if code == 0 || strings.Contains(out.String(), "未知命令") || !strings.Contains(out.String(), "显式配置模型") {
+		t.Fatalf("test-model command was not dispatched to its handler: exit=%d output=%s", code, out.String())
 	}
 }
 

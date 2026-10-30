@@ -15,13 +15,14 @@ func TestIntegrationInfoNeedsNeitherProjectNorInput(t *testing.T) {
 	var info struct {
 		Schema        int      `json:"schema"`
 		Entries       []string `json:"entries"`
+		ModelCommands []string `json:"model_commands"`
 		ModelRequired bool     `json:"model_required_for_local_evidence"`
 		Event         struct {
 			Command string   `json:"command"`
 			Events  []string `json:"events"`
 		} `json:"capture_event"`
 	}
-	if code != 0 || json.Unmarshal(out.Bytes(), &info) != nil || info.Schema != 1 || info.ModelRequired || strings.Join(info.Entries, ",") != "ide,skill,claude" || info.Event.Command != "capture-event" || strings.Join(info.Event.Events, ",") != "start,stop" {
+	if code != 0 || json.Unmarshal(out.Bytes(), &info) != nil || info.Schema != 1 || info.ModelRequired || strings.Join(info.Entries, ",") != "ide,skill,claude" || info.Event.Command != "capture-event" || strings.Join(info.Event.Events, ",") != "start,stop" || !strings.Contains(strings.Join(info.ModelCommands, ","), "test-model") {
 		t.Fatalf("invalid integration contract: %s", out.String())
 	}
 }
