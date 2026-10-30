@@ -1,0 +1,206 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly quality checks on Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  complexity:
+    name: Code Complexity Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Install gocyclo
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+      
+      - name: Check cyclomatic complexity
+        run: |
+          echo "## Cyclomatic Complexity Report" >> $GITHUB_STEP_SUMMARY
+          gocyclo -over 15 . >> complexity.txt || true
+          if [ -s complexity.txt ]; then
+            echo "⚠️ Found functions with high complexity (>15):" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat complexity.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ All functions have acceptable complexity" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  duplication:
+    name: Code Duplication Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Install dupl
+        run: go install github.com/mibk/dupl@latest
+      
+      - name: Check for duplicated code
+        run: |
+          echo "## Code Duplication Report" >> $GITHUB_STEP_SUMMARY
+          dupl -t 100 ./... > duplication.txt || true
+          if [ -s duplication.txt ]; then
+            echo "⚠️ Found duplicated code blocks:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat duplication.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ No significant code duplication found" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+
+  ineffassign:
+    name: Ineffectual Assignment Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Install ineffassign
+        run: go install github.com/gordonklaus/ineffassign@latest
+      
+      - name: Check for ineffectual assignments
+        run: ineffassign ./...
+
+  misspell:
+    name: Spelling Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Install misspell
+        run: go install github.com/client9/misspell/cmd/misspell@latest
+      
+      - name: Check for misspellings
+        run: |
+          misspell -error .
+
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=10m
+
+  test-coverage-check:
+    name: Test Coverage Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      
+      - name: Generate coverage report
+        run: |
+          go test -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -func=coverage.out > coverage.txt
+      
+      - name: Check coverage levels
+        run: |
+          echo "## Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 1 coverage.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          # Extract total coverage percentage
+          TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${TOTAL_COVERAGE}%"
+          
+          # Fail if coverage is below 70%
+          if (( $(echo "$TOTAL_COVERAGE < 70" | bc -l) )); then
+            echo "❌ Coverage is below 70% threshold" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ Coverage meets 70% threshold" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Generate coverage badge
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: coverage
+          fail_ci_if_error: false
+
+  documentation-check:
+    name: Documentation Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check for missing documentation
+        run: |
+          echo "## Documentation Check" >> $GITHUB_STEP_SUMMARY
+          
+          # Check for README in major directories
+          for dir in cmd internal extension scripts docs; do
+            if [ -d "$dir" ] && [ ! -f "$dir/README.md" ]; then
+              echo "⚠️ Missing README.md in $dir/" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          # Check for CHANGELOG updates
+          if git diff origin/main...HEAD --name-only | grep -v CHANGELOG.md > /dev/null; then
+            echo "⚠️ Code changes without CHANGELOG.md update" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Check markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/markdown-link-check-config.json'
+        continue-on-error: true
+
+  line-count:
+    name: Code Metrics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install cloc
+        run: sudo apt-get install -y cloc
+      
+      - name: Generate code statistics
+        run: |
+          echo "## Code Metrics" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cloc --exclude-dir=vendor,node_modules,.git,.work --md . >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
