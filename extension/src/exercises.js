@@ -1,26 +1,20 @@
 'use strict';
 const crypto = require('node:crypto');
 const { page, escapeHTML, confinedPath } = require('./core');
-const path = require('node:path');
-function isPathWithin(root, candidate) {
- if (typeof root !== 'string' || !root || typeof candidate !== 'string' || !candidate) return false;
- const relative = path.relative(path.resolve(root), path.resolve(candidate));
- return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-}
-const button = (action, text, index = '') => `<button data-action="${escapeHTML(action)}" data-index="${escapeHTML(index)}">${escapeHTML(text)}</button>`;
+const button = (action, text, index = '') => action === 'validate' || action === 'score' ? `<button disabled>${escapeHTML(text)}（执行关闭）</button>` : `<button data-action="${escapeHTML(action)}" data-index="${escapeHTML(index)}">${escapeHTML(text)}</button>`;
 const json = value => `<pre>${escapeHTML(JSON.stringify(value, null, 2))}</pre>`;
+const executionWarning = '<p><strong>执行已关闭：</strong>当前版本没有经过验证的 OS 沙箱，因此验证和评分不会启动 Go 测试代码。</p>';
 
 function renderExercise(view, nonce) {
  const spec=view.spec || {};
- return page(spec.title || '小修改练习', `<p>题目 ${escapeHTML(view.id)} · 版本 ${escapeHTML(view.version)}</p>${view.supersedes ? `<p>新版本源自 ${escapeHTML(view.supersedes)}；旧作答不迁移。</p>` : ''}<p>题目验证：${escapeHTML(view.validation?.status)}${view.needs_review ? ' · 依据需要复核' : ''}</p>${view.imported ? '<p>共享题目不含参考解，本地无法完成参考修改验证；评分保留暂定标记。</p>' : ''}<ul>${(spec.requirements || []).map(r=>`<li>${escapeHTML(r.text)} <small>固定测试 ${escapeHTML(r.test)}</small></li>`).join('')}</ul>${button('validate','验证题目')}${button('score','执行并评分')}${button('shareExercise','准备共享题目')}${button('apply','预览应用到原项目')}${view.source_id ? button('newVersion','重新生成题目版本') : ''}<h2>独立作答目录</h2><p>${escapeHTML(view.workspace)}</p><p>先确认执行范围并验证题目。只修改作答目录的源码，保存后再评分；这里不是 OS 沙箱。</p>${Object.keys(spec.baseline || {}).filter(p=>!p.endsWith('_test.go')).map(p=>button('openAnswer',p,p)).join('')}<details><summary>固定验收测试（修改后不能计原题通过）</summary><pre>${escapeHTML(spec.acceptance)}</pre></details><details><summary>题目验证执行记录：原测试 → 预期失败 → 参考修改</summary>${json(view.validation)}</details><h2>作答记录</h2>${(view.attempts || []).map((a,i)=>`<section><h3>${escapeHTML(a.created)} · ${escapeHTML(a.version)}</h3><p>${a.provisional ? '暂定反馈：题目验证未完整通过。' : '题目通过有限验证，仍需核对题意与测试质量。'}</p><h4>行为要求通过情况</h4>${json(a.behavior)}<h4>测试执行情况</h4>${json(a.result)}<details><summary>实际命令和范围</summary>${json(a.execution)}</details><h4>理由解释反馈（补充，不改变测试结果）</h4><p>${escapeHTML(a.feedback)}</p>${button('feedback','提交理由并获取模型反馈',String(i))}</section>`).join('')}<p>有限测试通过不能证明所有情形正确，也不代表已经完全理解。</p>`, nonce);
+	 return page(spec.title || '小修改练习', `<p>题目 ${escapeHTML(view.id)} · 版本 ${escapeHTML(view.version)}</p>${view.supersedes ? `<p>新版本源自 ${escapeHTML(view.supersedes)}；旧作答不迁移。</p>` : ''}<p>题目验证：${escapeHTML(view.validation?.status)}${view.needs_review ? ' · 依据需要复核' : ''}</p>${view.imported ? '<p>共享题目不含参考解，本地无法完成参考修改验证；评分保留暂定标记。</p>' : ''}<ul>${(spec.requirements || []).map(r=>`<li>${escapeHTML(r.text)} <small>固定测试 ${escapeHTML(r.test)}</small></li>`).join('')}</ul>${button('validate','验证题目')}${button('score','执行并评分')}${button('shareExercise','准备共享题目')}${button('apply','预览应用到原项目')}${view.source_id ? button('newVersion','重新生成题目版本') : ''}<h2>独立作答目录</h2><p>${escapeHTML(view.workspace)}</p>${executionWarning}<p>只修改作答目录的源码，保存后再评分。</p>${Object.keys(spec.baseline || {}).filter(p=>!p.endsWith('_test.go')).map(p=>button('openAnswer',p,p)).join('')}<details><summary>固定验收测试（修改后不能计原题通过）</summary><pre>${escapeHTML(spec.acceptance)}</pre></details><details><summary>题目验证执行记录：原测试 → 预期失败 → 参考修改</summary>${json(view.validation)}</details><h2>作答记录</h2>${(view.attempts || []).map((a,i)=>`<section><h3>${escapeHTML(a.created)} · ${escapeHTML(a.version)}</h3><p>${a.provisional ? '暂定反馈：题目验证未完整通过。' : '题目通过有限验证，仍需核对题意与测试质量。'}</p><h4>行为要求通过情况</h4>${json(a.behavior)}<h4>测试执行情况</h4>${json(a.result)}<details><summary>实际命令和范围</summary>${json(a.execution)}</details><h4>理由解释反馈（补充，不改变测试结果）</h4><p>${escapeHTML(a.feedback)}</p>${button('feedback','提交理由并获取模型反馈',String(i))}</section>`).join('')}<p>有限测试通过不能证明所有情形正确，也不代表已经完全理解。</p>`, nonce);
 }
 
 function createExerciseUI({vscode, cli, panel, folderFor}) {
- const approved = new Map();
  const nonce = () => crypto.randomBytes(18).toString('hex');
- function preview(folder,title,body,confirm) {
+ function preview(folder,title,body,confirm,confirmLabel='确认') {
   let busy=false;
-  const view=panel(title,n=>page(title,body+button('confirm','确认')+button('cancel','取消'),n),async message=>{
+  const view=panel(title,n=>page(title,body+button('confirm',confirmLabel)+button('cancel','取消'),n),async message=>{
    if(message.action==='cancel'){view.dispose();return;}
    if(message.action!=='confirm'||busy)return;busy=true;
    try{await confirm();view.dispose();}finally{busy=false;}
@@ -30,17 +24,15 @@ function createExerciseUI({vscode, cli, panel, folderFor}) {
   let record=initial, busy=false;
   const refresh=async()=>{record=await cli(folder,'exercise-view',{exercise_id:record.id});view.webview.html=renderExercise(record,nonce());};
   const view=panel('IntentLens · 小修改练习',n=>renderExercise(record,n),async message=>{
+   if(message.action==='validate'||message.action==='score'){
+    vscode.window.showWarningMessage?.('IntentLens：练习验证和评分已关闭；没有经过验证的 OS 沙箱，不会启动本机 Go 测试。');
+    return;
+   }
    if(busy)return;busy=true;
    try {
     await refresh();
     const input={exercise_id:record.id};
-    if(message.action==='validate'||message.action==='score') {
-     if(vscode.workspace?.textDocuments?.some(doc=>doc.isDirty&&isPathWithin(record.workspace,doc.uri?.fsPath)))throw new Error('请先保存作答目录中的文件。');
-     const plan=await cli(folder,'exercise-plan',input);
-     const run=async confirm=>{await cli(folder,'exercise-run',{...input,mode:message.action==='validate'?'validate':'score',preview_digest:plan.digest,confirm});approved.set(record.id,plan.digest);await refresh();};
-     if(approved.get(record.id)===plan.digest)await run(false);
-     else preview(folder,'确认练习执行范围',`<p>确认后，本题相同命令及范围可重复执行；新增文件、依赖、规则或工具变化须重新确认。</p>${json(plan)}`,()=>run(true));
-    } else if(message.action==='openAnswer') {
+    if(message.action==='openAnswer') {
      if(!Object.hasOwn(record.spec.baseline,message.index)||message.index.endsWith('_test.go'))return;
      await cli(folder,'exercise-plan',input);
      const path=confinedPath(record.workspace,message.index);

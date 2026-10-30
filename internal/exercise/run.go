@@ -1,26 +1,21 @@
 package exercise
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
-	"time"
 )
 
 type Executable struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
+
 type Result struct {
 	NoTests    bool              `json:"no_tests,omitempty"`
 	Passed     bool              `json:"passed"`
@@ -32,6 +27,7 @@ type Result struct {
 }
 
 func Args() []string { return []string{"test", "-json", "-count=1", "-timeout=10s", "."} }
+
 func Tool() (Executable, error) {
 	path, err := exec.LookPath("go")
 	if err != nil {
@@ -43,138 +39,44 @@ func Tool() (Executable, error) {
 	}
 	// Keep the absolute lookup path: Windows tool caches may be reached through
 	// junctions that EvalSymlinks cannot canonicalize across volumes. Hashing and
-	// verifying the executable at this same path still binds execution to its bytes.
+	// hashing the executable at this same path preserves a stable preview identity.
 	f, err := os.Open(path)
 	if err != nil {
-		return Executable{}, fmt.Errorf("open Go executable %q: %w", path, err)
+		return Executable{}, err
 	}
 	defer f.Close()
 	h := sha256.New()
 	if _, err = io.Copy(h, f); err != nil {
 		return Executable{}, err
 	}
-	return Executable{path, hex.EncodeToString(h.Sum(nil))}, nil
+	return Executable{Path: path, SHA256: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
-func verifyTool(tool Executable) error {
-	if !filepath.IsAbs(tool.Path) {
-		return errors.New("练习执行工具路径无效")
+var ErrSandboxUnavailable = errors.New("exercise-run 已关闭：当前没有经过验证的操作系统沙箱，不会启动本机 Go 测试")
+
+// There is deliberately no OS sandbox adapter in this version. Do not change
+// this to true unless a sandbox boundary is implemented and independently verified.
+const verifiedOSSandboxAvailable = false
+
+func OSSandboxAvailable() bool { return verifiedOSSandboxAvailable }
+
+// runWhenSandboxVerified is the single gate to any future execution callback.
+// A false or unverified sandbox must return without invoking code that could
+// start a child process.
+func runWhenSandboxVerified(verified bool, run func() Result) Result {
+	if !verified || run == nil {
+		return Result{
+			Failure:  "sandbox_unavailable",
+			Tests:    map[string]string{},
+			Expected: map[string]bool{},
+			ExitCode: -1,
+		}
 	}
-	expected, err := hex.DecodeString(tool.SHA256)
-	if err != nil || len(expected) != sha256.Size {
-		return errors.New("练习执行工具摘要无效")
-	}
-	f, err := os.Open(tool.Path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err = io.Copy(h, f); err != nil {
-		return err
-	}
-	if !bytes.Equal(h.Sum(nil), expected) {
-		return errors.New("Go 执行器在确认后发生变化")
-	}
-	return nil
+	return run()
 }
 
-type limitedOutput struct {
-	mu       sync.Mutex
-	b        bytes.Buffer
-	overflow bool
-}
-
-func (w *limitedOutput) Write(b []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.b.Len()+len(b) > 1<<20 {
-		w.overflow = true
-		return 0, errors.New("测试输出超过 1 MiB")
-	}
-	return w.b.Write(b)
-}
-func Run(ctx context.Context, tool Executable, dir, cache string) Result {
-	started := time.Now()
-	r := Result{Tests: map[string]string{}, Expected: map[string]bool{}, ExitCode: -1}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	if err := verifyTool(tool); err != nil {
-		r.Failure = "tool_changed"
-		r.DurationMS = time.Since(started).Milliseconds()
-		return r
-	}
-	if err := os.MkdirAll(cache, 0700); err != nil {
-		r.Failure = "environment_error"
-		return r
-	}
-	tmp := filepath.Join(cache, "tmp")
-	if err := os.MkdirAll(tmp, 0700); err != nil {
-		r.Failure = "environment_error"
-		return r
-	}
-	cmd := exec.CommandContext(ctx, tool.Path, Args()...)
-	cmd.Dir = dir
-	cmd.Env = []string{"GOPROXY=off", "GOSUMDB=off", "GOWORK=off", "GOENV=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0", "GOFLAGS=", "GOTELEMETRY=off", "GOCACHE=" + cache, "GOPATH=" + filepath.Join(cache, "gopath"), "HOME=" + cache, "USERPROFILE=" + cache, "TMP=" + tmp, "TEMP=" + tmp, "TMPDIR=" + tmp, "PATH=" + filepath.Dir(tool.Path)}
-	for _, key := range []string{"SystemRoot", "WINDIR"} {
-		if v := os.Getenv(key); v != "" {
-			cmd.Env = append(cmd.Env, key+"="+v)
-		}
-	}
-	configureProcess(cmd)
-	cmd.WaitDelay = 2 * time.Second
-	var output limitedOutput
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	err := cmd.Run()
-	r.DurationMS = time.Since(started).Milliseconds()
-	if cmd.ProcessState != nil {
-		r.ExitCode = cmd.ProcessState.ExitCode()
-	}
-	if ctx.Err() != nil {
-		r.Failure = "timeout"
-		return r
-	}
-	if output.overflow {
-		r.Failure = "output_limit"
-		return r
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(output.b.Bytes()))
-	scanner.Buffer(make([]byte, 4096), 1<<20)
-	packagePass := false
-	failedTest := false
-	for scanner.Scan() {
-		var event struct {
-			Action string
-			Test   string
-			Output string
-		}
-		if json.Unmarshal(scanner.Bytes(), &event) != nil {
-			continue
-		}
-		if event.Test != "" {
-			switch event.Action {
-			case "pass", "fail", "skip":
-				r.Tests[event.Test] = event.Action
-				if event.Action == "fail" {
-					failedTest = true
-				}
-			}
-			if bytes.Contains([]byte(event.Output), []byte(MissingMarker)) {
-				r.Expected[event.Test] = true
-			}
-		} else if event.Action == "skip" {
-			r.NoTests = true
-		} else if event.Action == "pass" {
-			packagePass = true
-		}
-	}
-	r.Passed = err == nil && (packagePass || r.NoTests) && scanner.Err() == nil
-	if !r.Passed {
-		r.Failure = "build_or_environment_error"
-		if failedTest {
-			r.Failure = "tests_failed"
-		}
-	}
-	return r
+// Run is intentionally fail-closed. A Go test process is native code execution,
+// not a sandbox; confirmation, timeouts, and environment filtering do not make it safe.
+func Run(_ context.Context, _ Executable, _, _ string) Result {
+	return runWhenSandboxVerified(verifiedOSSandboxAvailable, nil)
 }

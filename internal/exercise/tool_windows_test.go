@@ -4,6 +4,7 @@ package exercise
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -35,8 +36,12 @@ func TestToolThroughWindowsJunction(t *testing.T) {
 	if err := Materialize(dir, fixture().Baseline); err != nil {
 		t.Fatal(err)
 	}
-	result := Run(context.Background(), tool, dir, filepath.Join(base, "cache"))
-	if !result.Passed {
-		t.Fatalf("junction tool cannot execute: %+v", result)
+	cache := filepath.Join(base, "cache")
+	result := Run(context.Background(), tool, dir, cache)
+	if result.Passed || result.Failure != "sandbox_unavailable" {
+		t.Fatalf("runner did not remain closed: %+v", result)
+	}
+	if _, err = os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatalf("closed runner created an execution cache: %v", err)
 	}
 }

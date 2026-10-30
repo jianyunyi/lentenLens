@@ -133,6 +133,12 @@ func (a *App) recoverApply() error {
 }
 
 func (a *App) applyChanges(plan ExerciseApply) error {
+	if len(plan.Changes) > 1 {
+		return errors.New("多文件应用已关闭；一次仅允许单个源码文件，未改动任何文件")
+	}
+	if len(plan.Changes) == 0 {
+		return errors.New("没有可应用的源码修改")
+	}
 	if err := a.recoverApply(); err != nil {
 		return err
 	}
