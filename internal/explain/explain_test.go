@@ -33,7 +33,7 @@ func TestRunChecksEveryClaimAndRejectsInventedReferences(t *testing.T) {
 		if calls == 2 {
 			text = `{"checks":[{"claim_id":"c1","status":"supported"}]}`
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 20}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 20}})
 	}))
 	cfg := Config{Enabled: true, Endpoint: "https://model.invalid", HTTPTransport: server, Model: "test", TokenLimit: 100000}
 	doc, usage, err := Run(context.Background(), cfg, Usage{}, "test-key", "explain", []Evidence{{ID: "e1", Source: "func F() int { return 0 }"}})
@@ -56,7 +56,7 @@ func TestReviewFailureDoesNotPublishVerifiedClaims(t *testing.T) {
 			w.WriteHeader(500)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]any{"type": "text", "text": `{"claims":[{"id":"c1","text":"zero","kind":"behavior","evidence_ids":["e1"]}]}`}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 10}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"claims":[{"id":"c1","text":"zero","kind":"behavior","evidence_ids":["e1"]}]}`}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 10}})
 	}))
 	doc, usage, err := Run(context.Background(), Config{Enabled: true, Endpoint: "https://model.invalid", HTTPTransport: server, Model: "test", TokenLimit: 100000}, Usage{}, "key", "explain", []Evidence{{ID: "e1", Source: "return 0"}})
 	if err != nil {
@@ -78,7 +78,7 @@ func TestStructuredGenerationUsesBudgetAndAccountsUsage(t *testing.T) {
 		if payload["max_tokens"] != float64(8192) {
 			t.Error("output allowance wrong")
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]string{"type": "text", "text": `{"feedback":"fixture"}`}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"stop_reason": "end_turn", "content": []any{map[string]string{"type": "text", "text": `{"feedback":"fixture"}`}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 5}})
 	}))
 	cfg := Config{Enabled: true, Model: "test", Endpoint: "https://model.invalid", HTTPTransport: server, TokenLimit: 1}
 	if _, _, err := Structured(context.Background(), cfg, Usage{}, "key", "prompt"); err == nil || calls != 0 {

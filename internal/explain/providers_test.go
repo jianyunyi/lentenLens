@@ -129,7 +129,7 @@ func TestProviderExplanationAndEvidenceCheckAcrossProtocols(t *testing.T) {
 				var response map[string]any
 				switch provider {
 				case "anthropic":
-					response = map[string]any{"content": []any{map[string]string{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}}
+					response = map[string]any{"stop_reason": "end_turn", "content": []any{map[string]string{"type": "text", "text": text}}, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1}}
 				case "gemini":
 					response = map[string]any{"candidates": []any{map[string]any{"finishReason": "STOP", "content": map[string]any{"parts": []any{map[string]string{"text": text}}}}}, "usageMetadata": map[string]int{"totalTokenCount": 2}}
 				default:
@@ -158,7 +158,7 @@ func TestProviderWireProtocols(t *testing.T) {
 					if r.URL.Path != "/v1/messages" || r.Header.Get("x-api-key") != "secret" || body["system"] != "system" {
 						t.Errorf("wrong Anthropic request")
 					}
-					w.Write([]byte(`{"content":[{"type":"text","text":"{}"}],"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":4,"cache_creation_input_tokens":1}}`))
+					w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"{}"}],"usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":4,"cache_creation_input_tokens":1}}`))
 				case "gemini":
 					if r.URL.Path != "/v1/models/fixture:generateContent" || r.Header.Get("x-goog-api-key") != "secret" || r.URL.RawQuery != "" || body["systemInstruction"] == nil {
 						t.Errorf("wrong Gemini request")
@@ -236,5 +236,44 @@ func TestProvidersFailWithoutConfirmedUsageAndOnHTTPError(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProviderResponsesCombineAllVisibleTextParts(t *testing.T) {
+	tests := []struct {
+		provider string
+		response string
+	}{
+		{"anthropic", `{"stop_reason":"end_turn","content":[{"type":"thinking","thinking":"not answer"},{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"text","text":"ok\"}"}],"usage":{"input_tokens":1,"output_tokens":1}}`},
+		{"openai", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"output_text","text":"ok\"}"}]}}],"usage":{"total_tokens":2}}`},
+		{"openai-compatible", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"{\"intentlens_connection_test\":\""},{"type":"text","text":"ok\"}"}]}}],"usage":{"total_tokens":2}}`},
+		{"gemini", `{"candidates":[{"finishReason":"STOP","content":{"parts":[{"thought":true,"text":"not answer"},{"text":"{\"intentlens_connection_test\":\""},{"text":"ok\"}"}]}}],"usageMetadata":{"totalTokenCount":2}}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			text, tokens, err := decodeResponse(tc.provider, []byte(tc.response))
+			if err != nil || text != `{"intentlens_connection_test":"ok"}` || tokens != 2 {
+				t.Fatalf("text=%q tokens=%d err=%v", text, tokens, err)
+			}
+		})
+	}
+}
+
+func TestOpenAIRejectsUnrenderedContentAndMultipleChoices(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response string
+		wantErr  string
+	}{
+		{"non-text block", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text","text":"{}"},{"type":"image_url","image_url":{"url":"fixture"}}]}}],"usage":{"total_tokens":2}}`, "非文本块"},
+		{"text block without text", `{"choices":[{"finish_reason":"stop","message":{"content":[{"type":"text"}]}}],"usage":{"total_tokens":2}}`, "缺少文本内容"},
+		{"multiple choices", `{"choices":[{"finish_reason":"stop","message":{"content":"{}"}},{"finish_reason":"stop","message":{"content":"{}"}}],"usage":{"total_tokens":2}}`, "候选数"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text, _, err := decodeResponse("openai-compatible", []byte(tc.response))
+			if err == nil || text != "" || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("partial or unrenderable response accepted: text=%q err=%v", text, err)
+			}
+		})
 	}
 }

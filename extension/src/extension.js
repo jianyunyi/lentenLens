@@ -544,10 +544,11 @@ function activate(context) {
     const answer = await vscode.window.showWarningMessage(
       `将仅向以下明确配置的地址发送固定连接探针，不包含项目代码、文件路径或用户问题：\nProvider：${model.provider}\nBase URL：${model.base_url}\nAPI 返回的模型 ID：${model.model}\n\n该请求可能消耗少量 token 或产生费用。不会自动改用其他 endpoint、provider 或 model。`,
       { modal: true }, '发送此模型的测试请求');
-    if (answer !== '发送此模型的测试请求') return;
-    const result = await cli(folder, 'test-model', {});
-    vscode.window.showInformationMessage(`IntentLens：连接测试成功。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
-  });
+	    if (answer !== '发送此模型的测试请求') return;
+	    const result = await cli(folder, 'test-model', {});
+	    if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
+	    vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
+	  });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;
     const status = await cli(folder, 'status');

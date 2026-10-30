@@ -251,3 +251,33 @@ func mustJSON(value any) []byte {
 	}
 	return encoded
 }
+
+func TestProviderMissingFinishSignalIsIncomplete(t *testing.T) {
+	for _, provider := range []string{"anthropic", "openai", "openai-compatible", "gemini"} {
+		t.Run(provider, func(t *testing.T) {
+			text, _, err := decodeResponse(provider, mustJSON(modeFixtureResponse(provider, `{}`, "")))
+			if err == nil || text != "" || !strings.Contains(err.Error(), "结束标记") {
+				t.Fatalf("missing finish signal accepted: text=%q err=%v", text, err)
+			}
+		})
+	}
+}
+
+func TestProviderTruncationSignalsAreReportedWithoutPartialText(t *testing.T) {
+	for _, tc := range []struct {
+		provider string
+		reason   string
+	}{
+		{"anthropic", "max_tokens"},
+		{"openai", "length"},
+		{"openai-compatible", "length"},
+		{"gemini", "MAX_TOKENS"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			text, _, err := decodeResponse(tc.provider, mustJSON(modeFixtureResponse(tc.provider, `{"partial":`, tc.reason)))
+			if err == nil || text != "" || !strings.Contains(err.Error(), "截断") {
+				t.Fatalf("truncated partial text accepted or misreported: text=%q err=%v", text, err)
+			}
+		})
+	}
+}

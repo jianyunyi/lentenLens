@@ -28,11 +28,13 @@ func TestConnection(ctx context.Context, cfg Config, key string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var result struct {
-		Status string `json:"intentlens_connection_test"`
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &result); err != nil || len(result) != 1 {
+		return 0, errors.New("模型响应未完整匹配固定探针文本；未回退到其他模型")
 	}
-	if err := json.Unmarshal([]byte(text), &result); err != nil || result.Status != "ok" {
-		return 0, errors.New("模型响应不符合固定连通性测试格式；未回退到其他模型")
+	var status string
+	if err := json.Unmarshal(result["intentlens_connection_test"], &status); err != nil || status != "ok" {
+		return 0, errors.New("模型响应未完整匹配固定探针文本；未回退到其他模型")
 	}
 	return tokens, nil
 }

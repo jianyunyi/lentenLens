@@ -149,8 +149,8 @@ func isDeepSeekBaseURL(base string) bool {
 func decodeResponse(provider string, raw []byte) (string, int, error) {
 	var result struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type string  `json:"type"`
+			Text *string `json:"text"`
 		} `json:"content"`
 		StopReason string `json:"stop_reason"`
 		Usage      *struct {
@@ -162,15 +162,16 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 		} `json:"usage"`
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content json.RawMessage `json:"content"`
+				Refusal string          `json:"refusal"`
 			} `json:"message"`
 			Finish string `json:"finish_reason"`
 		} `json:"choices"`
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text    string `json:"text"`
-					Thought bool   `json:"thought"`
+					Text    *string `json:"text"`
+					Thought bool    `json:"thought"`
 				} `json:"parts"`
 			} `json:"content"`
 			Finish string `json:"finishReason"`
@@ -186,12 +187,17 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 	tokens := -1
 	switch provider {
 	case "anthropic":
-		if result.StopReason != "" && result.StopReason != "end_turn" && result.StopReason != "stop_sequence" {
-			return "", 0, errors.New("模型输出未完整结束")
+		if result.StopReason != "end_turn" && result.StopReason != "stop_sequence" {
+			return "", 0, incompleteFinishError(result.StopReason)
 		}
 		for _, c := range result.Content {
-			if c.Type == "text" {
-				out.WriteString(c.Text)
+			if c.Type == "text" || (c.Type == "" && c.Text != nil) {
+				if c.Text == nil {
+					return "", 0, errors.New("Anthropic 文本块缺少文本内容")
+				}
+				out.WriteString(*c.Text)
+			} else if c.Text != nil && c.Type != "thinking" && c.Type != "redacted_thinking" {
+				return "", 0, errors.New("Anthropic 响应包含无法完整显示的文本块")
 			}
 		}
 		if u := result.Usage; u != nil && u.Input != nil && u.Output != nil {
@@ -204,21 +210,38 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 			}
 		}
 	case "openai", "openai-compatible":
-		if len(result.Choices) != 1 || result.Choices[0].Finish != "stop" {
-			return "", 0, errors.New("模型没有返回完整的单条文本答案")
+		if len(result.Choices) != 1 {
+			return "", 0, errors.New("模型返回的候选数不是恰好一条，无法验证单条完整答案")
 		}
-		out.WriteString(result.Choices[0].Message.Content)
+		if result.Choices[0].Finish != "stop" {
+			return "", 0, incompleteFinishError(result.Choices[0].Finish)
+		}
+		if result.Choices[0].Message.Refusal != "" {
+			return "", 0, errors.New("模型拒绝返回固定探针文本")
+		}
+		text, err := decodeOpenAITextContent(result.Choices[0].Message.Content)
+		if err != nil {
+			return "", 0, err
+		}
+		out.WriteString(text)
 		if result.Usage != nil && result.Usage.Total != nil {
 			tokens = *result.Usage.Total
 		}
 	case "gemini":
 		if len(result.Candidates) != 1 || result.Candidates[0].Finish != "STOP" {
-			return "", 0, errors.New("模型输出为空、被拦截或未完整结束")
+			if len(result.Candidates) != 1 {
+				return "", 0, errors.New("Gemini 返回的候选数不是恰好一条，无法验证单条完整答案")
+			}
+			return "", 0, incompleteFinishError(result.Candidates[0].Finish)
 		}
 		for _, p := range result.Candidates[0].Content.Parts {
-			if !p.Thought {
-				out.WriteString(p.Text)
+			if p.Thought {
+				continue
 			}
+			if p.Text == nil {
+				return "", 0, errors.New("Gemini 响应包含无法完整显示的非文本部分")
+			}
+			out.WriteString(*p.Text)
 		}
 		if result.Metadata != nil && result.Metadata.Total != nil {
 			tokens = *result.Metadata.Total
@@ -236,4 +259,53 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 		text = strings.TrimSuffix(strings.TrimPrefix(text, "```json\n"), "\n```")
 	}
 	return text, tokens, nil
+}
+
+func incompleteFinishError(reason string) error {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "", "null":
+		return errors.New("模型未返回完整结束标记，无法确认输出完整")
+	case "length", "max_tokens":
+		return errors.New("模型输出达到 token 上限，属于截断结果")
+	case "content_filter", "safety", "recitation", "blocked", "prohibited_content", "spii":
+		return errors.New("模型输出被 provider 内容策略拦截，不能视为完整答案")
+	default:
+		return errors.New("模型输出未正常完成，不能视为完整答案")
+	}
+}
+
+func decodeOpenAITextContent(raw json.RawMessage) (string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", errors.New("OpenAI 响应未返回文本内容")
+	}
+	var text string
+	if raw[0] == '"' {
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return "", errors.New("OpenAI 响应文本格式无效")
+		}
+		return text, nil
+	}
+	var blocks []struct {
+		Type    string  `json:"type"`
+		Text    *string `json:"text"`
+		Refusal *string `json:"refusal"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil || len(blocks) == 0 {
+		return "", errors.New("OpenAI 响应的文本块格式不受支持")
+	}
+	var out strings.Builder
+	for _, block := range blocks {
+		if block.Type == "refusal" || block.Refusal != nil {
+			return "", errors.New("模型拒绝返回固定探针文本")
+		}
+		if block.Type != "" && block.Type != "text" && block.Type != "output_text" {
+			return "", errors.New("OpenAI 响应包含无法完整显示的非文本块")
+		}
+		if block.Text == nil {
+			return "", errors.New("OpenAI 文本块缺少文本内容")
+		}
+		out.WriteString(*block.Text)
+	}
+	return out.String(), nil
 }
