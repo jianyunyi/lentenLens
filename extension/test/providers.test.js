@@ -1,48 +1,177 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { configureModel, presets, verificationModes, validateBase } = require('../src/providers');
-test('provider configuration confirms exact destination and cancellation never saves', async () => {
-  for (const choice of presets) {
-    const inputs = [choice.base_url || 'https://custom.example/v1', 'fixture-model', choice.api_key_env, '123456'];
-    let index = 0, pickIndex = 0, saved, confirmation;
-    const vscode = { window: {
-      showQuickPick: async items => pickIndex++ === 0 ? choice : items.find(item => item.value === 'light'), showInputBox: async () => inputs[index++],
-      showWarningMessage: async text => { confirmation = text; return 'cancel'; }, showInformationMessage() {},
-    } };
-    const cli = async (_, command, request) => { saved = { command, request }; };
-    const status = { settings: { model: { token_limit: 200000 } }, usage: { actual_tokens: 42, uncertain_tokens: 10 } };
-    assert.equal(await configureModel(vscode, { name: 'fixture' }, status, cli), false);
-    assert.equal(saved, undefined);
-    assert.ok(confirmation.includes(inputs[0])); assert.ok(confirmation.includes('42'));
-    index = 0; pickIndex = 0; vscode.window.showWarningMessage = async text => { confirmation = text; return '同意并启用'; };
-    assert.equal(await configureModel(vscode, { name: 'fixture' }, status, cli), true);
-    assert.equal(saved.request.settings.model.provider, choice.provider);
-    assert.equal(saved.request.settings.model.api_key_env, choice.api_key_env);
-    assert.equal(saved.request.settings.model.verification_mode, 'light');
-    assert.equal(saved.request.consent, true);
-    assert.ok(!('api_key' in saved.request.settings.model));
-    assert.match(confirmation, /轻量复核/);
-  }
+const { configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV } = require('../src/providers');
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function wizard({ query = true, accept = true, key = 'fixture-api-key', selectedModel, previousKey, configureError } = {}) {
+  const baseURL = 'https://api.fixture/v1';
+  const inputs = [], picks = [], warnings = [], calls = [], requests = [];
+  const secrets = new Map();
+  const secretName = workspaceSecretKey('/fixture/project');
+  if (previousKey !== undefined) secrets.set(secretName, previousKey);
+  const selectedProvider = presets.find(item => item.provider === 'openai-compatible' && !item.base_url);
+  const vscode = { window: {
+    showQuickPick: async (items, options = {}) => {
+      picks.push({ items, options });
+      if (options.title.includes('厂商')) return selectedProvider;
+      if (options.title.includes('API 返回')) return selectedModel === 'forged' ? { returnedModelId: 'not-returned' } : items.find(item => item.returnedModelId === (selectedModel || 'model-from-api'));
+      return items.find(item => item.value === 'light');
+    },
+    showInputBox: async options => {
+      inputs.push(options);
+      if (options.title.includes('基础地址')) return baseURL;
+      if (options.title.includes('API Key')) return key;
+      if (options.title.includes('token 上限')) return '4096';
+      throw new Error(`unexpected input ${options.title}`);
+    },
+    showWarningMessage: async (text, _options, action) => {
+      warnings.push({ text, action });
+      if (action === '查询此 API 的模型列表') return query ? action : undefined;
+      return accept ? '同意并启用' : 'cancel';
+    },
+    showInformationMessage() {},
+  } };
+  const secure = {
+    get: async name => secrets.get(name),
+    store: async (name, value) => secrets.set(name, value),
+    delete: async name => secrets.delete(name),
+  };
+  const cli = async (_folder, command, request) => {
+    calls.push({ command, request });
+    if (configureError) throw configureError;
+    return { saved: true };
+  };
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, options });
+    return jsonResponse({ data: [{ id: 'model-from-api' }, { id: 'another-returned-model' }] });
+  };
+  const folder = { name: 'fixture', uri: { fsPath: '/fixture/project' } };
+  const status = { settings: { model: { token_limit: 200000 } }, usage: { actual_tokens: 42, uncertain_tokens: 10 } };
+  return { vscode, secure, cli, fetchImpl, folder, status, baseURL, inputs, picks, warnings, calls, requests, secrets, secretName };
+}
+
+test('OpenAI-compatible model discovery uses the selected /models endpoint and API key only in Authorization header', async () => {
+  let request;
+  const models = await listModels('openai-compatible', 'https://api.fixture/v1', 'fixture-secret', async (url, options) => {
+    request = { url, options };
+    return jsonResponse({ data: [{ id: 'model-a' }, { id: 'model-b' }] });
+  });
+  assert.deepEqual(models.map(model => model.id), ['model-a', 'model-b']);
+  assert.equal(request.url, 'https://api.fixture/v1/models');
+  assert.equal(request.options.method, 'GET');
+  assert.equal(request.options.redirect, 'error');
+  assert.equal(request.options.headers.authorization, 'Bearer fixture-secret');
+  assert.ok(!request.url.includes('fixture-secret'));
+  assert.ok(!new URL(request.url).search);
 });
-test('fast and strict choices are persisted and accurately described', async () => {
-  for (const selected of ['fast', 'strict']) {
-    let picks = 0, index = 0, saved, confirmation, modeItems;
-    const inputs = ['https://deepseek.example/v1', 'fixture-model', 'DEEPSEEK_API_KEY', '200000'];
-    const vscode = { window: {
-      showQuickPick: async items => { if (picks++ === 0) return { ...items.find(item => item.provider === 'openai-compatible'), provider: 'openai-compatible', label: 'DeepSeek' }; modeItems = items; return items.find(item => item.value === selected); },
-      showInputBox: async () => inputs[index++],
-      showWarningMessage: async text => { confirmation = text; return '同意并启用'; }, showInformationMessage() {},
-    } };
-    const cli = async (_, command, request) => { saved = { command, request }; };
-    assert.equal(await configureModel(vscode, { name: 'fixture' }, { settings: { model: { verification_mode: 'strict' } }, usage: {} }, cli), true);
-    assert.equal(saved.request.settings.model.verification_mode, selected);
-    assert.match(confirmation, selected === 'fast' ? /不做独立复核/ : /逐条检查所有说法/);
-    assert.equal(modeItems[0].value, 'strict');
-    assert.match(modeItems[0].label, /当前/);
-  }
+
+test('provider-specific auth and pagination return actual Anthropic and Gemini IDs', async () => {
+  const anthropicRequests = [];
+  const anthropic = await listModels('anthropic', 'https://api.fixture/v1', 'anthropic-key', async (url, options) => {
+    anthropicRequests.push({ url: new URL(url), options });
+    if (!new URL(url).searchParams.has('after_id')) return jsonResponse({ data: [{ id: 'claude-a' }], has_more: true, last_id: 'claude-a' });
+    return jsonResponse({ data: [{ id: 'claude-b' }], has_more: false });
+  });
+  assert.deepEqual(anthropic.map(model => model.id), ['claude-a', 'claude-b']);
+  assert.equal(anthropicRequests.length, 2);
+  assert.equal(anthropicRequests[0].options.headers['x-api-key'], 'anthropic-key');
+  assert.equal(anthropicRequests[0].options.headers['anthropic-version'], '2023-06-01');
+  assert.equal(anthropicRequests[1].url.searchParams.get('after_id'), 'claude-a');
+  assert.ok(!anthropicRequests[1].url.toString().includes('anthropic-key'));
+
+  const geminiRequests = [];
+  const gemini = await listModels('gemini', 'https://api.fixture/v1beta', 'gemini-key', async (url, options) => {
+    const parsed = new URL(url);
+    geminiRequests.push({ url: parsed, options });
+    if (!parsed.searchParams.has('pageToken')) return jsonResponse({ models: [
+      { name: 'models/gemini-flash', displayName: 'Gemini Flash', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-embed', supportedGenerationMethods: ['embedContent'] },
+    ], nextPageToken: 'page-2' });
+    return jsonResponse({ models: [{ name: 'models/gemini-pro' }] });
+  });
+  assert.deepEqual(gemini.map(model => model.id), ['models/gemini-flash', 'models/gemini-pro']);
+  assert.equal(geminiRequests.length, 2);
+  assert.equal(geminiRequests[0].options.headers['x-goog-api-key'], 'gemini-key');
+  assert.equal(geminiRequests[1].url.searchParams.get('pageToken'), 'page-2');
+  assert.ok(!geminiRequests[0].url.toString().includes('gemini-key'));
+});
+
+test('wizard queries first, lets the user select only a returned ID, and stores the key outside settings', async () => {
+  const h = wizard();
+  assert.equal(await configureModel(h.vscode, h.folder, h.status, h.cli, h.secure, h.fetchImpl), true);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0].url, `${h.baseURL}/models`);
+  assert.equal(h.requests[0].options.headers.authorization, 'Bearer fixture-api-key');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].command, 'configure');
+  const cfg = h.calls[0].request.settings.model;
+  assert.deepEqual({ provider: cfg.provider, base_url: cfg.base_url, model: cfg.model, api_key_env: cfg.api_key_env }, {
+    provider: 'openai-compatible', base_url: h.baseURL, model: 'model-from-api', api_key_env: SECURE_API_KEY_ENV,
+  });
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg.token_limit, 4096);
+  assert.equal(cfg.verification_mode, 'light');
+  assert.equal('api_key' in cfg, false);
+  assert.ok(h.inputs.some(options => options.password === true));
+  assert.ok(!h.inputs.some(options => options.title === '模型 ID'));
+  assert.deepEqual(h.picks.find(pick => pick.options.title.includes('API 返回')).items.map(item => item.returnedModelId), ['model-from-api', 'another-returned-model']);
+  assert.equal(h.secrets.get(h.secretName), 'fixture-api-key');
+  assert.ok(h.warnings.some(item => item.action === '查询此 API 的模型列表' && item.text.includes('/models')));
+  assert.ok(!JSON.stringify(h.calls).includes('fixture-api-key'));
+  assert.ok(!h.warnings.some(item => item.text.includes('fixture-api-key')));
+});
+
+test('query consent, API errors, empty results, forged selections, and final consent all fail closed', async () => {
+  const denied = wizard({ query: false });
+  assert.equal(await configureModel(denied.vscode, denied.folder, denied.status, denied.cli, denied.secure, denied.fetchImpl), false);
+  assert.equal(denied.requests.length, 0);
+  assert.equal(denied.calls.length, 0);
+  assert.equal(denied.secrets.has(denied.secretName), false);
+
+  const failed = wizard();
+  failed.fetchImpl = async () => jsonResponse({ error: 'secret response body must not be shown' }, 401);
+  await assert.rejects(() => configureModel(failed.vscode, failed.folder, failed.status, failed.cli, failed.secure, failed.fetchImpl), /HTTP 401/);
+  assert.equal(failed.calls.length, 0);
+  assert.equal(failed.secrets.has(failed.secretName), false);
+
+  const empty = wizard();
+  empty.fetchImpl = async () => jsonResponse({ data: [] });
+  await assert.rejects(() => configureModel(empty.vscode, empty.folder, empty.status, empty.cli, empty.secure, empty.fetchImpl), /没有返回可选模型/);
+  assert.equal(empty.calls.length, 0);
+  assert.equal(empty.secrets.has(empty.secretName), false);
+
+  const forged = wizard({ selectedModel: 'forged' });
+  await assert.rejects(() => configureModel(forged.vscode, forged.folder, forged.status, forged.cli, forged.secure, forged.fetchImpl), /不在此 API 返回/);
+  assert.equal(forged.calls.length, 0);
+  assert.equal(forged.secrets.has(forged.secretName), false);
+
+  const declined = wizard({ accept: false });
+  assert.equal(await configureModel(declined.vscode, declined.folder, declined.status, declined.cli, declined.secure, declined.fetchImpl), false);
+  assert.equal(declined.calls.length, 0);
+  assert.equal(declined.secrets.has(declined.secretName), false);
+});
+
+test('a previously saved key is not a substitute for the key entered in this wizard; failed save rolls back', async () => {
+  const noKey = wizard({ key: '', previousKey: 'old-key' });
+  await assert.rejects(() => configureModel(noKey.vscode, noKey.folder, noKey.status, noKey.cli, noKey.secure, noKey.fetchImpl), /必须输入 API Key/);
+  assert.equal(noKey.requests.length, 0);
+  assert.equal(noKey.secrets.get(noKey.secretName), 'old-key');
+
+  const failedSave = wizard({ previousKey: 'old-key', configureError: new Error('fixture config write failed') });
+  await assert.rejects(() => configureModel(failedSave.vscode, failedSave.folder, failedSave.status, failedSave.cli, failedSave.secure, failedSave.fetchImpl), /fixture config write failed/);
+  assert.equal(failedSave.secrets.get(failedSave.secretName), 'old-key');
+  assert.ok(!failedSave.warnings.some(item => item.text.includes('old-key')));
+});
+
+test('secure storage is mandatory and base URLs reject credentials, queries, model endpoints and remote HTTP', async () => {
+  const h = wizard();
+  await assert.rejects(() => configureModel(h.vscode, h.folder, h.status, h.cli, undefined, h.fetchImpl), /安全密钥存储/);
+  assert.equal(h.requests.length, 0);
+  for (const value of ['http://remote.test/v1', 'https://a:b@host/v1', 'https://host/v1?key=abc', 'https://host/v1#x', 'https://host/v1/models']) assert.ok(validateBase(value));
+  for (const value of ['https://host/v1', 'http://127.0.0.1:8080/v1', 'http://[::1]:8080/v1']) assert.equal(validateBase(value), null);
+  for (const preset of presets) assert.ok(preset.provider);
   assert.deepEqual(verificationModes.map(mode => mode.value), ['light', 'fast', 'strict']);
-});
-test('base URL checks reject credentials, query and remote plaintext', () => {
-  for (const value of ['http://remote.test/v1','https://a:b@host/v1','https://host/v1?key=abc','https://host/v1#x','https://host/v1/messages']) assert.ok(validateBase(value));
-  for (const value of ['https://host/v1','http://127.0.0.1:8080/v1','http://[::1]:8080/v1']) assert.equal(validateBase(value), null);
 });

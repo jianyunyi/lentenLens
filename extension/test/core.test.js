@@ -12,9 +12,9 @@ test('CLI bridge preserves JSON and root with spaces without a shell', async t =
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens bridge '));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const script = path.join(root, 'fixture.cjs');
-  fs.writeFileSync(script, `let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{if(process.argv[2]==='fail'){console.log(JSON.stringify({error:'rejected'}));process.exitCode=1;}else{console.log(JSON.stringify({args:process.argv.slice(2),input:JSON.parse(s)}));}});`);
-  const value = await core.runCLI(process.execPath, root, 'inspect', { question: 'a " & b' }, { prefixArgs: [script] });
-  assert.deepEqual(value, { args: ['inspect', '--root', root], input: { question: 'a " & b' } });
+  fs.writeFileSync(script, `let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{if(process.argv[2]==='fail'){console.log(JSON.stringify({error:'rejected'}));process.exitCode=1;}else{console.log(JSON.stringify({args:process.argv.slice(2),input:JSON.parse(s),injected:process.env.INTENTLENS_TEST_SENTINEL}));}});`);
+  const value = await core.runCLI(process.execPath, root, 'inspect', { question: 'a " & b' }, { prefixArgs: [script], env: { ...process.env, INTENTLENS_TEST_SENTINEL: 'secret-storage-env' } });
+  assert.deepEqual(value, { args: ['inspect', '--root', root], input: { question: 'a " & b' }, injected: 'secret-storage-env' });
   await assert.rejects(core.runCLI(process.execPath, root, 'fail', {}, { prefixArgs: [script] }), /rejected/);
 });
 test('paths reject traversal, absolute paths, ADS, and symlink escapes', t => {

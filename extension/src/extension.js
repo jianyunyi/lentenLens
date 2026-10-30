@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { createExerciseUI } = require('./exercises');
 const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
-const { configureModel } = require('./providers');
+const { configureModel, workspaceSecretKey, SECURE_API_KEY_ENV } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
 const { createCallPathProvider } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
@@ -67,7 +67,10 @@ function activate(context) {
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal });
+    const modelCommands = new Set(['explain', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'exercise-share-prepare', 'test-model']);
+    const secret = modelCommands.has(command) ? await context.secrets?.get(workspaceSecretKey(folder.uri.fsPath)) : undefined;
+    const env = modelCommands.has(command) ? { ...process.env, [SECURE_API_KEY_ENV]: secret || '' } : process.env;
+    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal, env });
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
     return result;
   }
@@ -526,7 +529,24 @@ function activate(context) {
   command('enableModel', async () => {
     const folder = await folderFor(); if (!folder) return;
     const status = await cli(folder, 'status');
-    if (await configureModel(vscode, folder, status, cli)) refresh();
+    if (await configureModel(vscode, folder, status, cli, context.secrets)) refresh();
+  });
+  command('testModel', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    const status = await cli(folder, 'status');
+    const model = status.settings?.model || {};
+    if (!model.enabled || !model.provider || !model.base_url || !model.model || model.api_key_env !== SECURE_API_KEY_ENV) {
+      throw new Error('请先通过“启用或调整模型分析”查询并选择 API 返回的模型 ID。');
+    }
+    if (!context.secrets || typeof context.secrets.get !== 'function' || !await context.secrets.get(workspaceSecretKey(folder.uri.fsPath))) {
+      throw new Error('此工作区没有 VS Code 安全存储的 API Key；请重新配置。');
+    }
+    const answer = await vscode.window.showWarningMessage(
+      `将仅向以下明确配置的地址发送固定连接探针，不包含项目代码、文件路径或用户问题：\nProvider：${model.provider}\nBase URL：${model.base_url}\nAPI 返回的模型 ID：${model.model}\n\n该请求可能消耗少量 token 或产生费用。不会自动改用其他 endpoint、provider 或 model。`,
+      { modal: true }, '发送此模型的测试请求');
+    if (answer !== '发送此模型的测试请求') return;
+    const result = await cli(folder, 'test-model', {});
+    vscode.window.showInformationMessage(`IntentLens：连接测试成功。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
   });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;

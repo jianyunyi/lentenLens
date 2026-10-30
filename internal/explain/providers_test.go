@@ -186,6 +186,22 @@ func TestProviderWireProtocols(t *testing.T) {
 	}
 }
 
+func TestGeminiResourceModelIDIsUsedVerbatim(t *testing.T) {
+	transport := newInMemoryRoundTripper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models/gemini-flash:generateContent" {
+			t.Errorf("unexpected Gemini resource endpoint: %s", r.URL.Path)
+		}
+		if r.Header.Get("x-goog-api-key") != "secret" || r.URL.RawQuery != "" {
+			t.Error("Gemini Key was not confined to the expected header")
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{}"}]}}],"usageMetadata":{"totalTokenCount":2}}`))
+	}))
+	text, tokens, err := call(context.Background(), Config{Provider: "gemini", BaseURL: "https://model.invalid/v1", HTTPTransport: transport, Model: "models/gemini-flash"}, "secret", "system", "prompt")
+	if err != nil || text != "{}" || tokens != 2 {
+		t.Fatalf("text=%q tokens=%d err=%v", text, tokens, err)
+	}
+}
+
 func TestProviderConfiguration(t *testing.T) {
 	cfg, err := (Config{}).Resolved()
 	if err != nil || cfg.Provider != "anthropic" || cfg.APIKeyEnv != "ANTHROPIC_API_KEY" {

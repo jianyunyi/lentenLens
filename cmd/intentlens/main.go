@@ -45,7 +45,7 @@ type input struct {
 
 func run(args []string, in io.Reader, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | call-path | explain | configure | status | analyze-round | hooks-config | hook")
+		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | call-path | explain | configure | status | test-model | analyze-round | hooks-config | hook")
 		return 0
 	}
 	command := args[0]
@@ -189,6 +189,10 @@ func run(args []string, in io.Reader, out io.Writer) int {
 			}
 			result = map[string]any{"settings": s, "usage": u, "state_directory": a.State, "root": a.Root, "diagnostics": diagnostics, "fees": "未配置费率，费用估算不可用"}
 		}
+	case "test-model":
+		var tokens int
+		tokens, e = a.TestModel(context.Background())
+		result = map[string]any{"tested": e == nil, "actual_tokens": tokens, "fallback": false, "project_data_sent": false}
 	case "analyze-round":
 		if strings.TrimSpace(*roundID) == "" {
 			return fail(out, errors.New("需要非空 round_id（可通过 --round 或 JSON 输入提供）"))

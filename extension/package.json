@@ -8,7 +8,7 @@
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "main": "./src/extension.js",
-  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onView:intentlens.modelAnswer", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath", "onCommand:intentlens.refreshModelAnswer"],
+  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onView:intentlens.modelAnswer", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath", "onCommand:intentlens.refreshModelAnswer", "onCommand:intentlens.enableModel", "onCommand:intentlens.testModel"],
   "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "Views are available; CLI execution requires workspace trust." }, "virtualWorkspaces": { "supported": false } },
   "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/callpath.js && node --check src/sidebar.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js" },
   "contributes": {
@@ -29,6 +29,7 @@
       { "command": "intentlens.cancelRound", "title": "IntentLens: 取消当前轮次（保留源码）" },
       { "command": "intentlens.status", "title": "IntentLens: 查看状态与预算" },
       { "command": "intentlens.enableModel", "title": "IntentLens: 启用或调整模型分析" },
+      { "command": "intentlens.testModel", "title": "IntentLens: 测试当前模型 API（只发送固定探针）" },
       { "command": "intentlens.pauseModel", "title": "IntentLens: 暂停模型分析" },
       { "command": "intentlens.hooksConfig", "title": "IntentLens: 预览 Claude Code Hook 配置" }
     ],
@@ -49,6 +50,7 @@
       { "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" },
       { "command": "intentlens.refreshCallPath", "when": "view == intentlens.callPath", "group": "navigation" },
       { "command": "intentlens.refreshModelAnswer", "when": "view == intentlens.modelAnswer", "group": "navigation" },
+      { "command": "intentlens.testModel", "when": "view == intentlens.rounds", "group": "model@2" },
       { "command": "intentlens.startRound", "when": "view == intentlens.rounds", "group": "capture@1" },
       { "command": "intentlens.stopRound", "when": "view == intentlens.rounds", "group": "capture@2" },
       { "command": "intentlens.resumeRound", "when": "view == intentlens.rounds", "group": "capture@3" },
