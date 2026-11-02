@@ -26,7 +26,7 @@ func (a *App) lock(name string) (func(), error) {
 	} else if !errors.Is(e, os.ErrNotExist) {
 		return nil, e
 	}
-	f, err := root.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := root.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

@@ -53,9 +53,9 @@ type Coverage struct {
 	OmissionReasons map[string]string  `json:"-"`
 }
 type unit struct {
+	tree   *ast.File
 	name   string
 	source string
-	tree   *ast.File
 }
 
 func Build(files map[string]string) Index {
@@ -85,7 +85,7 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 			continue
 		}
 		key := path.Dir(strings.ReplaceAll(name, "\\", "/")) + ":" + tree.Name.Name
-		groups[key] = append(groups[key], unit{name, files[name], tree})
+		groups[key] = append(groups[key], unit{tree: tree, name: name, source: files[name]})
 	}
 	keys := make([]string, 0, len(groups))
 	for k := range groups {

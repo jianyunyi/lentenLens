@@ -42,12 +42,12 @@ func (a *App) PrepareExerciseShare(id string) (ExerciseShareDraft, error) {
 	spec.Reference = nil
 	record := SharedExercise{Schema: 1, ID: e.ID, Version: e.Version, PackageDir: e.PackageDir, Spec: spec, AuthorValidation: "作者环境通过：原测试、基线预期失败、参考修改通过；接收者本地尚未验证"}
 	if e.Supersedes != "" {
-		records, err := a.SharedExercises()
-		if err != nil {
-			return ExerciseShareDraft{}, err
+		records, recordsErr := a.SharedExercises()
+		if recordsErr != nil {
+			return ExerciseShareDraft{}, recordsErr
 		}
-		for _, r := range records {
-			if r.ID == e.Supersedes {
+		for i := range records {
+			if records[i].ID == e.Supersedes {
 				record.Supersedes = e.Supersedes
 			}
 		}
@@ -69,8 +69,8 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 	}
 	defer unlock()
 	var draft ExerciseShareDraft
-	if err = a.read("exercise-share-"+id+".json", &draft); err != nil {
-		return err
+	if readErr := a.read("exercise-share-"+id+".json", &draft); readErr != nil {
+		return readErr
 	}
 	if draft.Digest != previewDigest || digest(draft.Record) != previewDigest {
 		return errors.New("题目预览摘要变化")
@@ -94,7 +94,7 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 	if len(b) > maxShareBytes {
 		return errors.New("题目共享记录过大")
 	}
-	f, err := root.OpenFile(id+".json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := root.OpenFile(id+".json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return errors.New("题目已共享或目标不可写，未覆盖已有版本")
 	}
@@ -119,7 +119,7 @@ func (a *App) exerciseSharedDir(create bool) (*os.Root, error) {
 	for _, p := range []string{".intent", ".intent/exercises"} {
 		info, e := root.Lstat(p)
 		if errors.Is(e, os.ErrNotExist) && create {
-			if e = root.Mkdir(p, 0700); e != nil && !errors.Is(e, os.ErrExist) {
+			if e = root.Mkdir(p, 0o700); e != nil && !errors.Is(e, os.ErrExist) {
 				return nil, e
 			}
 			info, e = root.Lstat(p)
@@ -175,8 +175,8 @@ func (a *App) SharedExercises() ([]SharedExercise, error) {
 		if err != nil || end != io.EOF || closeErr != nil || r.Schema != 1 || !validID(r.ID) || entry.Name() != r.ID+".json" || r.Version != exercise.Version(r.Spec) || len(r.Spec.Reference) > 0 || (r.PackageDir != "." && !safeRelative(r.PackageDir)) {
 			return nil, errors.Join(errors.New("共享题目版本、字段或路径无效"), err, closeErr)
 		}
-		if err = exercise.Check(r.Spec); err != nil {
-			return nil, err
+		if checkErr := exercise.Check(r.Spec); checkErr != nil {
+			return nil, checkErr
 		}
 		allowed := true
 		for name := range exercise.Files(r.Spec, false) {
@@ -200,7 +200,8 @@ func (a *App) ImportExercise(id string) (ExerciseDisplay, error) {
 	if err != nil {
 		return ExerciseDisplay{}, err
 	}
-	for _, r := range records {
+	for i := range records {
+		r := &records[i]
 		if r.ID != id {
 			continue
 		}
@@ -208,8 +209,8 @@ func (a *App) ImportExercise(id string) (ExerciseDisplay, error) {
 			return a.ExerciseView(id)
 		}
 		e := Exercise{ID: r.ID, Version: r.Version, Supersedes: r.Supersedes, PackageDir: r.PackageDir, Spec: r.Spec, Imported: true}
-		if err = a.write("exercise-"+id+".json", e); err != nil {
-			return ExerciseDisplay{}, err
+		if writeErr := a.write("exercise-"+id+".json", e); writeErr != nil {
+			return ExerciseDisplay{}, writeErr
 		}
 		return a.ExerciseView(id)
 	}
@@ -255,8 +256,8 @@ func (a *App) ExerciseFeedback(ctx context.Context, id, attemptID, reason, key s
 		}
 		attempt.Reason = reason
 		attempt.Feedback = response.Feedback
-		if err = a.write("exercise-attempts-"+id+".json", view.Attempts); err != nil {
-			return view, err
+		if writeErr := a.write("exercise-attempts-"+id+".json", view.Attempts); writeErr != nil {
+			return view, writeErr
 		}
 		return a.ExerciseView(id)
 	}

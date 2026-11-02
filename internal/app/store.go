@@ -19,10 +19,10 @@ import (
 type App struct {
 	applyStageFault func() error    // Test seam before a source rename.
 	applyFault      func(int) error // In-process failure injection; never serialized.
-	Root            string
-	State           string
 	modelRun        func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
 	exerciseRun     func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
+	Root            string
+	State           string
 }
 
 func Open(root, state string) (*App, error) {
@@ -52,8 +52,8 @@ func Open(root, state string) (*App, error) {
 	if contained(root, state) {
 		return nil, errors.New("本地私有状态目录必须位于项目之外")
 	}
-	if err = os.MkdirAll(state, 0700); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(state, 0o700); mkdirErr != nil {
+		return nil, mkdirErr
 	}
 	state, err = filepath.EvalSymlinks(state)
 	if err != nil {
@@ -67,8 +67,8 @@ func Open(root, state string) (*App, error) {
 		identity = strings.ToLower(root)
 	}
 	state = filepath.Join(state, hash(identity)[:24])
-	if err = os.MkdirAll(state, 0700); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(state, 0o700); mkdirErr != nil {
+		return nil, mkdirErr
 	}
 	canonical, err := filepath.EvalSymlinks(state)
 	if err != nil {
@@ -78,11 +78,11 @@ func Open(root, state string) (*App, error) {
 		return nil, errors.New("项目私有状态目录不能是链接")
 	}
 	a := &App{Root: root, State: state}
-	if err = a.recoverState(); err != nil {
-		return nil, err
+	if recoverErr := a.recoverState(); recoverErr != nil {
+		return nil, recoverErr
 	}
-	if err = a.scrubExcluded(); err != nil {
-		return nil, err
+	if scrubErr := a.scrubExcluded(); scrubErr != nil {
+		return nil, scrubErr
 	}
 	return a, nil
 }
@@ -171,5 +171,5 @@ func (a *App) write(name string, v any) error {
 		return err
 	}
 	defer root.Close()
-	return atomicReplace(root, name, b, 0600, nil)
+	return atomicReplace(root, name, b, 0o600, nil)
 }

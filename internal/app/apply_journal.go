@@ -12,6 +12,7 @@ import (
 
 const applyJournalName = "apply-journal.json"
 
+// applyJournal is serialized; keep its field order stable for persisted JSON.
 type applyJournal struct {
 	ID         string           `json:"id"`
 	Schema     int              `json:"schema"`
@@ -19,9 +20,9 @@ type applyJournal struct {
 	Changes    []ExerciseChange `json:"changes"`
 }
 
-func currentSource(root *os.Root, path string) (string, os.FileMode, error) {
-	if err := safeComponents(root, path); err != nil {
-		return "", 0, err
+func currentSource(root *os.Root, path string) (source string, mode os.FileMode, err error) {
+	if componentsErr := safeComponents(root, path); componentsErr != nil {
+		return "", 0, componentsErr
 	}
 	info, err := root.Lstat(path)
 	if err != nil {
@@ -51,8 +52,8 @@ func (a *App) removeApplyJournal() error {
 		return err
 	}
 	defer root.Close()
-	if err = root.Remove(applyJournalName); err != nil {
-		return err
+	if removeErr := root.Remove(applyJournalName); removeErr != nil {
+		return removeErr
 	}
 	f, err := root.Open(".")
 	if err != nil {
@@ -95,8 +96,8 @@ func (a *App) recoverApply() error {
 			return errors.New("应用恢复日志超出范围")
 		}
 	}
-	if err = j.cleanupStages(root); err != nil {
-		return err
+	if cleanupErr := j.cleanupStages(root); cleanupErr != nil {
+		return cleanupErr
 	}
 	if policy.Hash() != j.PolicyHash {
 		return errors.New("应用恢复期间排除规则变化；暂存已清除，保留日志，请人工检查")
@@ -126,8 +127,8 @@ func (a *App) recoverApply() error {
 			return fmt.Errorf("恢复未完成，保留日志: %w", e)
 		}
 	}
-	if err = j.cleanupStages(root); err != nil {
-		return err
+	if cleanupErr := j.cleanupStages(root); cleanupErr != nil {
+		return cleanupErr
 	}
 	return a.removeApplyJournal()
 }
@@ -155,8 +156,8 @@ func (a *App) applyChanges(plan ExerciseApply) error {
 		}
 	}
 	j := applyJournal{ID: newID(), Schema: 1, PolicyHash: plan.PolicyHash, Changes: plan.Changes}
-	if err = a.write(applyJournalName, j); err != nil {
-		return err
+	if writeErr := a.write(applyJournalName, j); writeErr != nil {
+		return writeErr
 	}
 	fail := func(cause error) error {
 		if recoveryErr := a.recoverApply(); recoveryErr != nil {
@@ -182,11 +183,11 @@ func (a *App) applyChanges(plan ExerciseApply) error {
 			}
 		}
 	}
-	if err = j.cleanupStages(root); err != nil {
-		return err
+	if cleanupErr := j.cleanupStages(root); cleanupErr != nil {
+		return cleanupErr
 	}
-	if err = a.removeApplyJournal(); err != nil {
-		return fmt.Errorf("源码已替换但日志清理失败；请保留日志重试恢复: %w", err)
+	if removeErr := a.removeApplyJournal(); removeErr != nil {
+		return fmt.Errorf("源码已替换但日志清理失败；请保留日志重试恢复: %w", removeErr)
 	}
 	return nil
 }

@@ -187,7 +187,7 @@ func Materialize(dir string, files map[string]string) error {
 	if err := Qualify(files); err != nil {
 		return err
 	}
-	if err := os.Mkdir(dir, 0700); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(dir)
@@ -200,7 +200,7 @@ func Materialize(dir string, files map[string]string) error {
 		all[p] = s
 	}
 	for p, s := range all {
-		f, e := root.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		f, e := root.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if e != nil {
 			return e
 		}
@@ -296,7 +296,7 @@ func Scope(files map[string]string) []string {
 	return out
 }
 func Behavior(s Spec, result Result) []CheckResult {
-	out := []CheckResult{}
+	out := make([]CheckResult, 0, len(s.Requirements))
 	for _, r := range s.Requirements {
 		status := result.Tests[r.Test]
 		if status == "" {

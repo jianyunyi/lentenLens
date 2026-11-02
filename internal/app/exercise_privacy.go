@@ -21,8 +21,8 @@ func (a *App) scrubExercises() error {
 			continue
 		}
 		var e Exercise
-		if err = a.read(name, &e); err != nil {
-			return err
+		if readErr := a.read(name, &e); readErr != nil {
+			return readErr
 		}
 		revoked := e.SourceID != "" && !a.revisionExists(e.SourceID)
 		paths := map[string]bool{}
@@ -43,11 +43,11 @@ func (a *App) scrubExercises() error {
 			}
 		}
 		var attempts []ExerciseAttempt
-		if err = a.read("exercise-attempts-"+id+".json", &attempts); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+		if attemptsErr := a.read("exercise-attempts-"+id+".json", &attempts); attemptsErr != nil && !errors.Is(attemptsErr, os.ErrNotExist) {
+			return attemptsErr
 		}
-		for _, attempt := range attempts {
-			for p := range attempt.Files {
+		for i := range attempts {
+			for p := range attempts[i].Files {
 				paths[p] = true
 			}
 		}
@@ -65,20 +65,20 @@ func (a *App) scrubExercises() error {
 		}
 		dir := filepath.Join(a.State, "exercise-work-"+id)
 		if info, err := os.Lstat(dir); err == nil {
-			resolved, err := filepath.EvalSymlinks(dir)
-			if err != nil || resolved != dir || !contained(a.State, dir) || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			resolved, resolveErr := filepath.EvalSymlinks(dir)
+			if resolveErr != nil || resolved != dir || !contained(a.State, dir) || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 				return errors.New("撤销练习目录含链接，请手动检查")
 			}
-			if err = os.RemoveAll(dir); err != nil {
-				return err
+			if removeErr := os.RemoveAll(dir); removeErr != nil {
+				return removeErr
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		// Keep the principal record until every dependent removal succeeds, so failures retry.
 		for _, prefix := range []string{"exercise-attempts-", "exercise-validation-", "exercise-auth-", "exercise-share-", "exercise-"} {
-			if err = os.Remove(filepath.Join(a.State, prefix+id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
+			if removeErr := os.Remove(filepath.Join(a.State, prefix+id+".json")); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return removeErr
 			}
 		}
 	}
@@ -94,8 +94,8 @@ func (a *App) readExerciseAnswer(e Exercise, dir string) (map[string]string, err
 		if entry.Name() == "go.mod" {
 			continue
 		}
-		ok, err := capture.Allowed(a.Root, exercise.JoinSource(e.PackageDir, entry.Name()))
-		if err != nil || !ok {
+		ok, allowedErr := capture.Allowed(a.Root, exercise.JoinSource(e.PackageDir, entry.Name()))
+		if allowedErr != nil || !ok {
 			return nil, errors.New("练习材料包含已排除路径，未读取内容")
 		}
 	}

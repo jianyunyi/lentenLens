@@ -19,11 +19,11 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	defer unlock()
 
 	var raw Settings
-	if err := a.read("settings.json", &raw); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	if readErr := a.read("settings.json", &raw); readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
 			return 0, errors.New("请先显式配置模型 provider、Base URL 和模型 ID")
 		}
-		return 0, err
+		return 0, readErr
 	}
 	if !raw.Model.Enabled {
 		return 0, errors.New("模型 API 未启用")
@@ -49,8 +49,8 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	}
 	reserved := usage
 	reserved.UncertainTokens += reserve
-	if err := a.write("usage.json", reserved); err != nil {
-		return 0, err
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return 0, writeErr
 	}
 	tokens, err := explain.TestConnection(ctx, cfg, key)
 	if err != nil {
@@ -63,8 +63,8 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	}
 	reserved.UncertainTokens -= reserve
 	reserved.ActualTokens += tokens
-	if err := a.write("usage.json", reserved); err != nil {
-		return 0, err
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return 0, writeErr
 	}
 	return tokens, nil
 }

@@ -18,12 +18,12 @@ func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMo
 	if !filepath.IsLocal(name) {
 		return errors.New("替换路径越界")
 	}
-	if info, err := root.Lstat(name); err == nil {
+	if info, statErr := root.Lstat(name); statErr == nil {
 		if !info.Mode().IsRegular() {
 			return errors.New("替换目标不是普通文件")
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
 	}
 	dir := filepath.Dir(name)
 	// Pin the parent directory too, so an ancestor swapped by another process
@@ -82,12 +82,12 @@ func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMo
 		}
 	}
 	if beforeRename != nil {
-		if err = beforeRename(); err != nil {
-			return err
+		if callbackErr := beforeRename(); callbackErr != nil {
+			return callbackErr
 		}
 	}
-	if err = parent.Rename(temp, base); err != nil {
-		return err
+	if renameErr := parent.Rename(temp, base); renameErr != nil {
+		return renameErr
 	}
 	d, err := parent.Open(".")
 	if err != nil {

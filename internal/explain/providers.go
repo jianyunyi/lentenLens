@@ -55,7 +55,7 @@ func (c Config) Resolved() (Config, error) {
 	}
 	ip := net.ParseIP(u.Hostname())
 	loopback := strings.EqualFold(u.Hostname(), "localhost") || (ip != nil && ip.IsLoopback())
-	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
 		return c, errors.New("API 必须使用 HTTPS；仅本机 loopback 可使用 HTTP")
 	}
 	if c.APIKeyEnv == "" {

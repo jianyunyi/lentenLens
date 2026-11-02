@@ -216,8 +216,8 @@ func TestExerciseSharingAndRevocationKeepPersonalStateLocal(t *testing.T) {
 		t.Fatal("recipient inherited private state")
 	}
 	put(t, root, ".intentignore", exercise.AcceptanceFile+"\n")
-	if shared, err := receiver.SharedExercises(); err != nil || len(shared) != 0 {
-		t.Fatal("excluded acceptance leaked", err)
+	if shared, sharedErr := receiver.SharedExercises(); sharedErr != nil || len(shared) != 0 {
+		t.Fatal("excluded acceptance leaked", sharedErr)
 	}
 	put(t, root, ".intentignore", "main.go\n")
 	if _, err = a.Exercises(); err != nil {

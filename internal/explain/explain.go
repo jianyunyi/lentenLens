@@ -112,7 +112,8 @@ func fastEligible(question string, evidence []Evidence) bool {
 		return false
 	}
 	total := 0
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if len(item.Source) > fastMaxEvidenceBytes-total {
 			return false
 		}
@@ -200,7 +201,8 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 		return Document{}, usage, errors.New("模型未返回有效的解释 JSON")
 	}
 	valid := map[string]bool{}
-	for _, e := range evidence {
+	for i := range evidence {
+		e := &evidence[i]
 		valid[e.ID] = true
 	}
 	claims := []Claim{}
@@ -285,7 +287,7 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 			doc.Unknowns = append(doc.Unknowns, "一项说法未获证据支持，已省略")
 			continue
 		}
-		if s == "supported" && profile.mode == ModeStrict && strictNeedsUsageEvidence(c) && !hasPurposeEvidence(c, reviewEvidence) {
+		if s == "supported" && profile.mode == ModeStrict && strictNeedsUsageEvidence(&c) && !hasPurposeEvidence(&c, reviewEvidence) {
 			doc.Unknowns = append(doc.Unknowns, "strict 模式无法仅凭函数实现确认用途或调用场景；缺少被引用的调用点或明确文档，已保留待确认")
 			checked = append(checked, c)
 			continue
@@ -307,15 +309,16 @@ func citedEvidence(claims []Claim, evidence []Evidence) []Evidence {
 		}
 	}
 	selected := make([]Evidence, 0, len(used))
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if used[item.ID] {
-			selected = append(selected, item)
+			selected = append(selected, *item)
 		}
 	}
 	return selected
 }
 
-func strictNeedsUsageEvidence(claim Claim) bool {
+func strictNeedsUsageEvidence(claim *Claim) bool {
 	if strings.EqualFold(strings.TrimSpace(claim.Section), "purpose") {
 		return true
 	}
@@ -328,12 +331,13 @@ func strictNeedsUsageEvidence(claim Claim) bool {
 	return false
 }
 
-func hasPurposeEvidence(claim Claim, evidence []Evidence) bool {
+func hasPurposeEvidence(claim *Claim, evidence []Evidence) bool {
 	cited := make(map[string]bool, len(claim.EvidenceIDs))
 	for _, id := range claim.EvidenceIDs {
 		cited[id] = true
 	}
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if !cited[item.ID] {
 			continue
 		}

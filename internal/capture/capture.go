@@ -59,7 +59,7 @@ func Take(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if ok, err := safePath(root, ""); err != nil || !ok {
+	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
 		return Snapshot{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)
@@ -148,7 +148,7 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
 	}
-	if ok, err := safePath(root, ""); err != nil || !ok {
+	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
 		return Snapshot{}, Coverage{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)

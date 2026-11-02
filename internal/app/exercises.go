@@ -79,16 +79,16 @@ func (a *App) exerciseModel(ctx context.Context, key, prompt string) (string, er
 	}
 	reserved := u
 	reserved.UncertainTokens += reserve
-	if err = a.write("usage.json", reserved); err != nil {
-		return "", err
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return "", writeErr
 	}
 	run := a.exerciseRun
 	if run == nil {
 		run = explain.Structured
 	}
 	raw, updated, callErr := run(ctx, cfg.Model, u, key, prompt)
-	if err = a.write("usage.json", updated); err != nil {
-		return "", err
+	if writeErr := a.write("usage.json", updated); writeErr != nil {
+		return "", writeErr
 	}
 	return raw, callErr
 }
@@ -112,9 +112,10 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 		return Exercise{}, errors.New("请选择已获证据支持的行为说法")
 	}
 	target := false
-	for _, ev := range source.Evidence {
+	for i := range source.Evidence {
+		ev := &source.Evidence[i]
 		for _, id := range selected.EvidenceIDs {
-			if ev.ID == id && ev.File == file && codeEvidence(ev) && ev.Role != "before" {
+			if ev.ID == id && ev.File == file && codeEvidence(*ev) && ev.Role != "before" {
 				target = true
 			}
 		}
@@ -157,14 +158,15 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 		}
 		files[name] = f.Content
 	}
-	if err = exercise.Qualify(files); err != nil {
-		return Exercise{}, err
+	if qualifyErr := exercise.Qualify(files); qualifyErr != nil {
+		return Exercise{}, qualifyErr
 	}
 	targetEvidence := []explain.Evidence{}
-	for _, ev := range source.Evidence {
+	for i := range source.Evidence {
+		ev := &source.Evidence[i]
 		for _, id := range selected.EvidenceIDs {
-			if ev.ID == id && codeEvidence(ev) && ev.Visibility != "local" && filepath.ToSlash(filepath.Dir(ev.File)) == dir {
-				targetEvidence = append(targetEvidence, ev)
+			if ev.ID == id && codeEvidence(*ev) && ev.Visibility != "local" && filepath.ToSlash(filepath.Dir(ev.File)) == dir {
+				targetEvidence = append(targetEvidence, *ev)
 			}
 		}
 	}
@@ -189,8 +191,8 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 	if len(spec.Reference) == 0 {
 		return Exercise{}, errors.New("题目缺少内部验证参考修改")
 	}
-	if err = exercise.Check(spec); err != nil {
-		return Exercise{}, err
+	if checkErr := exercise.Check(spec); checkErr != nil {
+		return Exercise{}, checkErr
 	}
 	latest, err := a.ExplanationByID(sourceID)
 	if err != nil || latest.Freshness != "已引用证据未变" || len(latest.Corrections) > 0 {
@@ -248,7 +250,7 @@ func (a *App) exerciseDirectory(id string) (string, error) {
 		return "", errors.New("无效题目 ID")
 	}
 	dir := filepath.Join(a.State, "exercise-work-"+id)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(dir)

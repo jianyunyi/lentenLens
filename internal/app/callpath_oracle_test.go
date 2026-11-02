@@ -12,20 +12,20 @@ import (
 
 type oracleCall struct {
 	Caller, Name, Status string
-	Targets              []string
 	File                 string
-	Line, Column         int
 	Source               string
+	Targets              []string
+	Line, Column         int
 }
 type oracleFixture struct {
 	name, file string
-	line       int
 	files      map[string]string
 	selected   string
 	functions  []string
 	roots      []string
 	calls      []oracleCall
 	facts      []bool
+	line       int
 }
 type oracleMetric struct {
 	Numerator   int     `json:"numerator"`
@@ -51,7 +51,10 @@ type oracleMetrics struct {
 }
 
 func oc(caller, name, status string, targets []string, file string, line, column int, source string) oracleCall {
-	return oracleCall{caller, name, status, targets, file, line, column, source}
+	return oracleCall{
+		Caller: caller, Name: name, Status: status, File: file, Source: source,
+		Targets: targets, Line: line, Column: column,
+	}
 }
 func resolved(caller, name, target, file string, line, col int, source string) oracleCall {
 	return oc(caller, name, "resolved", []string{target}, file, line, col, source)
@@ -87,14 +90,14 @@ func TestCallPathOracleBenchmark(t *testing.T) {
 		m.EvidenceExact.Percent = pct(m.EvidenceExact.Numerator, m.EvidenceExact.Denominator)
 		m.SourceFactAnswers.Percent = pct(m.SourceFactAnswers.Numerator, m.SourceFactAnswers.Denominator)
 		m.UnknownAbstention.Percent = pct(m.UnknownAbstention.Numerator, m.UnknownAbstention.Denominator)
-		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		b, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, append(b, '\n'), 0600); err != nil {
+		if err := os.WriteFile(p, append(b, '\n'), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,12 +156,13 @@ func checkFixture(t *testing.T, fx oracleFixture, got CallPath, m *oracleMetrics
 		} else {
 			t.Errorf("call %s got=%+v want=%+v", key, g, w)
 		}
-		if w.Status == "resolved" {
+		switch w.Status {
+		case "resolved":
 			m.CallsiteTargetAccuracy.Denominator++
 			if evidenceOK {
 				m.CallsiteTargetAccuracy.Numerator++
 			}
-		} else if w.Status == "unresolved" {
+		case "unresolved":
 			m.UnknownAbstention.Denominator++
 			if evidenceOK && g.Status == w.Status && len(g.Targets) == 0 {
 				m.UnknownAbstention.Numerator++
