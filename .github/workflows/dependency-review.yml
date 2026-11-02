@@ -20,7 +20,7 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
-          deny-licenses: GPL-3.0, AGPL-3.0
+          # The allow-list is stricter than the redundant GPL/AGPL deny-list.
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC
           comment-summary-in-pr: always
 
@@ -37,10 +37,11 @@ jobs:
       - name: Check go.mod and go.sum are tidy
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum || {
+          if [ -n "$(git status --porcelain --untracked-files=all -- go.mod go.sum)" ]; then
+            git status --short -- go.mod go.sum
             echo "go.mod or go.sum is not tidy. Please run 'go mod tidy' and commit changes."
             exit 1
-          }
+          fi
 
   npm-outdated:
     name: Check Outdated npm Packages

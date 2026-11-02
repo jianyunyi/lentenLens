@@ -42,6 +42,18 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+          output: codeql-results
+          post-processed-sarif-path: codeql-processed-sarif
+      - name: Preserve CodeQL SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: |
+            codeql-results/
+            codeql-processed-sarif/
+          if-no-files-found: warn
+          retention-days: 14
 
   gosec:
     name: Go Security Scan (gosec)
@@ -62,6 +74,14 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gosec-results.sarif
+      - name: Preserve Gosec SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosec-sarif
+          path: gosec-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   nancy:
     name: Go Dependency Vulnerability Scan (nancy)
@@ -118,6 +138,14 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
+      - name: Preserve Trivy SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          path: trivy-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   semgrep:
     name: Semgrep Security Scan
@@ -138,6 +166,14 @@ jobs:
         if: always()
         with:
           sarif_file: semgrep-results.sarif
+      - name: Preserve Semgrep SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   license-check:
     name: License Compliance Check
@@ -159,6 +195,9 @@ jobs:
   secrets-scan:
     name: Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

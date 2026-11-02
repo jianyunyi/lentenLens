@@ -105,8 +105,9 @@ func (a *App) isolateRecords() error {
 		if err != nil {
 			return err
 		}
-		entries, err := dir.ReadDir(-1)
-		dir.Close()
+		entries, readErr := dir.ReadDir(-1)
+		closeErr := dir.Close()
+		err = errors.Join(readErr, closeErr)
 		if err != nil {
 			return err
 		}
@@ -148,9 +149,9 @@ func (a *App) isolateRecords() error {
 				return e
 			}
 			b, e := io.ReadAll(io.LimitReader(f, (maxStateRecordBytes)+1))
-			f.Close()
-			if e != nil {
-				return e
+			closeErr := f.Close()
+			if e != nil || closeErr != nil {
+				return errors.Join(e, closeErr)
 			}
 			if len(b) > maxStateRecordBytes {
 				parseErr = errors.New("记录超过恢复范围")
@@ -176,8 +177,9 @@ func (a *App) isolateRecords() error {
 	if err != nil {
 		return err
 	}
-	quarantined, err := dir.ReadDir(-1)
-	dir.Close()
+	quarantined, readErr := dir.ReadDir(-1)
+	closeErr := dir.Close()
+	err = errors.Join(readErr, closeErr)
 	if err != nil {
 		return err
 	}
@@ -289,7 +291,10 @@ func validateStateRecord(name string, b []byte, target any) error {
 		if limit < 0 || (enabled && (limit == 0 || modelID == "")) {
 			return errors.New("模型授权范围无效")
 		}
-		cfg := target.(*Settings)
+		cfg, ok := target.(*Settings)
+		if !ok {
+			return errors.New("设置记录目标类型无效")
+		}
 		if _, err := cfg.Model.Resolved(); err != nil {
 			return err
 		}

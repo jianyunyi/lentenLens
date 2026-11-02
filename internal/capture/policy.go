@@ -2,9 +2,11 @@ package capture
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,10 +19,18 @@ type Policy struct{ patterns []string }
 // Basename patterns match every path component; slash patterns are root-relative.
 // Every matched path and its descendants are excluded, including directory rules.
 // Negation is deliberately unsupported so exclusions cannot be re-included.
-func LoadPolicy(root string) (Policy, error) {
-	p := Policy{patterns: []string{".git", ".intent", ".intentlens-write-*", ".intentignore", ".worktrees", ".cache", ".pnpm-store", "node_modules", "vendor", ".env*", "*.pem", "*.key"}}
-	name := filepath.Join(root, ".intentignore")
-	info, err := os.Lstat(name)
+func LoadPolicy(root string) (p Policy, retErr error) {
+	p = Policy{patterns: []string{".git", ".intent", ".intentlens-write-*", ".intentignore", ".worktrees", ".cache", ".pnpm-store", "node_modules", "vendor", ".env*", "*.pem", "*.key"}}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return p, err
+	}
+	defer func() {
+		if closeErr := dir.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
+		}
+	}()
+	info, err := dir.Lstat(".intentignore")
 	if errors.Is(err, os.ErrNotExist) {
 		return p, nil
 	}
@@ -33,12 +43,29 @@ func LoadPolicy(root string) (Policy, error) {
 	if info.Size() > 64*1024 {
 		return p, fmt.Errorf(".intentignore exceeds 64 KiB")
 	}
-	f, err := os.Open(name)
+	f, err := dir.Open(".intentignore")
 	if err != nil {
 		return p, err
 	}
-	defer f.Close()
-	scan := bufio.NewScanner(f)
+	openedInfo, err := f.Stat()
+	if err != nil {
+		return p, errors.Join(err, f.Close())
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return p, errors.Join(fmt.Errorf(".intentignore changed while opening"), f.Close())
+	}
+	if openedInfo.Size() > 64*1024 {
+		return p, errors.Join(fmt.Errorf(".intentignore exceeds 64 KiB"), f.Close())
+	}
+	data, readErr := io.ReadAll(io.LimitReader(f, 64*1024+1))
+	closeErr := f.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return p, err
+	}
+	if len(data) > 64*1024 {
+		return p, fmt.Errorf(".intentignore exceeds 64 KiB")
+	}
+	scan := bufio.NewScanner(bytes.NewReader(data))
 	for scan.Scan() {
 		s := strings.TrimSpace(scan.Text())
 		if s == "" || strings.HasPrefix(s, "#") {
@@ -77,7 +104,13 @@ func (p Policy) Allows(name string) bool {
 	for _, pattern := range p.patterns {
 		if !strings.Contains(pattern, "/") {
 			for _, part := range parts {
-				if ok, _ := path.Match(pattern, part); ok {
+				ok, err := path.Match(pattern, part)
+				if err != nil {
+					// Invalid patterns are rejected by LoadPolicy; deny on a
+					// malformed in-memory policy rather than weakening exclusion.
+					return false
+				}
+				if ok {
 					return false
 				}
 			}
@@ -102,7 +135,10 @@ func matchParts(pattern, parts []string) bool {
 	if len(parts) == 0 {
 		return false
 	}
-	ok, _ := path.Match(pattern[0], parts[0])
+	ok, err := path.Match(pattern[0], parts[0])
+	if err != nil {
+		return false
+	}
 	return ok && matchParts(pattern[1:], parts[1:])
 }
 

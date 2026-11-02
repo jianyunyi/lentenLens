@@ -214,7 +214,7 @@ func (j applyJournal) cleanupStages(root *os.Root) error {
 			return err
 		}
 		err = syncDir(f)
-		f.Close()
+		err = errors.Join(err, f.Close())
 		if err != nil {
 			return err
 		}

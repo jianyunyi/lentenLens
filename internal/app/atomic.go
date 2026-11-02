@@ -14,7 +14,7 @@ func atomicReplace(root *os.Root, name string, data []byte, mode os.FileMode, be
 	return atomicReplaceStaged(root, name, data, mode, before, "", nil)
 }
 
-func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMode, before *string, stage string, beforeRename func() error) error {
+func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMode, before *string, stage string, beforeRename func() error) (err error) {
 	if !filepath.IsLocal(name) {
 		return errors.New("替换路径越界")
 	}
@@ -45,10 +45,13 @@ func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMo
 	if err != nil {
 		return err
 	}
-	defer parent.Remove(temp)
+	defer func() {
+		if removeErr := parent.Remove(temp); err == nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = removeErr
+		}
+	}()
 	if err = f.Chmod(mode.Perm()); err != nil {
-		f.Close()
-		return err
+		return errors.Join(err, f.Close())
 	}
 	if _, err = f.Write(data); err == nil {
 		err = f.Sync()
@@ -70,8 +73,11 @@ func atomicReplaceStaged(root *os.Root, name string, data []byte, mode os.FileMo
 			return e
 		}
 		b, e := io.ReadAll(io.LimitReader(current, 60001))
-		current.Close()
-		if e != nil || string(b) != *before {
+		closeErr := current.Close()
+		if e != nil || closeErr != nil {
+			return errors.Join(e, closeErr)
+		}
+		if string(b) != *before {
 			return errors.New("应用目标内容变化；未覆盖")
 		}
 	}

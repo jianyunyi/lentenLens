@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 )
 
@@ -32,14 +31,14 @@ func (a *App) lock(name string) (func(), error) {
 		return nil, err
 	}
 	info, err := f.Stat()
-	linkInfo, linkErr := os.Lstat(filepath.Join(a.State, path))
+	linkInfo, linkErr := root.Lstat(path)
 	if err != nil || linkErr != nil || !info.Mode().IsRegular() || !os.SameFile(info, linkInfo) {
-		f.Close()
-		return nil, errors.New("操作锁路径变化")
+		closeErr := f.Close()
+		return nil, errors.Join(errors.New("操作锁路径变化"), err, linkErr, closeErr)
 	}
 	if err = lockFile(f); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("项目操作进行中（%s）: %w", name, err)
+		closeErr := f.Close()
+		return nil, errors.Join(fmt.Errorf("项目操作进行中（%s）: %w", name, err), closeErr)
 	}
 	var once sync.Once
 	return func() { once.Do(func() { unlockFile(f); _ = f.Close() }) }, nil

@@ -65,7 +65,7 @@ func (c Config) Resolved() (Config, error) {
 		return c, errors.New("密钥环境变量名无效")
 	}
 	if c.Provider == "gemini" && c.Model != "" && !regexp.MustCompile(`^(models/)?[A-Za-z0-9][A-Za-z0-9._-]*$`).MatchString(c.Model) {
-		return c, errors.New("Gemini 模型 ID 应为模型名称或 API 返回的 models/<name> 资源名")
+		return c, errors.New("gemini 模型 ID 应为模型名称或 API 返回的 models/<name> 资源名")
 	}
 	return c, nil
 }
@@ -107,7 +107,10 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 	if cfg.Endpoint != "" {
 		endpoint = cfg.Endpoint
 	} // Non-serializable test seam.
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", 0, errors.New("模型请求无法编码为 JSON")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return "", 0, errors.New("模型请求地址无效")
@@ -193,11 +196,11 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 		for _, c := range result.Content {
 			if c.Type == "text" || (c.Type == "" && c.Text != nil) {
 				if c.Text == nil {
-					return "", 0, errors.New("Anthropic 文本块缺少文本内容")
+					return "", 0, errors.New("anthropic 文本块缺少文本内容")
 				}
 				out.WriteString(*c.Text)
 			} else if c.Text != nil && c.Type != "thinking" && c.Type != "redacted_thinking" {
-				return "", 0, errors.New("Anthropic 响应包含无法完整显示的文本块")
+				return "", 0, errors.New("anthropic 响应包含无法完整显示的文本块")
 			}
 		}
 		if u := result.Usage; u != nil && u.Input != nil && u.Output != nil {
@@ -230,7 +233,7 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 	case "gemini":
 		if len(result.Candidates) != 1 || result.Candidates[0].Finish != "STOP" {
 			if len(result.Candidates) != 1 {
-				return "", 0, errors.New("Gemini 返回的候选数不是恰好一条，无法验证单条完整答案")
+				return "", 0, errors.New("gemini 返回的候选数不是恰好一条，无法验证单条完整答案")
 			}
 			return "", 0, incompleteFinishError(result.Candidates[0].Finish)
 		}
@@ -239,7 +242,7 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 				continue
 			}
 			if p.Text == nil {
-				return "", 0, errors.New("Gemini 响应包含无法完整显示的非文本部分")
+				return "", 0, errors.New("gemini 响应包含无法完整显示的非文本部分")
 			}
 			out.WriteString(*p.Text)
 		}

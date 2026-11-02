@@ -42,7 +42,10 @@ func (a *App) PrepareExerciseShare(id string) (ExerciseShareDraft, error) {
 	spec.Reference = nil
 	record := SharedExercise{Schema: 1, ID: e.ID, Version: e.Version, PackageDir: e.PackageDir, Spec: spec, AuthorValidation: "作者环境通过：原测试、基线预期失败、参考修改通过；接收者本地尚未验证"}
 	if e.Supersedes != "" {
-		records, _ := a.SharedExercises()
+		records, err := a.SharedExercises()
+		if err != nil {
+			return ExerciseShareDraft{}, err
+		}
 		for _, r := range records {
 			if r.ID == e.Supersedes {
 				record.Supersedes = e.Supersedes
@@ -84,7 +87,10 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 		return err
 	}
 	defer root.Close()
-	b, _ := json.MarshalIndent(draft.Record, "", "  ")
+	b, err := json.MarshalIndent(draft.Record, "", "  ")
+	if err != nil {
+		return err
+	}
 	if len(b) > maxShareBytes {
 		return errors.New("题目共享记录过大")
 	}
@@ -98,7 +104,9 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 		err = ce
 	}
 	if err != nil {
-		_ = root.Remove(id + ".json")
+		if removeErr := root.Remove(id + ".json"); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return errors.Join(err, removeErr)
+		}
 	}
 	return err
 }
@@ -140,7 +148,8 @@ func (a *App) SharedExercises() ([]SharedExercise, error) {
 		return nil, err
 	}
 	entries, err := dir.ReadDir(-1)
-	dir.Close()
+	closeErr := dir.Close()
+	err = errors.Join(err, closeErr)
 	if err != nil {
 		return nil, err
 	}
@@ -162,9 +171,9 @@ func (a *App) SharedExercises() ([]SharedExercise, error) {
 		err = decoder.Decode(&r)
 		var extra any
 		end := decoder.Decode(&extra)
-		f.Close()
-		if err != nil || end != io.EOF || r.Schema != 1 || !validID(r.ID) || entry.Name() != r.ID+".json" || r.Version != exercise.Version(r.Spec) || len(r.Spec.Reference) > 0 || (r.PackageDir != "." && !safeRelative(r.PackageDir)) {
-			return nil, errors.New("共享题目版本、字段或路径无效")
+		closeErr := f.Close()
+		if err != nil || end != io.EOF || closeErr != nil || r.Schema != 1 || !validID(r.ID) || entry.Name() != r.ID+".json" || r.Version != exercise.Version(r.Spec) || len(r.Spec.Reference) > 0 || (r.PackageDir != "." && !safeRelative(r.PackageDir)) {
+			return nil, errors.Join(errors.New("共享题目版本、字段或路径无效"), err, closeErr)
 		}
 		if err = exercise.Check(r.Spec); err != nil {
 			return nil, err
@@ -227,7 +236,10 @@ func (a *App) ExerciseFeedback(ctx context.Context, id, attemptID, reason, key s
 		if attempt.ID != attemptID {
 			continue
 		}
-		payload, _ := json.Marshal(map[string]any{"requirements": view.Spec.Requirements, "answer": attempt.Files, "result": attempt.Result, "reason": reason})
+		payload, err := json.Marshal(map[string]any{"requirements": view.Spec.Requirements, "answer": attempt.Files, "result": attempt.Result, "reason": reason})
+		if err != nil {
+			return view, err
+		}
 		raw, err := a.exerciseModel(ctx, key, `仅评价用户对修改理由的解释质量，返回 JSON {"feedback":"中文补充反馈"}。不要给分，不改变测试结果，不宣称完全理解或测试未覆盖的正确性。测试失败必须保留，未验证题目反馈只能暂定。材料：`+string(payload))
 		if err != nil {
 			return view, err

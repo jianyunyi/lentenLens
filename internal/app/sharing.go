@@ -195,7 +195,9 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 		err = closeErr
 	}
 	if err != nil {
-		_ = dir.Remove(name)
+		if removeErr := dir.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return SharedRecord{}, errors.Join(err, removeErr)
+		}
 		return SharedRecord{}, err
 	}
 	return draft.Record, nil
@@ -326,7 +328,8 @@ func (a *App) Shared() ([]SharedView, error) {
 		return nil, err
 	}
 	entries, err := f.ReadDir(-1)
-	f.Close()
+	closeErr := f.Close()
+	err = errors.Join(err, closeErr)
 	if err != nil {
 		return nil, err
 	}
@@ -392,23 +395,26 @@ func (a *App) sharedParent(sourceID string) string {
 func (a *App) sharedDirectParent(sourceID string) string {
 	if validID(sourceID) {
 		if dir, err := a.sharedDir(false); err == nil {
-			_, err = readShared(dir, sourceID+".json")
-			dir.Close()
-			if err == nil {
+			_, readErr := readShared(dir, sourceID+".json")
+			closeErr := dir.Close()
+			if readErr == nil && closeErr == nil {
 				return sourceID
 			}
 		}
 	}
-	entries, _ := os.ReadDir(a.State)
+	entries, err := os.ReadDir(a.State)
+	if err != nil {
+		return ""
+	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "share-draft-") {
 			var d ShareDraft
 			if a.read(e.Name(), &d) == nil && d.SourceID == sourceID {
 				dir, err := a.sharedDir(false)
 				if err == nil {
-					r, err := readShared(dir, d.ID+".json")
-					dir.Close()
-					if err == nil && r.ID == d.ID {
+					r, readErr := readShared(dir, d.ID+".json")
+					closeErr := dir.Close()
+					if readErr == nil && closeErr == nil && r.ID == d.ID {
 						return d.ID
 					}
 				}

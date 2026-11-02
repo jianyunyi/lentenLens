@@ -106,7 +106,6 @@ func pct(n, d int) float64 {
 	}
 	return float64(n) * 100 / float64(d)
 }
-func metric(n, d int) oracleMetric { return oracleMetric{n, d, pct(n, d)} }
 func checkFixture(t *testing.T, fx oracleFixture, got CallPath, m *oracleMetrics) {
 	if got.SelectedID != fx.selected {
 		t.Fatalf("selected=%q want %q", got.SelectedID, fx.selected)

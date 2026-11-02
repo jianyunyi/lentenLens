@@ -39,7 +39,13 @@ func (a *App) evidenceAllowed(e explain.Evidence) (bool, error) {
 	}
 	return e.Kind == "prompt" || e.Kind == "self_report", nil
 }
-func digest(v any) string { b, _ := json.Marshal(v); return hash(string(b)) }
+func digest(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return hash("无法序列化摘要值：" + err.Error())
+	}
+	return hash(string(b))
+}
 
 func (a *App) ExplanationByID(id string) (Explanation, error) {
 	if !validID(id) {

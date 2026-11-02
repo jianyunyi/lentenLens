@@ -101,7 +101,9 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 		info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Instances: map[*ast.Ident]types.Instance{}}
 		// No importer is supplied: dependencies are neither fetched nor executed.
 		cfg := types.Config{Error: func(err error) { out.Issues = append(out.Issues, "type check: "+err.Error()) }}
-		_, _ = cfg.Check(key, set, trees, info)
+		if _, err := cfg.Check(key, set, trees, info); err != nil {
+			out.Issues = append(out.Issues, "type check failed: "+err.Error())
+		}
 		targets := map[types.Object]string{}
 		declarations := map[string][]string{}
 		for _, u := range units {
@@ -123,7 +125,11 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 				name := f.Name.Name
 				if f.Recv != nil && len(f.Recv.List) > 0 {
 					var b bytes.Buffer
-					_ = format.Node(&b, set, f.Recv.List[0].Type)
+					if err := format.Node(&b, set, f.Recv.List[0].Type); err != nil {
+						out.Issues = append(out.Issues, fmt.Sprintf("%s: receiver formatting failed: %v", u.name, err))
+						b.Reset()
+						b.WriteString("<unformatted receiver>")
+					}
 					name = "(" + b.String() + ")." + name
 				}
 				start, end := set.PositionFor(f.Pos(), false), set.PositionFor(f.End(), false)
@@ -135,7 +141,11 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 							return true
 						}
 						var b bytes.Buffer
-						_ = format.Node(&b, set, c.Fun)
+						if err := format.Node(&b, set, c.Fun); err != nil {
+							out.Issues = append(out.Issues, fmt.Sprintf("%s: call formatting failed: %v", u.name, err))
+							b.Reset()
+							b.WriteString("<unformatted call>")
+						}
 						pos, end := set.PositionFor(c.Pos(), false), set.PositionFor(c.End(), false)
 						source := ""
 						if pos.Offset >= 0 && end.Offset <= len(u.source) && pos.Offset <= end.Offset {

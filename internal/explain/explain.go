@@ -146,7 +146,12 @@ func ReservationForMode(mode, question string, evidence []Evidence) int {
 }
 
 func reservationForProfile(profile runProfile, question string, evidence []Evidence) int {
-	b, _ := json.Marshal(evidence)
+	b, err := json.Marshal(evidence)
+	if err != nil {
+		// This API returns a budget estimate, not an error; reserve the
+		// maximum representable amount rather than under-reserving.
+		return math.MaxInt
+	}
 	return 2 * (len(b) + len(question) + len(profile.answerPrompt) + len(profile.reviewPrompt) + 4096 + (profile.answerLimit+profile.reviewLimit)*12)
 }
 
@@ -166,7 +171,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 	if len(question) > 8000 {
 		return doc, usage, errors.New("问题超过 8000 字节限制")
 	}
-	encoded, _ := json.Marshal(evidence)
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return doc, usage, errors.New("证据无法编码为 JSON")
+	}
 	if len(encoded) > 60000 {
 		return doc, usage, errors.New("证据超过本次分析范围，请选择更小的函数")
 	}
@@ -175,7 +183,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 	if reserve > usage.Remaining(cfg.TokenLimit) {
 		return doc, usage, fmt.Errorf("预算不足：本次保守预留 %d tokens；请主动追加项目预算", reserve)
 	}
-	payload, _ := json.Marshal(map[string]any{"question": question, "evidence": evidence})
+	payload, err := json.Marshal(map[string]any{"question": question, "evidence": evidence})
+	if err != nil {
+		return doc, usage, errors.New("模型请求无法编码为 JSON")
+	}
 	raw, n, err := callLimitMode(ctx, cfg, key, profile.answerPrompt, string(payload), profile.answerLimit, profile.mode)
 	if err != nil {
 		usage.uncertain(reserve)
@@ -231,7 +242,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 		return doc, usage, nil
 	}
 	reviewEvidence := citedEvidence(claims, evidence)
-	reviewPayload, _ := json.Marshal(map[string]any{"claims": claims, "evidence": reviewEvidence})
+	reviewPayload, err := json.Marshal(map[string]any{"claims": claims, "evidence": reviewEvidence})
+	if err != nil {
+		return doc, usage, errors.New("证据检查请求无法编码为 JSON")
+	}
 	reviewPrompt := profile.reviewPrompt
 	if profile.mode == ModeStrict {
 		reviewPrompt += "\n" + strictPurposeEvidencePrompt

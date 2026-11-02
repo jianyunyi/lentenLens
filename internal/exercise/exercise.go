@@ -47,7 +47,15 @@ var testName = regexp.MustCompile(`^TestIntentLens[A-Za-z0-9_]+$`)
 var imports = strings.Fields("bytes cmp container/heap container/list container/ring context encoding/base64 encoding/binary encoding/hex encoding/json errors fmt hash hash/crc32 hash/fnv io math math/big math/bits math/rand math/rand/v2 path regexp slices sort strconv strings sync sync/atomic testing time unicode unicode/utf8 unicode/utf16")
 
 func Hash(v any) string {
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		// Hash has a fixed, non-error-returning API; keep failures distinct
+		// instead of silently hashing an empty serialization.
+		return hashBytes([]byte("marshal-error:" + fmt.Sprintf("%T", v)))
+	}
+	return hashBytes(b)
+}
+func hashBytes(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -239,9 +247,9 @@ func ReadWorkspace(dir string, s Spec) (map[string]string, error) {
 			return nil, err
 		}
 		b, err := io.ReadAll(io.LimitReader(file, 60001))
-		file.Close()
-		if err != nil {
-			return nil, err
+		closeErr := file.Close()
+		if err != nil || closeErr != nil {
+			return nil, errors.Join(err, closeErr)
 		}
 		if name == "go.mod" {
 			if string(b) != Module {
@@ -272,7 +280,12 @@ func Scope(files map[string]string) []string {
 	out := []string{}
 	for name, src := range files {
 		out = append(out, "file:"+name)
-		f, _ := parser.ParseFile(token.NewFileSet(), name, src, parser.ImportsOnly)
+		f, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ImportsOnly)
+		if err != nil {
+			// Scope cannot return parse errors; retaining the file scope while
+			// omitting uncertain imports is the conservative fallback.
+			continue
+		}
 		if f != nil {
 			for _, im := range f.Imports {
 				out = append(out, "import:"+im.Path.Value)

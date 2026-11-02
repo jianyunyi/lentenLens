@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"intentlens/internal/explain"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,7 +117,12 @@ func newID() string {
 }
 
 func (a *App) read(name string, v any) error {
-	info, e := os.Lstat(filepath.Join(a.State, name))
+	root, e := os.OpenRoot(a.State)
+	if e != nil {
+		return e
+	}
+	defer root.Close()
+	info, e := root.Lstat(name)
 	if e != nil {
 		return e
 	}
@@ -126,9 +132,24 @@ func (a *App) read(name string, v any) error {
 	if info.Size() > maxStateRecordBytes {
 		return errors.New("本地记录超过读取范围")
 	}
-	b, e := os.ReadFile(filepath.Join(a.State, name))
+	f, e := root.Open(name)
 	if e != nil {
 		return e
+	}
+	defer f.Close()
+	openedInfo, e := f.Stat()
+	if e != nil {
+		return e
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return errors.New("本地记录路径在读取期间发生变化")
+	}
+	b, e := io.ReadAll(io.LimitReader(f, maxStateRecordBytes+1))
+	if e != nil {
+		return e
+	}
+	if int64(len(b)) > maxStateRecordBytes {
+		return errors.New("本地记录超过读取范围")
 	}
 	if name == "usage.json" || name == "settings.json" {
 		return validateStateRecord(name, b, v)

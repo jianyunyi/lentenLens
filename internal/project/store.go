@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -105,26 +106,47 @@ func within(root, name string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-func (s *Store) transact(fn func(*state, capture.Policy) error) error {
-	lockPath := filepath.Join(s.Dir, "state.lock")
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+func (s *Store) transact(fn func(*state, capture.Policy) error) (retErr error) {
+	stateRoot, err := os.OpenRoot(s.Dir)
+	if err != nil {
+		return err
+	}
+	defer stateRoot.Close()
+	lock, err := stateRoot.OpenFile("state.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return fmt.Errorf("cannot lock local state (another process or interrupted run): %w", err)
 	}
-	defer os.Remove(lockPath)
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			retErr = errors.Join(retErr, err)
+		}
+		if err := stateRoot.Remove("state.lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			retErr = errors.Join(retErr, err)
+		}
+	}()
 	policy, err := capture.LoadPolicy(s.Root)
 	if err != nil {
 		return err
 	}
 	st := state{Version: 1, Root: s.Root, Rounds: []Round{}}
-	name := filepath.Join(s.Dir, "state.json")
-	if info, err := os.Lstat(name); err == nil {
+	if info, err := stateRoot.Lstat("state.json"); err == nil {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("state must be a regular file")
 		}
-		data, err := os.ReadFile(name)
+		f, err := stateRoot.Open("state.json")
 		if err != nil {
+			return err
+		}
+		openedInfo, statErr := f.Stat()
+		if statErr != nil {
+			return errors.Join(statErr, f.Close())
+		}
+		if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			return errors.Join(fmt.Errorf("state path changed while opening"), f.Close())
+		}
+		data, readErr := io.ReadAll(f)
+		closeErr := f.Close()
+		if err := errors.Join(readErr, closeErr); err != nil {
 			return err
 		}
 		if err = json.Unmarshal(data, &st); err != nil {
@@ -166,33 +188,56 @@ func (s *Store) transact(fn func(*state, capture.Policy) error) error {
 	return s.save(st)
 }
 
-func (s *Store) save(st state) error {
+func (s *Store) save(st state) (retErr error) {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.Dir, ".state-*")
+	stateRoot, err := os.OpenRoot(s.Dir)
 	if err != nil {
 		return err
 	}
-	name := f.Name()
-	defer os.Remove(name)
+	defer stateRoot.Close()
+	nameBytes := make([]byte, 12)
+	if _, err := rand.Read(nameBytes); err != nil {
+		return err
+	}
+	name := ".state-" + hex.EncodeToString(nameBytes)
+	f, err := stateRoot.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	fileOpen := true
+	tempExists := true
+	defer func() {
+		if fileOpen {
+			retErr = errors.Join(retErr, f.Close())
+		}
+		if tempExists {
+			if err := stateRoot.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+				retErr = errors.Join(retErr, err)
+			}
+		}
+	}()
 	if err = f.Chmod(0600); err != nil {
-		f.Close()
 		return err
 	}
 	if _, err = f.Write(data); err != nil {
-		f.Close()
 		return err
 	}
 	if err = f.Sync(); err != nil {
-		f.Close()
 		return err
 	}
 	if err = f.Close(); err != nil {
+		fileOpen = false
 		return err
 	}
-	return os.Rename(name, filepath.Join(s.Dir, "state.json"))
+	fileOpen = false
+	if err = stateRoot.Rename(name, "state.json"); err != nil {
+		return err
+	}
+	tempExists = false
+	return nil
 }
 
 func (s *Store) Start() (Active, error) {
@@ -218,7 +263,7 @@ func (s *Store) Start() (Active, error) {
 
 func (s *Store) End() (Round, error) {
 	var result Round
-	err := s.transact(func(st *state, p capture.Policy) error {
+	err := s.transact(func(st *state, _ capture.Policy) error {
 		if st.Active == nil {
 			return fmt.Errorf("no active round; run start before editing")
 		}
@@ -227,7 +272,7 @@ func (s *Store) End() (Round, error) {
 			return err
 		}
 		// Read policy again in Take; filter the baseline with that same latest policy.
-		p, err = capture.LoadPolicy(s.Root)
+		p, err := capture.LoadPolicy(s.Root)
 		if err != nil {
 			return err
 		}
