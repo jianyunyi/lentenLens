@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 jobs:
@@ -44,6 +43,15 @@ jobs:
           category: "/language:${{ matrix.language }}"
           output: codeql-results
           post-processed-sarif-path: codeql-processed-sarif
+          upload: never
+      - name: Explain skipped GitHub Code Scanning upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Code Scanning upload: skipped"
+            echo
+            echo "CodeQL analysis runs locally in this workflow. Uploading SARIF to the GitHub Security tab is not available for this repository, so no Code Scanning upload was attempted. The SARIF artifact is retained below when produced. This is not a successful GitHub Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve CodeQL SARIF as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -70,10 +78,14 @@ jobs:
         with:
           args: '-fmt sarif -out gosec-results.sarif ./...'
       
-      - name: Upload Gosec results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: gosec-results.sarif
+      - name: Explain skipped GitHub Security upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Gosec SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Gosec SARIF as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,8 +109,18 @@ jobs:
         run: go install github.com/sonatype-nexus-community/nancy@latest
       
       - name: Run nancy
-        run: go list -json -deps ./... | nancy sleuth
-        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          go list -json -deps ./... | nancy sleuth 2>&1 | tee nancy-results.txt
+      - name: Preserve nancy scan output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nancy-results
+          path: nancy-results.txt
+          if-no-files-found: warn
+          retention-days: 14
 
   npm-audit:
     name: npm Audit
@@ -117,7 +139,6 @@ jobs:
         working-directory: ${{ matrix.directory }}
         run: |
           npm audit --audit-level=moderate
-        continue-on-error: true
 
   trivy:
     name: Trivy Vulnerability Scanner
@@ -134,10 +155,14 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
       
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+      - name: Explain skipped GitHub Security upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Trivy SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Trivy SARIF as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -159,13 +184,14 @@ jobs:
         run: semgrep scan --sarif --output=semgrep-results.sarif --config=auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-        continue-on-error: true
-      
-      - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Explain skipped GitHub Security upload
         if: always()
-        with:
-          sarif_file: semgrep-results.sarif
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Semgrep SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Semgrep SARIF as workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -190,7 +216,6 @@ jobs:
       
       - name: Check licenses
         run: go-licenses check ./...
-        continue-on-error: true
 
   secrets-scan:
     name: Secret Scanning (Gitleaks)
