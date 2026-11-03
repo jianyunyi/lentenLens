@@ -21,6 +21,7 @@ type App struct {
 	Root            string
 	State           string
 	modelRun        func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
+	selectionRun    func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
 	exerciseRun     func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
 }
 
@@ -97,6 +98,10 @@ func OpenWithHTTPTransport(root, state string, transport http.RoundTripper) (*Ap
 		a.modelRun = func(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
 			cfg.HTTPTransport = transport
 			return explain.Run(ctx, cfg, usage, key, question, evidence)
+		}
+		a.selectionRun = func(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
+			cfg.HTTPTransport = transport
+			return explain.RunSelection(ctx, cfg, usage, key, question, evidence)
 		}
 	}
 	return a, nil

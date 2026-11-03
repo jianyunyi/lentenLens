@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"intentlens/internal/capture"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Inspection struct {
@@ -206,6 +208,133 @@ func (a *App) Explain(ctx context.Context, file string, line int, question, key 
 	return a.generate(ctx, file, info.Function.ID, question, key, info.Evidence)
 }
 
+const maxSelectionBytes = 16 * 1024
+const maxSelectionDiagnostics = 100
+
+func (a *App) ExplainSelection(ctx context.Context, source, language string, startLine, endLine, savedVersion int, selectionRange explain.EditorRange, diagnostics []explain.EditorDiagnostic, key string) (explain.SelectionResult, error) {
+	result := explain.SelectionResult{Claims: []explain.Claim{}, Diagnostics: []explain.SelectionDiagnostic{}, DiagnosticsStatus: "no_errors", Unknowns: []string{}, Evidence: []explain.Evidence{}, SavedVersion: savedVersion}
+	if !utf8.ValidString(source) || strings.TrimSpace(source) == "" {
+		return result, errors.New("请先选中非空代码")
+	}
+	if len(source) > maxSelectionBytes {
+		return result, errors.New("选中代码超过 16 KiB 安全上限，请缩小选区")
+	}
+	if language == "" || language == "plaintext" || len(language) > 64 || strings.ContainsAny(language, "\r\n\x00") {
+		return result, errors.New("编辑器语言标识无效或不受支持")
+	}
+	if startLine < 1 || endLine < startLine || endLine > 100000000 || savedVersion < 1 || !validEditorRange(selectionRange) {
+		return result, errors.New("选区坐标或已保存版本无效")
+	}
+	expectedEndLine := selectionRange.End.Line + 1
+	if selectionRange.End.Character == 0 && selectionRange.End.Line > selectionRange.Start.Line {
+		expectedEndLine--
+	}
+	if expectedEndLine < startLine {
+		expectedEndLine = startLine
+	}
+	if startLine != selectionRange.Start.Line+1 || endLine != expectedEndLine {
+		return result, errors.New("选区行号与编辑器坐标不一致")
+	}
+	for _, diagnostic := range diagnostics {
+		mapped, ok := mapSelectionDiagnostic(diagnostic, selectionRange)
+		if ok {
+			result.Diagnostics = append(result.Diagnostics, mapped)
+		}
+	}
+	if len(result.Diagnostics) > maxSelectionDiagnostics {
+		return result, errors.New("选区内错误诊断超过安全上限，未发送给模型")
+	}
+	if len(result.Diagnostics) > 0 {
+		result.DiagnosticsStatus = "errors_found"
+	}
+	evidence := []explain.Evidence{{Kind: "selection", Language: language, ID: "selected-code", StartLine: startLine, EndLine: endLine, Source: source}}
+	if len(result.Diagnostics) > 0 {
+		diagnosticJSON, err := json.Marshal(result.Diagnostics)
+		if err != nil {
+			return result, errors.New("选区诊断无法编码")
+		}
+		evidence = append(evidence, explain.Evidence{Kind: "diagnostics", Language: "json", ID: "selected-diagnostics", StartLine: startLine, EndLine: endLine, Source: string(diagnosticJSON)})
+	}
+	encoded, err := json.Marshal(evidence)
+	if err != nil || len(encoded) > 60000 {
+		return result, errors.New("选区代码与错误诊断编码后超过模型输入安全范围，请缩小选区")
+	}
+	question := "请解释这段选中代码的意义和可能用途、可见的输入输出/副作用、主要执行流程，以及一种或多种有依据的设计考虑；明确区分直接可见的事实与可能的工程取舍，不臆测作者真实动机。若可见新功能实现，请说明选区能支持的实现机制，并将缺失上下文列为未知。"
+	doc, err := a.analyzeSelection(ctx, question, key, evidence)
+	if err != nil {
+		return explain.SelectionResult{}, err
+	}
+	result.Claims = doc.Claims
+	result.Unknowns = doc.Unknowns
+	result.Evidence = evidence
+	return result, nil
+}
+
+func validEditorRange(r explain.EditorRange) bool {
+	return validEditorPosition(r.Start) && validEditorPosition(r.End) && editorPositionLess(r.Start, r.End)
+}
+
+func validEditorPosition(p explain.EditorPosition) bool {
+	return p.Line >= 0 && p.Line <= 100000000 && p.Character >= 0 && p.Character <= 100000000
+}
+
+func editorPositionLess(a, b explain.EditorPosition) bool {
+	return a.Line < b.Line || (a.Line == b.Line && a.Character < b.Character)
+}
+
+func editorPositionEqual(a, b explain.EditorPosition) bool {
+	return a.Line == b.Line && a.Character == b.Character
+}
+
+func maxEditorPosition(a, b explain.EditorPosition) explain.EditorPosition {
+	if editorPositionLess(a, b) {
+		return b
+	}
+	return a
+}
+
+func minEditorPosition(a, b explain.EditorPosition) explain.EditorPosition {
+	if editorPositionLess(a, b) {
+		return a
+	}
+	return b
+}
+
+func mapSelectionDiagnostic(d explain.EditorDiagnostic, selection explain.EditorRange) (explain.SelectionDiagnostic, bool) {
+	if d.Severity != "error" || !utf8.ValidString(d.Message) || !validEditorPosition(d.Range.Start) || !validEditorPosition(d.Range.End) || editorPositionLess(d.Range.End, d.Range.Start) {
+		return explain.SelectionDiagnostic{}, false
+	}
+	start, end := d.Range.Start, d.Range.End
+	if editorPositionEqual(start, end) {
+		if editorPositionLess(start, selection.Start) || !editorPositionLess(start, selection.End) {
+			return explain.SelectionDiagnostic{}, false
+		}
+	} else if !editorPositionLess(start, selection.End) || !editorPositionLess(selection.Start, end) {
+		return explain.SelectionDiagnostic{}, false
+	}
+	clippedStart := maxEditorPosition(start, selection.Start)
+	clippedEnd := minEditorPosition(end, selection.End)
+	if editorPositionEqual(start, end) {
+		clippedStart, clippedEnd = start, end
+	}
+	absolute := func(p explain.EditorPosition) explain.SelectionPosition {
+		return explain.SelectionPosition{Line: p.Line + 1, Column: p.Character + 1}
+	}
+	relative := func(p explain.EditorPosition) explain.SelectionPosition {
+		column := p.Character + 1
+		if p.Line == selection.Start.Line {
+			column = p.Character - selection.Start.Character + 1
+		}
+		return explain.SelectionPosition{Line: p.Line - selection.Start.Line + 1, Column: column}
+	}
+	return explain.SelectionDiagnostic{
+		Severity:      d.Severity,
+		Message:       d.Message,
+		AbsoluteRange: explain.SelectionRange{Start: absolute(start), End: absolute(end), EndExclusive: true},
+		RelativeRange: explain.SelectionRange{Start: relative(clippedStart), End: relative(clippedEnd), EndExclusive: true},
+	}, true
+}
+
 func (a *App) generate(ctx context.Context, file, functionID, question, key string, evidence []explain.Evidence) (Explanation, error) {
 	doc, e := a.analyze(ctx, question, key, evidence)
 	if e != nil {
@@ -216,6 +345,14 @@ func (a *App) generate(ctx context.Context, file, functionID, question, key stri
 }
 
 func (a *App) analyze(ctx context.Context, question, key string, evidence []explain.Evidence) (explain.Document, error) {
+	return a.analyzeWith(ctx, question, key, evidence, false)
+}
+
+func (a *App) analyzeSelection(ctx context.Context, question, key string, evidence []explain.Evidence) (explain.Document, error) {
+	return a.analyzeWith(ctx, question, key, evidence, true)
+}
+
+func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []explain.Evidence, selection bool) (explain.Document, error) {
 	unlock, e := a.lock("analysis")
 	if e != nil {
 		return explain.Document{}, e
@@ -239,6 +376,9 @@ func (a *App) analyze(ctx context.Context, question, key string, evidence []expl
 		return explain.Document{}, fmt.Errorf("需要密钥环境变量 %s；请在启动编辑器或 hook 的环境中配置", settings.Model.APIKeyEnv)
 	}
 	reserve := explain.ReservationForMode(settings.Model.VerificationMode, question, evidence)
+	if selection {
+		reserve = explain.ReservationForSelectionMode(settings.Model.VerificationMode, question, evidence)
+	}
 	if reserve > usage.Remaining(settings.Model.TokenLimit) {
 		return explain.Document{}, fmt.Errorf("预算不足；本次保守预留 %d tokens", reserve)
 	}
@@ -248,8 +388,15 @@ func (a *App) analyze(ctx context.Context, question, key string, evidence []expl
 		return explain.Document{}, e
 	}
 	runner := a.modelRun
+	if selection {
+		runner = a.selectionRun
+	}
 	if runner == nil {
-		runner = explain.Run
+		if selection {
+			runner = explain.RunSelection
+		} else {
+			runner = explain.Run
+		}
 	}
 	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
 	if e = a.write("usage.json", updated); e != nil {
@@ -260,6 +407,13 @@ func (a *App) analyze(ctx context.Context, question, key string, evidence []expl
 	}
 	// Policy may change while the remote request is running: do not persist newly excluded sources.
 	for _, ev := range evidence {
+		if selection {
+			validSelectionEvidence := (ev.Kind == "selection" && ev.ID == "selected-code") || (ev.Kind == "diagnostics" && ev.ID == "selected-diagnostics")
+			if !validSelectionEvidence || ev.File != "" {
+				return explain.Document{}, errors.New("选区证据超出本次请求范围；结果未返回")
+			}
+			continue
+		}
 		ok, err := a.evidenceAllowed(ev)
 		if err != nil {
 			return explain.Document{}, err

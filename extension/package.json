@@ -1,7 +1,7 @@
 {
   "name": "intentlens",
   "displayName": "IntentLens",
-  "description": "Go function explanations tied to local source evidence and round snapshots.",
+  "description": "Go explanations tied to local source evidence, plus selected-code explanations.",
   "version": "0.5.2",
   "publisher": "intentlens",
   "license": "MIT",
@@ -32,7 +32,7 @@
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Other"],
   "main": "./src/extension.js",
-  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onView:intentlens.modelAnswer", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath", "onCommand:intentlens.refreshModelAnswer", "onCommand:intentlens.enableModel", "onCommand:intentlens.testModel"],
+  "activationEvents": ["onLanguage:go", "onView:intentlens.rounds", "onView:intentlens.callPath", "onView:intentlens.modelAnswer", "onCommand:intentlens.callPath", "onCommand:intentlens.refreshCallPath", "onCommand:intentlens.refreshModelAnswer", "onCommand:intentlens.enableModel", "onCommand:intentlens.testModel", "onCommand:intentlens.explainSelection"],
   "capabilities": { "untrustedWorkspaces": { "supported": "limited", "description": "Views are available; CLI execution requires workspace trust." }, "virtualWorkspaces": { "supported": false } },
   "scripts": { "test": "node --test test/*.test.js", "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/callpath.js && node --check src/sidebar.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js" },
   "contributes": {
@@ -42,6 +42,7 @@
       { "command": "intentlens.shared", "title": "IntentLens: 查看团队共享解释" },
       { "command": "intentlens.inspect", "title": "IntentLens: 查看当前函数解释与证据" },
       { "command": "intentlens.inspectDetails", "title": "IntentLens: 打开函数完整详情与历史" },
+      { "command": "intentlens.explainSelection", "title": "IntentLens: 解释选中代码（作用、流程与设计考虑）", "description": "仅发送所选代码、语言标识和行号；不会发送文件或项目上下文" },
       { "command": "intentlens.callPath", "title": "IntentLens: 显示调用路径" },
       { "command": "intentlens.refreshCallPath", "title": "IntentLens: 刷新调用路径", "icon": "$(refresh)" },
       { "command": "intentlens.refreshModelAnswer", "title": "IntentLens: 刷新模型回答与证据", "icon": "$(refresh)" },
@@ -70,7 +71,9 @@
       { "view": "intentlens.callPath", "contents": "在本地 Go 文件中放置光标后加载调用路径；受限工作区不会执行 CLI。\n[显示调用路径](command:intentlens.callPath)\n[刷新调用路径](command:intentlens.refreshCallPath)" },
       { "view": "intentlens.modelAnswer", "contents": "只读显示当前函数已保存在本地的回答、历史版本和引用证据。打开或刷新视图不会发起模型请求。\n[刷新模型回答与证据](command:intentlens.refreshModelAnswer)" }
     ],
-    "menus": { "view/title": [
+    "menus": { "editor/context": [
+      { "command": "intentlens.explainSelection", "when": "editorTextFocus && editorHasSelection", "group": "navigation@1" }
+    ], "view/title": [
       { "command": "intentlens.refresh", "when": "view == intentlens.rounds", "group": "navigation" },
       { "command": "intentlens.refreshCallPath", "when": "view == intentlens.callPath", "group": "navigation" },
       { "command": "intentlens.refreshModelAnswer", "when": "view == intentlens.modelAnswer", "group": "navigation" },

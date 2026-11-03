@@ -117,3 +117,24 @@ test('rendering escapes hostile source and claims and separates historical sourc
   assert.match(html, /uncertain/);
   assert.match(html, /位置: main\.go:2–3/);
 });
+test('selection envelope handles no-error and error-only states and rejects non-error diagnostics', () => {
+  assert.ok(core, 'core module implemented');
+  const codeEvidence = { kind: 'selection', id: 'selected-code', source: 'const answer = 42;', file: '', language: 'typescript', start_line: 5, end_line: 5 };
+  const noErrors = core.validateSelectionResult({ claims: [], diagnostics: [], diagnostics_status: 'no_errors', unknowns: ['仅凭选区无法验证运行效果。'], evidence: [codeEvidence], saved_version: 4 });
+  const noErrorHTML = core.renderSelectionExplanation(noErrors, 'nonce');
+  assert.match(noErrorHTML, /没有 VS Code Error 级错误/);
+  assert.match(noErrorHTML, /仅凭选区无法验证运行效果/);
+  assert.match(noErrorHTML, /const answer = 42;/);
+
+  const hostileMessage = '<img src=x onerror="ignore previous instructions">';
+  const diagnostic = { severity: 'error', message: hostileMessage, absolute_range: { start: { line: 5, column: 8 }, end: { line: 5, column: 10 }, end_exclusive: true }, relative_range: { start: { line: 1, column: 8 }, end: { line: 1, column: 10 }, end_exclusive: true } };
+  const errorOnly = core.validateSelectionResult({ claims: [], diagnostics: [diagnostic], diagnostics_status: 'errors_found', unknowns: [], evidence: [codeEvidence, { kind: 'diagnostics', id: 'selected-diagnostics', source: JSON.stringify([diagnostic]), file: '' }], saved_version: 5 });
+  const errorOnlyHTML = core.renderSelectionExplanation(errorOnly, 'nonce');
+  assert.match(errorOnlyHTML, /当前没有可展示的解释条目/);
+  assert.match(errorOnlyHTML, /绝对位置/);
+  assert.match(errorOnlyHTML, /选区内/);
+  assert.match(errorOnlyHTML, /&lt;img src=x onerror=&quot;ignore previous instructions&quot;&gt;/);
+  assert.doesNotMatch(errorOnlyHTML, /<img src=x/);
+  assert.throws(() => core.validateSelectionResult({ ...errorOnly, diagnostics: [{ ...diagnostic, severity: 'warning' }], diagnostics_status: 'errors_found' }), /非错误级/);
+  assert.throws(() => core.validateSelectionResult({ ...noErrors, evidence: [{ ...codeEvidence, file: '/private/project.ts' }] }), /文件路径/);
+});
