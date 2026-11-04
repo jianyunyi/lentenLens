@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func benchmarkProject(b *testing.B, n int) (*App, string) {
+func benchmarkProject(b *testing.B, n int) *App {
 	b.Helper()
 	root := b.TempDir()
 	for i := 0; i < n; i++ {
@@ -22,13 +22,13 @@ func benchmarkProject(b *testing.B, n int) (*App, string) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	return a, root
+	return a
 }
 
 func BenchmarkIndexWorkspace(b *testing.B) {
 	for _, n := range []int{100, 1000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a, _ := benchmarkProject(b, n)
+			a := benchmarkProject(b, n)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -44,7 +44,7 @@ func BenchmarkIndexWorkspace(b *testing.B) {
 func BenchmarkInspectWorkspace(b *testing.B) {
 	for _, n := range []int{100, 1000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a, _ := benchmarkProject(b, n)
+			a := benchmarkProject(b, n)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -60,7 +60,7 @@ func BenchmarkInspectWorkspace(b *testing.B) {
 func BenchmarkRoundHistory(b *testing.B) {
 	for _, n := range []int{20, 200} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			a, _ := benchmarkProject(b, 1)
+			a := benchmarkProject(b, 1)
 			for i := 0; i < n; i++ {
 				id := newID()
 				after := capture.NewFile("package p\nfunc F0(x int) int { return x }\n")
@@ -86,7 +86,7 @@ func BenchmarkRoundHistoryJoin(b *testing.B) {
 	for _, explained := range []bool{false, true} {
 		for _, n := range []int{20, 200, 1000} {
 			b.Run(fmt.Sprintf("explained=%t/%d", explained, n), func(b *testing.B) {
-				a, _ := benchmarkProject(b, 1)
+				a := benchmarkProject(b, 1)
 				source := "package p\nfunc F0(x int) int { return x + 0 }\n"
 				for i := 0; i < n; i++ {
 					id := fmt.Sprintf("%024x", i+1)

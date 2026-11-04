@@ -164,16 +164,16 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 			continue
 		}
 		var saved Explanation
-		if e = a.read(ent.Name(), &saved); e != nil {
-			return result, e
+		if readErr := a.read(ent.Name(), &saved); readErr != nil {
+			return result, readErr
 		}
 		if saved.FunctionID != result.Function.ID {
 			continue
 		}
 		visible := true
 		saved.Freshness = "已引用证据未变"
-		for _, ev := range saved.Evidence {
-			ok, err := a.evidenceAllowed(ev)
+		for i := range saved.Evidence {
+			ok, err := a.evidenceAllowed(saved.Evidence[i])
 			if err != nil {
 				return result, err
 			}
@@ -184,8 +184,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 		saved.Freshness = a.freshnessFromSnapshot(saved.Evidence, snap)
 		if visible {
-			if e = a.attachCorrections(&saved); e != nil {
-				return result, e
+			if correctionsErr := a.attachCorrections(&saved); correctionsErr != nil {
+				return result, correctionsErr
 			}
 			result.History = append(result.History, saved)
 		} else {
@@ -244,23 +244,23 @@ func (a *App) analyze(ctx context.Context, question, key string, evidence []expl
 	}
 	reserved := usage
 	reserved.UncertainTokens += reserve
-	if e = a.write("usage.json", reserved); e != nil {
-		return explain.Document{}, e
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return explain.Document{}, writeErr
 	}
 	runner := a.modelRun
 	if runner == nil {
 		runner = explain.Run
 	}
 	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
-	if e = a.write("usage.json", updated); e != nil {
-		return explain.Document{}, e
+	if writeErr := a.write("usage.json", updated); writeErr != nil {
+		return explain.Document{}, writeErr
 	}
 	if callErr != nil {
 		return explain.Document{}, callErr
 	}
 	// Policy may change while the remote request is running: do not persist newly excluded sources.
-	for _, ev := range evidence {
-		ok, err := a.evidenceAllowed(ev)
+	for i := range evidence {
+		ok, err := a.evidenceAllowed(evidence[i])
 		if err != nil {
 			return explain.Document{}, err
 		}

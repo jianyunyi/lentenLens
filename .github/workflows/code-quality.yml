@@ -24,7 +24,7 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install gocyclo
         run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
@@ -50,7 +50,7 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install dupl
         run: go install github.com/mibk/dupl@latest
@@ -77,7 +77,7 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install ineffassign
         run: go install github.com/gordonklaus/ineffassign@latest
@@ -93,7 +93,7 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install misspell
         run: go install github.com/client9/misspell/cmd/misspell@latest
@@ -110,12 +110,12 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13
           args: --timeout=10m
 
   test-coverage-check:
@@ -126,7 +126,7 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Generate coverage report
         run: |
@@ -134,6 +134,7 @@ jobs:
           go tool cover -func=coverage.out > coverage.txt
       
       - name: Check coverage levels
+        shell: bash
         run: |
           echo "## Test Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -145,7 +146,7 @@ jobs:
           echo "Total coverage: ${TOTAL_COVERAGE}%"
           
           # Fail if coverage is below 70%
-          if (( $(echo "$TOTAL_COVERAGE < 70" | bc -l) )); then
+          if (( ${TOTAL_COVERAGE%.*} < 70 )); then
             echo "❌ Coverage is below 70% threshold" >> $GITHUB_STEP_SUMMARY
             exit 1
           else

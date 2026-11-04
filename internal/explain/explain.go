@@ -112,7 +112,8 @@ func fastEligible(question string, evidence []Evidence) bool {
 		return false
 	}
 	total := 0
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if len(item.Source) > fastMaxEvidenceBytes-total {
 			return false
 		}
@@ -146,7 +147,12 @@ func ReservationForMode(mode, question string, evidence []Evidence) int {
 }
 
 func reservationForProfile(profile runProfile, question string, evidence []Evidence) int {
-	b, _ := json.Marshal(evidence)
+	b, err := json.Marshal(evidence)
+	if err != nil {
+		// This API returns a budget estimate, not an error; reserve the
+		// maximum representable amount rather than under-reserving.
+		return math.MaxInt
+	}
 	return 2 * (len(b) + len(question) + len(profile.answerPrompt) + len(profile.reviewPrompt) + 4096 + (profile.answerLimit+profile.reviewLimit)*12)
 }
 
@@ -166,7 +172,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 	if len(question) > 8000 {
 		return doc, usage, errors.New("问题超过 8000 字节限制")
 	}
-	encoded, _ := json.Marshal(evidence)
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return doc, usage, errors.New("证据无法编码为 JSON")
+	}
 	if len(encoded) > 60000 {
 		return doc, usage, errors.New("证据超过本次分析范围，请选择更小的函数")
 	}
@@ -175,7 +184,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 	if reserve > usage.Remaining(cfg.TokenLimit) {
 		return doc, usage, fmt.Errorf("预算不足：本次保守预留 %d tokens；请主动追加项目预算", reserve)
 	}
-	payload, _ := json.Marshal(map[string]any{"question": question, "evidence": evidence})
+	payload, err := json.Marshal(map[string]any{"question": question, "evidence": evidence})
+	if err != nil {
+		return doc, usage, errors.New("模型请求无法编码为 JSON")
+	}
 	raw, n, err := callLimitMode(ctx, cfg, key, profile.answerPrompt, string(payload), profile.answerLimit, profile.mode)
 	if err != nil {
 		usage.uncertain(reserve)
@@ -189,7 +201,8 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 		return Document{}, usage, errors.New("模型未返回有效的解释 JSON")
 	}
 	valid := map[string]bool{}
-	for _, e := range evidence {
+	for i := range evidence {
+		e := &evidence[i]
 		valid[e.ID] = true
 	}
 	claims := []Claim{}
@@ -231,7 +244,10 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 		return doc, usage, nil
 	}
 	reviewEvidence := citedEvidence(claims, evidence)
-	reviewPayload, _ := json.Marshal(map[string]any{"claims": claims, "evidence": reviewEvidence})
+	reviewPayload, err := json.Marshal(map[string]any{"claims": claims, "evidence": reviewEvidence})
+	if err != nil {
+		return doc, usage, errors.New("证据检查请求无法编码为 JSON")
+	}
 	reviewPrompt := profile.reviewPrompt
 	if profile.mode == ModeStrict {
 		reviewPrompt += "\n" + strictPurposeEvidencePrompt
@@ -271,7 +287,7 @@ func Run(ctx context.Context, cfg Config, usage Usage, key, question string, evi
 			doc.Unknowns = append(doc.Unknowns, "一项说法未获证据支持，已省略")
 			continue
 		}
-		if s == "supported" && profile.mode == ModeStrict && strictNeedsUsageEvidence(c) && !hasPurposeEvidence(c, reviewEvidence) {
+		if s == "supported" && profile.mode == ModeStrict && strictNeedsUsageEvidence(&c) && !hasPurposeEvidence(&c, reviewEvidence) {
 			doc.Unknowns = append(doc.Unknowns, "strict 模式无法仅凭函数实现确认用途或调用场景；缺少被引用的调用点或明确文档，已保留待确认")
 			checked = append(checked, c)
 			continue
@@ -293,15 +309,16 @@ func citedEvidence(claims []Claim, evidence []Evidence) []Evidence {
 		}
 	}
 	selected := make([]Evidence, 0, len(used))
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if used[item.ID] {
-			selected = append(selected, item)
+			selected = append(selected, *item)
 		}
 	}
 	return selected
 }
 
-func strictNeedsUsageEvidence(claim Claim) bool {
+func strictNeedsUsageEvidence(claim *Claim) bool {
 	if strings.EqualFold(strings.TrimSpace(claim.Section), "purpose") {
 		return true
 	}
@@ -314,12 +331,13 @@ func strictNeedsUsageEvidence(claim Claim) bool {
 	return false
 }
 
-func hasPurposeEvidence(claim Claim, evidence []Evidence) bool {
+func hasPurposeEvidence(claim *Claim, evidence []Evidence) bool {
 	cited := make(map[string]bool, len(claim.EvidenceIDs))
 	for _, id := range claim.EvidenceIDs {
 		cited[id] = true
 	}
-	for _, item := range evidence {
+	for i := range evidence {
+		item := &evidence[i]
 		if !cited[item.ID] {
 			continue
 		}

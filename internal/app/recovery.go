@@ -65,11 +65,11 @@ func (a *App) recoverState() error {
 		return err
 	}
 	defer releaseCapture()
-	if err = a.cleanupStateTemps(); err != nil {
-		return err
+	if cleanupErr := a.cleanupStateTemps(); cleanupErr != nil {
+		return cleanupErr
 	}
-	if err = a.isolateRecords(); err != nil {
-		return err
+	if isolateErr := a.isolateRecords(); isolateErr != nil {
+		return isolateErr
 	}
 	return a.recoverApply()
 }
@@ -84,7 +84,7 @@ func (a *App) isolateRecords() error {
 	if err != nil {
 		return err
 	}
-	if err = root.Mkdir("quarantine", 0700); err != nil && !errors.Is(err, os.ErrExist) {
+	if err = root.Mkdir("quarantine", 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	info, err := root.Lstat("quarantine")
@@ -101,24 +101,25 @@ func (a *App) isolateRecords() error {
 		return err
 	}
 	if string(old) != policy.Hash() {
-		dir, err := q.Open(".")
-		if err != nil {
-			return err
+		dir, dirErr := q.Open(".")
+		if dirErr != nil {
+			return dirErr
 		}
-		entries, err := dir.ReadDir(-1)
-		dir.Close()
+		entries, readErr := dir.ReadDir(-1)
+		closeErr := dir.Close()
+		err = errors.Join(readErr, closeErr)
 		if err != nil {
 			return err
 		}
 		for _, e := range entries {
 			if e.Name() != "policy" {
-				if err = q.Remove(e.Name()); err != nil {
-					return err
+				if removeErr := q.Remove(e.Name()); removeErr != nil {
+					return removeErr
 				}
 			}
 		}
-		if err = atomicReplace(q, "policy", []byte(policy.Hash()), 0600, nil); err != nil {
-			return err
+		if replaceErr := atomicReplace(q, "policy", []byte(policy.Hash()), 0o600, nil); replaceErr != nil {
+			return replaceErr
 		}
 	}
 	entries, err := os.ReadDir(a.State)
@@ -130,9 +131,9 @@ func (a *App) isolateRecords() error {
 		if target == nil {
 			continue
 		}
-		info, err := root.Lstat(entry.Name())
-		if err != nil {
-			return err
+		info, statErr := root.Lstat(entry.Name())
+		if statErr != nil {
+			return statErr
 		}
 		if !info.Mode().IsRegular() {
 			return errors.New("本地记录不是普通文件")
@@ -148,9 +149,9 @@ func (a *App) isolateRecords() error {
 				return e
 			}
 			b, e := io.ReadAll(io.LimitReader(f, (maxStateRecordBytes)+1))
-			f.Close()
-			if e != nil {
-				return e
+			closeErr := f.Close()
+			if e != nil || closeErr != nil {
+				return errors.Join(e, closeErr)
 			}
 			if len(b) > maxStateRecordBytes {
 				parseErr = errors.New("记录超过恢复范围")
@@ -168,16 +169,17 @@ func (a *App) isolateRecords() error {
 			return fmt.Errorf("%s 损坏；为保留授权和预算，需显式修复", entry.Name())
 		}
 		name := "quarantine/" + entry.Name() + "-" + newID() + ".bad"
-		if err = root.Rename(entry.Name(), name); err != nil {
-			return err
+		if renameErr := root.Rename(entry.Name(), name); renameErr != nil {
+			return renameErr
 		}
 	}
-	dir, err := q.Open(".")
-	if err != nil {
-		return err
+	dir, dirErr := q.Open(".")
+	if dirErr != nil {
+		return dirErr
 	}
-	quarantined, err := dir.ReadDir(-1)
-	dir.Close()
+	quarantined, readErr := dir.ReadDir(-1)
+	closeErr := dir.Close()
+	err = errors.Join(readErr, closeErr)
 	if err != nil {
 		return err
 	}
@@ -188,8 +190,8 @@ func (a *App) isolateRecords() error {
 		}
 	}
 	if len(names) > 0 {
-		if err = a.write("recovery-diagnostic.json", map[string]string{"quarantined_count": strconv.Itoa(len(names)), "files": strings.Join(names, ", "), "action": "坏记录已隔离，不参与展示、共享或模型请求；排除规则变化时清除隔离原文。"}); err != nil {
-			return err
+		if diagnosticErr := a.write("recovery-diagnostic.json", map[string]string{"quarantined_count": strconv.Itoa(len(names)), "files": strings.Join(names, ", "), "action": "坏记录已隔离，不参与展示、共享或模型请求；排除规则变化时清除隔离原文。"}); diagnosticErr != nil {
+			return diagnosticErr
 		}
 	} else if err = root.Remove("recovery-diagnostic.json"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -218,15 +220,15 @@ func (a *App) cleanupStateTemps() error {
 		if !strings.HasPrefix(e.Name(), ".intentlens-write-") {
 			continue
 		}
-		info, err := root.Lstat(e.Name())
-		if err != nil {
-			return err
+		info, statErr := root.Lstat(e.Name())
+		if statErr != nil {
+			return statErr
 		}
 		if !info.Mode().IsRegular() {
 			return errors.New("私有暂存文件包含链接或目录；请人工检查")
 		}
-		if err = root.Remove(e.Name()); err != nil {
-			return err
+		if removeErr := root.Remove(e.Name()); removeErr != nil {
+			return removeErr
 		}
 	}
 	f, err := root.Open(".")
@@ -289,7 +291,10 @@ func validateStateRecord(name string, b []byte, target any) error {
 		if limit < 0 || (enabled && (limit == 0 || modelID == "")) {
 			return errors.New("模型授权范围无效")
 		}
-		cfg := target.(*Settings)
+		cfg, ok := target.(*Settings)
+		if !ok {
+			return errors.New("设置记录目标类型无效")
+		}
 		if _, err := cfg.Model.Resolved(); err != nil {
 			return err
 		}

@@ -64,13 +64,13 @@ func TestRoundAndExplanationFreshnessAgreeUnderTextBudget(t *testing.T) {
 	fillNonGoBudget(t, root)
 	check := func(fresh bool) {
 		t.Helper()
-		rounds, err := a.List()
-		if err != nil {
-			t.Fatal(err)
+		rounds, listErr := a.List()
+		if listErr != nil {
+			t.Fatal(listErr)
 		}
-		loaded, err := a.ExplanationByID(e.ID)
-		if err != nil {
-			t.Fatal(err)
+		loaded, loadErr := a.ExplanationByID(e.ID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
 		}
 		if len(rounds) != 1 || rounds[0].Analysis == nil {
 			t.Fatal("missing round analysis")

@@ -27,7 +27,7 @@ func seedExplanation(t *testing.T, a *App, root string) Explanation {
 		if strings.Contains(q, "PRIVATE_") {
 			t.Fatal("local explanation or reason leaked into generation prompt")
 		}
-		ids := []string{}
+		ids := make([]string, 0, len(ev))
 		for _, item := range ev {
 			ids = append(ids, item.ID)
 		}
@@ -173,7 +173,7 @@ func TestSharedReaderMissingEvidenceAndChangedSource(t *testing.T) {
 	}
 	record.Evidence = nil
 	b, _ := json.Marshal(record)
-	if e = os.WriteFile(filepath.Join(root, ".intent", "shared", record.ID+".json"), b, 0600); e != nil {
+	if e = os.WriteFile(filepath.Join(root, ".intent", "shared", record.ID+".json"), b, 0o600); e != nil {
 		t.Fatal(e)
 	}
 	list, e = a.Shared()
@@ -347,7 +347,7 @@ func TestDeletedEvidenceDetectsUncapturedReplacement(t *testing.T) {
 			}
 			switch kind {
 			case "directory":
-				if err := os.Mkdir(filepath.Join(root, "deleted.go"), 0700); err != nil {
+				if err := os.Mkdir(filepath.Join(root, "deleted.go"), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			case "binary":

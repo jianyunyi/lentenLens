@@ -42,13 +42,13 @@ func TestFunctionFreshnessAgreesUnderTextBudgetPressure(t *testing.T) {
 	}
 	check := func(wantFresh bool) {
 		t.Helper()
-		info, err := a.Inspect("z.go", 2)
-		if err != nil || len(info.History) != 1 {
-			t.Fatalf("inspect history: %+v %v", info.History, err)
+		info, inspectErr := a.Inspect("z.go", 2)
+		if inspectErr != nil || len(info.History) != 1 {
+			t.Fatalf("inspect history: %+v %v", info.History, inspectErr)
 		}
-		loaded, err := a.ExplanationByID(saved.ID)
-		if err != nil {
-			t.Fatal(err)
+		loaded, explanationErr := a.ExplanationByID(saved.ID)
+		if explanationErr != nil {
+			t.Fatal(explanationErr)
 		}
 		for _, status := range []string{info.History[0].Freshness, loaded.Freshness} {
 			if (status == "已引用证据未变") != wantFresh {
@@ -57,22 +57,22 @@ func TestFunctionFreshnessAgreesUnderTextBudgetPressure(t *testing.T) {
 		}
 	}
 	check(true)
-	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err != nil {
-		t.Fatalf("unchanged explanation cannot be shared: %v", err)
+	if _, shareErr := a.PrepareShare(context.Background(), saved.ID, nil, "key"); shareErr != nil {
+		t.Fatalf("unchanged explanation cannot be shared: %v", shareErr)
 	}
 	put(t, root, "z.go", "package p\nfunc F() int { return 2 }\n")
 	check(false)
-	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err == nil {
+	if _, shareErr := a.PrepareShare(context.Background(), saved.ID, nil, "key"); shareErr == nil {
 		t.Fatal("changed explanation can be shared")
 	}
-	if err := os.Remove(filepath.Join(root, "z.go")); err != nil {
-		t.Fatal(err)
+	if removeErr := os.Remove(filepath.Join(root, "z.go")); removeErr != nil {
+		t.Fatal(removeErr)
 	}
 	loaded, err := a.ExplanationByID(saved.ID)
 	if err != nil || !strings.Contains(loaded.Freshness, "过期") {
 		t.Fatalf("deleted source not stale: %+v %v", loaded, err)
 	}
-	if _, err := a.PrepareShare(context.Background(), saved.ID, nil, "key"); err == nil {
+	if _, shareErr := a.PrepareShare(context.Background(), saved.ID, nil, "key"); shareErr == nil {
 		t.Fatal("deleted explanation can be shared")
 	}
 	if _, err := a.Inspect("z.go", 2); err == nil || !strings.Contains(err.Error(), "源码文件不存在") {
@@ -187,13 +187,13 @@ func TestNonGoRoundEvidenceBeyondBudgetIsConservativelyStale(t *testing.T) {
 	}
 	check := func(fresh bool) {
 		t.Helper()
-		rounds, err := a.List()
-		if err != nil {
-			t.Fatal(err)
+		rounds, listErr := a.List()
+		if listErr != nil {
+			t.Fatal(listErr)
 		}
-		loaded, err := a.ExplanationByID(saved.ID)
-		if err != nil {
-			t.Fatal(err)
+		loaded, explanationErr := a.ExplanationByID(saved.ID)
+		if explanationErr != nil {
+			t.Fatal(explanationErr)
 		}
 		if len(rounds) != 1 || rounds[0].Analysis == nil {
 			t.Fatal("missing round explanation")

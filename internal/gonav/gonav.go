@@ -82,7 +82,9 @@ func Analyze(files map[string]string) Result {
 			r.Diagnostics = append(r.Diagnostics, d)
 		}}
 		// No importer: local facts remain useful even when imports are unavailable.
-		_, _ = cfg.Check(key, fset, group, info)
+		if _, err := cfg.Check(key, fset, group, info); err != nil {
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Kind: "type", Message: "type check failed: " + err.Error()})
+		}
 		top := map[string][]Target{}
 		positions := map[token.Pos]Target{}
 		for _, f := range group {

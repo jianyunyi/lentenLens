@@ -58,8 +58,8 @@ func (a *App) PrepareShare(ctx context.Context, id string, approvedIDs []string,
 	}
 	approved := map[string]bool{}
 	known := map[string]bool{}
-	for _, e := range source.Evidence {
-		known[e.ID] = true
+	for i := range source.Evidence {
+		known[source.Evidence[i].ID] = true
 	}
 	for _, eid := range approvedIDs {
 		if !known[eid] {
@@ -68,13 +68,14 @@ func (a *App) PrepareShare(ctx context.Context, id string, approvedIDs []string,
 		approved[eid] = true
 	}
 	evidence := []explain.Evidence{}
-	for _, e := range source.Evidence {
-		if !(codeEvidence(e) && e.Visibility != "local") && !approved[e.ID] {
+	for i := range source.Evidence {
+		e := &source.Evidence[i]
+		if (!codeEvidence(*e) || e.Visibility == "local") && !approved[e.ID] {
 			continue
 		}
-		ok, err := a.evidenceAllowed(e)
-		if err != nil {
-			return ShareDraft{}, err
+		ok, allowedErr := a.evidenceAllowed(*e)
+		if allowedErr != nil {
+			return ShareDraft{}, allowedErr
 		}
 		if !ok {
 			return ShareDraft{}, errors.New("相关证据已被排除")
@@ -82,8 +83,9 @@ func (a *App) PrepareShare(ctx context.Context, id string, approvedIDs []string,
 		if e.Hash != hash(e.Source) {
 			return ShareDraft{}, errors.New("证据摘要不匹配")
 		}
-		e.Visibility = "shared"
-		evidence = append(evidence, e)
+		shared := *e
+		shared.Visibility = "shared"
+		evidence = append(evidence, shared)
 	}
 	if len(evidence) == 0 {
 		return ShareDraft{}, errors.New("没有获准共享的证据")
@@ -131,8 +133,8 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 	}
 	defer unlock()
 	var draft ShareDraft
-	if err = a.read("share-draft-"+id+".json", &draft); err != nil {
-		return SharedRecord{}, err
+	if readErr := a.read("share-draft-"+id+".json", &draft); readErr != nil {
+		return SharedRecord{}, readErr
 	}
 	if draft.ID != id || draft.Record.ID != id || draft.Digest != previewDigest || digest(draft.Record) != previewDigest {
 		return SharedRecord{}, errors.New("共享预览已变化，请重新查看")
@@ -154,8 +156,8 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 	if _, err = validateRecord(draft.Record, true); err != nil {
 		return SharedRecord{}, err
 	}
-	for _, e := range draft.Record.Evidence {
-		ok, eerr := a.evidenceAllowed(e)
+	for i := range draft.Record.Evidence {
+		ok, eerr := a.evidenceAllowed(draft.Record.Evidence[i])
 		if eerr != nil {
 			return SharedRecord{}, eerr
 		}
@@ -176,7 +178,7 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 	}
 	defer dir.Close()
 	name := id + ".json"
-	f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			existing, e := readShared(dir, name)
@@ -195,7 +197,9 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 		err = closeErr
 	}
 	if err != nil {
-		_ = dir.Remove(name)
+		if removeErr := dir.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return SharedRecord{}, errors.Join(err, removeErr)
+		}
 		return SharedRecord{}, err
 	}
 	return draft.Record, nil
@@ -210,7 +214,7 @@ func (a *App) sharedDir(create bool) (*os.Root, error) {
 	for _, p := range []string{".intent", ".intent/shared"} {
 		info, e := root.Lstat(p)
 		if errors.Is(e, os.ErrNotExist) && create {
-			if e = root.Mkdir(p, 0700); e != nil && !errors.Is(e, os.ErrExist) {
+			if e = root.Mkdir(p, 0o700); e != nil && !errors.Is(e, os.ErrExist) {
 				return nil, e
 			}
 			info, e = root.Lstat(p)
@@ -263,15 +267,16 @@ func validateRecord(r SharedRecord, strict bool) ([]string, error) {
 		return issues, errors.New("共享文件路径无效")
 	}
 	known := map[string]bool{}
-	for _, e := range r.Evidence {
+	for i := range r.Evidence {
+		e := &r.Evidence[i]
 		if e.ID == "" || known[e.ID] || hash(e.Source) != e.Hash {
 			return issues, errors.New("共享证据摘要或 ID 无效")
 		}
 		known[e.ID] = true
-		if codeEvidence(e) && !safeRelative(e.File) || e.File != "" && !safeRelative(e.File) {
+		if codeEvidence(*e) && !safeRelative(e.File) || e.File != "" && !safeRelative(e.File) {
 			return issues, errors.New("证据路径不安全")
 		}
-		if !codeEvidence(e) && e.Kind != "prompt" && e.Kind != "self_report" {
+		if !codeEvidence(*e) && e.Kind != "prompt" && e.Kind != "self_report" {
 			return issues, errors.New("未知证据来源")
 		}
 		if e.Visibility != "shared" {
@@ -326,7 +331,8 @@ func (a *App) Shared() ([]SharedView, error) {
 		return nil, err
 	}
 	entries, err := f.ReadDir(-1)
-	f.Close()
+	closeErr := f.Close()
+	err = errors.Join(err, closeErr)
 	if err != nil {
 		return nil, err
 	}
@@ -343,8 +349,8 @@ func (a *App) Shared() ([]SharedView, error) {
 			return nil, e
 		}
 		visible := true
-		for _, ev := range record.Evidence {
-			ok, e := a.evidenceAllowed(ev)
+		for i := range record.Evidence {
+			ok, e := a.evidenceAllowed(record.Evidence[i])
 			if e != nil {
 				return nil, e
 			}
@@ -392,23 +398,26 @@ func (a *App) sharedParent(sourceID string) string {
 func (a *App) sharedDirectParent(sourceID string) string {
 	if validID(sourceID) {
 		if dir, err := a.sharedDir(false); err == nil {
-			_, err = readShared(dir, sourceID+".json")
-			dir.Close()
-			if err == nil {
+			_, readErr := readShared(dir, sourceID+".json")
+			closeErr := dir.Close()
+			if readErr == nil && closeErr == nil {
 				return sourceID
 			}
 		}
 	}
-	entries, _ := os.ReadDir(a.State)
+	entries, err := os.ReadDir(a.State)
+	if err != nil {
+		return ""
+	}
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "share-draft-") {
 			var d ShareDraft
 			if a.read(e.Name(), &d) == nil && d.SourceID == sourceID {
 				dir, err := a.sharedDir(false)
 				if err == nil {
-					r, err := readShared(dir, d.ID+".json")
-					dir.Close()
-					if err == nil && r.ID == d.ID {
+					r, readErr := readShared(dir, d.ID+".json")
+					closeErr := dir.Close()
+					if readErr == nil && closeErr == nil && r.ID == d.ID {
 						return d.ID
 					}
 				}
@@ -450,7 +459,8 @@ func (a *App) AdoptShared(id string) (Explanation, error) {
 	if err != nil {
 		return Explanation{}, err
 	}
-	for _, view := range views {
+	for i := range views {
+		view := &views[i]
 		if view.ID != id {
 			continue
 		}
@@ -461,8 +471,8 @@ func (a *App) AdoptShared(id string) (Explanation, error) {
 			return a.ExplanationByID(id)
 		}
 		e := Explanation{ID: id, File: view.File, FunctionID: view.FunctionID, Created: view.Created, Document: view.Document, Evidence: view.Evidence}
-		if err = a.write("explanation-"+id+".json", e); err != nil {
-			return Explanation{}, err
+		if writeErr := a.write("explanation-"+id+".json", e); writeErr != nil {
+			return Explanation{}, writeErr
 		}
 		return a.ExplanationByID(id)
 	}

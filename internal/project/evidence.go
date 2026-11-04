@@ -31,7 +31,8 @@ func (s *Store) Evidence(id, name, side string, start, end int) (Evidence, error
 			return fmt.Errorf("side must be before or after")
 		}
 		var source *capture.File
-		for _, r := range st.Rounds {
+		for i := range st.Rounds {
+			r := &st.Rounds[i]
 			if r.ID != id {
 				continue
 			}

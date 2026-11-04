@@ -43,8 +43,8 @@ func (a *App) PrepareExecution(id string) (ExecutionPlan, error) {
 	}
 	answer := filepath.Join(dir, "answer")
 	if _, err = os.Lstat(answer); errors.Is(err, os.ErrNotExist) {
-		if err = exercise.Materialize(answer, exercise.Files(e.Spec, false)); err != nil {
-			return ExecutionPlan{}, err
+		if materializeErr := exercise.Materialize(answer, exercise.Files(e.Spec, false)); materializeErr != nil {
+			return ExecutionPlan{}, materializeErr
 		}
 	} else if err != nil {
 		return ExecutionPlan{}, err
@@ -69,7 +69,7 @@ func (a *App) PrepareExecution(id string) (ExecutionPlan, error) {
 	return plan, nil
 }
 
-func (a *App) RunExercise(_ context.Context, _ string, _ string, _ bool, _ string) (ExerciseDisplay, error) {
+func (a *App) RunExercise(_ context.Context, _, _ string, _ bool, _ string) (ExerciseDisplay, error) {
 	return ExerciseDisplay{}, exercise.ErrSandboxUnavailable
 }
 

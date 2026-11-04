@@ -46,8 +46,8 @@ func (a *App) attachRoundAnalyses(rounds []Round, entries []os.DirEntry) error {
 	for i := range rounds {
 		r := &rounds[i]
 		if saved, ok := latest["round:"+r.ID]; ok && (r.Analysis == nil || saved.Created > r.Analysis.Created) {
-			copy := saved
-			r.Analysis = &copy
+			savedCopy := saved
+			r.Analysis = &savedCopy
 		}
 		if r.Analysis != nil {
 			corrections[r.Analysis.ID] = nil

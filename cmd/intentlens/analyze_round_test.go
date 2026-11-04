@@ -95,7 +95,7 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	}
 	config := `{"consent":true,"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":"https://model.invalid","api_key_env":"INTENTLENS_E2E_KEY","model":"fixture","token_limit":1000000}}}`
 	var out bytes.Buffer
-	if code := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(config), &out); code != 0 {
+	if configureCode := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(config), &out); configureCode != 0 {
 		t.Fatalf("configure: %s", out.String())
 	}
 	roundID := makeRound(t, root, state)
@@ -111,14 +111,14 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	first := rounds[0]["analysis"].(map[string]any)["id"].(string)
 	// A failed opt-in attempt records a diagnostic; enabling the model and
 	// retrying this same round must remove only that round's diagnostic.
-	if code := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(`{"consent": false, "settings": {"model": {"enabled": false}}}`), &out); code != 0 {
+	if configureCode := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(`{"consent": false, "settings": {"model": {"enabled": false}}}`), &out); configureCode != 0 {
 		t.Fatalf("disable model: %s", out.String())
 	}
-	if code, result := analyzeRoundCLI(t, root, state, `{"round_id":"`+roundID+`"}`); code == 0 || result["analyzed"] == true {
-		t.Fatalf("disabled retry unexpectedly succeeded: code=%d result=%v", code, result)
+	if retryCode, retryResult := analyzeRoundCLI(t, root, state, `{"round_id":"`+roundID+`"}`); retryCode == 0 || retryResult["analyzed"] == true {
+		t.Fatalf("disabled retry unexpectedly succeeded: code=%d result=%v", retryCode, retryResult)
 	}
 	out.Reset()
-	if code := run([]string{"status", "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); code != 0 {
+	if statusCode := run([]string{"status", "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); statusCode != 0 {
 		t.Fatalf("status after failed retry: %s", out.String())
 	}
 	var status map[string]any
@@ -129,7 +129,7 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	if err := os.WriteFile(filepath.Join(actualState, "analysis-diagnostic.json"), []byte(`{"round":"other-round","error":"keep me"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if code := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(config), &out); code != 0 {
+	if configureCode := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(config), &out); configureCode != 0 {
 		t.Fatalf("re-enable model: %s", out.String())
 	}
 	code, result = analyzeRoundCLI(t, root, state, `{"round_id":"`+roundID+`"}`)
@@ -152,16 +152,16 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	if err := os.WriteFile(filepath.Join(actualState, "analysis-diagnostic.json"), []byte(`{"round":"`+roundID+`","error":"stale failure"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if code, result := analyzeRoundCLI(t, root, state, `{"round_id":"`+roundID+`"}`); code != 0 || result["analyzed"] != true || calls.Load() != 6 {
-		t.Fatalf("successful diagnostic retry: code=%d result=%v calls=%d", code, result, calls.Load())
+	if retryCode, retryResult := analyzeRoundCLI(t, root, state, `{"round_id":"`+roundID+`"}`); retryCode != 0 || retryResult["analyzed"] != true || calls.Load() != 6 {
+		t.Fatalf("successful diagnostic retry: code=%d result=%v calls=%d", retryCode, retryResult, calls.Load())
 	}
 	if _, err := os.Stat(filepath.Join(actualState, "analysis-diagnostic.json")); !os.IsNotExist(err) {
 		t.Fatalf("same-round diagnostic was not deleted: %v", err)
 	}
 	for _, command := range []string{"rounds", "status"} {
 		out.Reset()
-		if code := run([]string{command, "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); code != 0 || bytes.Contains(out.Bytes(), []byte("stale failure")) {
-			t.Fatalf("%s retained stale failure: code=%d output=%s", command, code, out.String())
+		if commandCode := run([]string{command, "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); commandCode != 0 || bytes.Contains(out.Bytes(), []byte("stale failure")) {
+			t.Fatalf("%s retained stale failure: code=%d output=%s", command, commandCode, out.String())
 		}
 	}
 	out.Reset()

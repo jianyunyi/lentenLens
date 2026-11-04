@@ -26,7 +26,7 @@ func validID(id string) bool {
 		return false
 	}
 	for _, r := range id {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return false
 		}
 	}
@@ -39,7 +39,13 @@ func (a *App) evidenceAllowed(e explain.Evidence) (bool, error) {
 	}
 	return e.Kind == "prompt" || e.Kind == "self_report", nil
 }
-func digest(v any) string { b, _ := json.Marshal(v); return hash(string(b)) }
+func digest(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return hash("无法序列化摘要值：" + err.Error())
+	}
+	return hash(string(b))
+}
 
 func (a *App) ExplanationByID(id string) (Explanation, error) {
 	if !validID(id) {
@@ -73,8 +79,8 @@ func (a *App) attachCorrections(e *Explanation) error {
 			continue
 		}
 		var c Correction
-		if err = a.read(entry.Name(), &c); err != nil {
-			return err
+		if readErr := a.read(entry.Name(), &c); readErr != nil {
+			return readErr
 		}
 		if c.ExplanationID == e.ID {
 			e.Corrections = append(e.Corrections, c)
@@ -135,21 +141,22 @@ func (a *App) Revise(ctx context.Context, id, key string) (Explanation, error) {
 			return Explanation{}, errors.New("轮次依据已变化；请从当前代码生成解释")
 		}
 	} else {
-		idx, err := a.Index()
-		if err != nil {
-			return Explanation{}, err
+		idx, indexErr := a.Index()
+		if indexErr != nil {
+			return Explanation{}, indexErr
 		}
 		found := false
 		for _, f := range idx.Functions {
-			if f.ID == parent.FunctionID {
-				info, e := a.Inspect(f.File, f.StartLine)
-				if e != nil {
-					return Explanation{}, e
-				}
-				evidence = info.Evidence
-				found = true
-				break
+			if f.ID != parent.FunctionID {
+				continue
 			}
+			info, e := a.Inspect(f.File, f.StartLine)
+			if e != nil {
+				return Explanation{}, e
+			}
+			evidence = info.Evidence
+			found = true
+			break
 		}
 		if !found {
 			return Explanation{}, errors.New("原函数无法定位；请从当前代码重新生成")
@@ -179,20 +186,22 @@ func (a *App) freshnessFromSnapshot(evidence []explain.Evidence, snap capture.Sn
 	}
 	var textSnapshot *capture.Snapshot
 	after := map[string]bool{}
-	for _, e := range evidence {
-		if codeEvidence(e) && e.Role != "before" {
+	for i := range evidence {
+		e := &evidence[i]
+		if codeEvidence(*e) && e.Role != "before" {
 			after[e.File] = true
 		}
 	}
-	for _, e := range evidence {
-		ok, err := a.evidenceAllowed(e)
+	for i := range evidence {
+		e := &evidence[i]
+		ok, err := a.evidenceAllowed(*e)
 		if err != nil || !ok {
 			return "解释已过期：依据已排除"
 		}
 		if hash(e.Source) != e.Hash {
 			return "解释已过期：证据摘要不匹配"
 		}
-		if !codeEvidence(e) {
+		if !codeEvidence(*e) {
 			continue
 		}
 		f, exists := snap.Files[e.File]

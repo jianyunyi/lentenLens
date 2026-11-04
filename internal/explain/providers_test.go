@@ -23,7 +23,7 @@ func TestProviderUsageCannotOverflowBudget(t *testing.T) {
 
 func TestProviderFailureBoundaries(t *testing.T) {
 	for _, provider := range []string{"anthropic", "openai", "openai-compatible", "gemini"} {
-		for _, mode := range []string{"redirect", "oversize", "empty", "truncated", "missing-usage", "cancelled", "timeout"} {
+		for _, mode := range []string{"redirect", "oversize", "empty", "truncated", "missing-usage", "canceled", "timeout"} {
 			t.Run(provider+"/"+mode, func(t *testing.T) {
 				transportCalls := 0
 				timeoutObserved := false
@@ -75,16 +75,17 @@ func TestProviderFailureBoundaries(t *testing.T) {
 				}))
 				ctx := context.Background()
 				cancel := func() {}
-				if mode == "cancelled" {
+				switch mode {
+				case "canceled":
 					ctx, cancel = context.WithCancel(ctx)
 					cancel()
-				} else if mode == "timeout" {
+				case "timeout":
 					ctx, cancel = context.WithTimeout(ctx, 10*time.Millisecond)
 				}
 				defer cancel()
 				_, usage, err := Structured(ctx, Config{Enabled: true, Provider: provider, BaseURL: "https://model.invalid", HTTPTransport: transport, Model: "fixture", TokenLimit: 1000000}, Usage{}, "secret", "prompt")
 				wantCalls := 1
-				if mode == "cancelled" {
+				if mode == "canceled" {
 					wantCalls = 0
 				}
 				if err == nil || usage.UncertainTokens == 0 || transportCalls != wantCalls || (mode == "timeout" && !timeoutObserved) {

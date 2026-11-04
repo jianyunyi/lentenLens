@@ -29,8 +29,8 @@ func (a *App) scrubExcluded() error {
 		switch {
 		case name == "active.json":
 			var active Active
-			if e = a.read(name, &active); e != nil {
-				return e
+			if readErr := a.read(name, &active); readErr != nil {
+				return readErr
 			}
 			changed := false
 			for p := range active.Snapshot.Files {
@@ -50,14 +50,14 @@ func (a *App) scrubExcluded() error {
 			active.Snapshot.Omitted = kept
 			// Preserve original policy hash so Stop can report scope changes.
 			if changed {
-				if e = a.write(name, active); e != nil {
-					return e
+				if writeErr := a.write(name, active); writeErr != nil {
+					return writeErr
 				}
 			}
 		case strings.HasPrefix(name, "round-") && strings.HasSuffix(name, ".json"):
 			var r Round
-			if e = a.read(name, &r); e != nil {
-				return e
+			if readErr := a.read(name, &r); readErr != nil {
+				return readErr
 			}
 			changed := false
 			kept := []capture.Change{}
@@ -80,23 +80,23 @@ func (a *App) scrubExcluded() error {
 			r.Omitted = omissions
 			if changed {
 				r.Analysis = nil
-				if e = a.write(name, r); e != nil {
-					return e
+				if writeErr := a.write(name, r); writeErr != nil {
+					return writeErr
 				}
 			}
 		case strings.HasPrefix(name, "explanation-") && strings.HasSuffix(name, ".json"):
 			var saved Explanation
-			if e = a.read(name, &saved); e != nil {
-				return e
+			if readErr := a.read(name, &saved); readErr != nil {
+				return readErr
 			}
-			for _, ev := range saved.Evidence {
-				allowed, err := a.evidenceAllowed(ev)
+			for i := range saved.Evidence {
+				allowed, err := a.evidenceAllowed(saved.Evidence[i])
 				if err != nil {
 					return err
 				}
 				if !allowed {
-					if e = os.Remove(filepath.Join(a.State, name)); e != nil {
-						return e
+					if removeErr := os.Remove(filepath.Join(a.State, name)); removeErr != nil {
+						return removeErr
 					}
 					break
 				}
@@ -109,20 +109,20 @@ func (a *App) scrubExcluded() error {
 		var sourceID string
 		if strings.HasPrefix(name, "share-draft-") && strings.HasSuffix(name, ".json") {
 			var draft ShareDraft
-			if e = a.read(name, &draft); e != nil {
-				return e
+			if readErr := a.read(name, &draft); readErr != nil {
+				return readErr
 			}
 			sourceID = draft.SourceID
 		} else if strings.HasPrefix(name, "correction-") && strings.HasSuffix(name, ".json") {
 			var correction Correction
-			if e = a.read(name, &correction); e != nil {
-				return e
+			if readErr := a.read(name, &correction); readErr != nil {
+				return readErr
 			}
 			sourceID = correction.ExplanationID
 		}
 		if sourceID != "" && !a.revisionExists(sourceID) {
-			if e = os.Remove(filepath.Join(a.State, name)); e != nil {
-				return e
+			if removeErr := os.Remove(filepath.Join(a.State, name)); removeErr != nil {
+				return removeErr
 			}
 		}
 	}

@@ -135,7 +135,7 @@ func TestCapturePolicyAndBounds(t *testing.T) {
 	if len(s.Omitted) < 2 {
 		t.Fatal(s.Omitted)
 	}
-	if ok, e := Allowed(r, "../outside"); e == nil && ok {
+	if ok, allowedErr := Allowed(r, "../outside"); allowedErr == nil && ok {
 		t.Fatal("traversal allowed")
 	}
 	old := s.PolicyHash

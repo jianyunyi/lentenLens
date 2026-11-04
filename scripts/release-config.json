@@ -5,7 +5,7 @@
     "goarch": "amd64",
     "vscode": "win32-x64"
   },
-  "goVersion": "1.26.3",
+  "goVersion": "1.25.0",
   "goModVersion": "1.25.0",
   "nodeMajor": 22,
   "vsceVersion": "4.0.0"
