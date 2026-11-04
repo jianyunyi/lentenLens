@@ -211,8 +211,25 @@ func (a *App) Explain(ctx context.Context, file string, line int, question, key 
 const maxSelectionBytes = 16 * 1024
 const maxSelectionDiagnostics = 100
 
-func (a *App) ExplainSelection(ctx context.Context, source, language string, startLine, endLine, savedVersion int, selectionRange explain.EditorRange, diagnostics []explain.EditorDiagnostic, key string) (explain.SelectionResult, error) {
+func (a *App) requireSelectionFileAllowed(file string) error {
+	if strings.TrimSpace(file) == "" {
+		return errors.New("缺少当前文件路径，无法应用排除规则；未调用模型")
+	}
+	allowed, err := capture.Allowed(a.Root, filepath.ToSlash(file))
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return errors.New("当前文件已排除：默认排除规则或 .intentignore 限制了选区解释；未调用模型")
+	}
+	return nil
+}
+
+func (a *App) ExplainSelection(ctx context.Context, file, source, language string, startLine, endLine, savedVersion int, selectionRange explain.EditorRange, diagnostics []explain.EditorDiagnostic, key string) (explain.SelectionResult, error) {
 	result := explain.SelectionResult{Claims: []explain.Claim{}, Diagnostics: []explain.SelectionDiagnostic{}, DiagnosticsStatus: "no_errors", Unknowns: []string{}, Evidence: []explain.Evidence{}, SavedVersion: savedVersion}
+	if err := a.requireSelectionFileAllowed(file); err != nil {
+		return result, err
+	}
 	if !utf8.ValidString(source) || strings.TrimSpace(source) == "" {
 		return result, errors.New("请先选中非空代码")
 	}
@@ -260,7 +277,7 @@ func (a *App) ExplainSelection(ctx context.Context, source, language string, sta
 		return result, errors.New("选区代码与错误诊断编码后超过模型输入安全范围，请缩小选区")
 	}
 	question := "请解释这段选中代码的意义和可能用途、可见的输入输出/副作用、主要执行流程，以及一种或多种有依据的设计考虑；明确区分直接可见的事实与可能的工程取舍，不臆测作者真实动机。若可见新功能实现，请说明选区能支持的实现机制，并将缺失上下文列为未知。"
-	doc, err := a.analyzeSelection(ctx, question, key, evidence)
+	doc, err := a.analyzeSelection(ctx, question, key, file, evidence)
 	if err != nil {
 		return explain.SelectionResult{}, err
 	}
@@ -345,14 +362,14 @@ func (a *App) generate(ctx context.Context, file, functionID, question, key stri
 }
 
 func (a *App) analyze(ctx context.Context, question, key string, evidence []explain.Evidence) (explain.Document, error) {
-	return a.analyzeWith(ctx, question, key, evidence, false)
+	return a.analyzeWith(ctx, question, key, evidence, false, "")
 }
 
-func (a *App) analyzeSelection(ctx context.Context, question, key string, evidence []explain.Evidence) (explain.Document, error) {
-	return a.analyzeWith(ctx, question, key, evidence, true)
+func (a *App) analyzeSelection(ctx context.Context, question, key, file string, evidence []explain.Evidence) (explain.Document, error) {
+	return a.analyzeWith(ctx, question, key, evidence, true, file)
 }
 
-func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []explain.Evidence, selection bool) (explain.Document, error) {
+func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []explain.Evidence, selection bool, selectionFile string) (explain.Document, error) {
 	unlock, e := a.lock("analysis")
 	if e != nil {
 		return explain.Document{}, e
@@ -398,6 +415,14 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 			runner = explain.Run
 		}
 	}
+	if selection {
+		if policyErr := a.requireSelectionFileAllowed(selectionFile); policyErr != nil {
+			if restoreErr := a.write("usage.json", usage); restoreErr != nil {
+				return explain.Document{}, fmt.Errorf("%w；无法恢复预算预留：%v", policyErr, restoreErr)
+			}
+			return explain.Document{}, policyErr
+		}
+	}
 	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
 	if e = a.write("usage.json", updated); e != nil {
 		return explain.Document{}, e
@@ -408,6 +433,9 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 	// Policy may change while the remote request is running: do not persist newly excluded sources.
 	for _, ev := range evidence {
 		if selection {
+			if policyErr := a.requireSelectionFileAllowed(selectionFile); policyErr != nil {
+				return explain.Document{}, fmt.Errorf("分析期间无法确认选区文件仍被允许；结果未返回：%w", policyErr)
+			}
 			validSelectionEvidence := (ev.Kind == "selection" && ev.ID == "selected-code") || (ev.Kind == "diagnostics" && ev.ID == "selected-diagnostics")
 			if !validSelectionEvidence || ev.File != "" {
 				return explain.Document{}, errors.New("选区证据超出本次请求范围；结果未返回")

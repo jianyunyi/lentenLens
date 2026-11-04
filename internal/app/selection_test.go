@@ -45,7 +45,7 @@ func TestExplainSelectionCombinesOnlyOverlappingErrorsWithPositionsAndDoesNotPer
 		return explain.Document{Claims: []explain.Claim{{ID: "c1", Text: "代码先调用 first，再执行 second。", Kind: "behavior", Section: "flow", EvidenceIDs: []string{"selected-code", "selected-diagnostics"}}}, Unknowns: []string{"缺少调用处，无法确认上下文。"}}, usage, nil
 	}
 
-	result, err := a.ExplainSelection(context.Background(), source, "typescript", 4, 5, 7, selection, diagnostics, "mock-only-key")
+	result, err := a.ExplainSelection(context.Background(), "main.ts", source, "typescript", 4, 5, 7, selection, diagnostics, "mock-only-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestExplainSelectionReturnsClearNoErrorsStatus(t *testing.T) {
 	}
 	selection := explain.EditorRange{Start: explain.EditorPosition{Line: 0, Character: 0}, End: explain.EditorPosition{Line: 0, Character: 8}}
 	warning := explain.EditorDiagnostic{Severity: "warning", Message: "not sent", Range: selection}
-	result, err := a.ExplainSelection(context.Background(), "const x", "typescript", 1, 1, 2, selection, []explain.EditorDiagnostic{warning}, "mock-only-key")
+	result, err := a.ExplainSelection(context.Background(), "main.ts", "const x", "typescript", 1, 1, 2, selection, []explain.EditorDiagnostic{warning}, "mock-only-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestExplainSelectionRejectsInvalidInputBeforeModel(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := a.ExplainSelection(context.Background(), tc.code, tc.language, tc.start, tc.end, tc.version, tc.rangeValue, nil, "")
+			_, err := a.ExplainSelection(context.Background(), "main.ts", tc.code, tc.language, tc.start, tc.end, tc.version, tc.rangeValue, nil, "")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected %q error, got %v", tc.want, err)
 			}
@@ -141,5 +141,35 @@ func TestExplainSelectionRejectsInvalidInputBeforeModel(t *testing.T) {
 	}
 	if called {
 		t.Fatal("invalid input reached model runner")
+	}
+}
+
+func TestExplainSelectionRejectsExcludedFileBeforeModel(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, ".intentignore", "private.ts\n")
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid/v1", APIKeyEnv: "INTENTLENS_SELECTION_TEST_KEY", Model: "fixture-model", TokenLimit: 200000, VerificationMode: explain.ModeFast}}
+	if err := a.Configure(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	a.selectionRun = func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error) {
+		called = true
+		return explain.Document{}, explain.Usage{}, nil
+	}
+	selection := explain.EditorRange{Start: explain.EditorPosition{Line: 0, Character: 0}, End: explain.EditorPosition{Line: 0, Character: 12}}
+	for _, file := range []string{"private.ts", ""} {
+		_, err := a.ExplainSelection(context.Background(), file, "const secret = 1", "typescript", 1, 1, 1, selection, nil, "mock-only-key")
+		if err == nil {
+			t.Fatalf("expected local path policy to reject %q", file)
+		}
+		if file == "private.ts" && (!strings.Contains(err.Error(), "排除") || !strings.Contains(err.Error(), ".intentignore")) {
+			t.Fatalf("excluded-file error did not explain the policy: %v", err)
+		}
+		if file == "" && !strings.Contains(err.Error(), "缺少当前文件路径") {
+			t.Fatalf("missing-file error did not explain the required local path: %v", err)
+		}
+	}
+	if called {
+		t.Fatal("excluded or pathless selection reached the model runner")
 	}
 }

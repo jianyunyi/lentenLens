@@ -165,3 +165,15 @@ func TestAnalyzeRoundFlagDoesNotReadStdin(t *testing.T) {
 		t.Fatalf("explicit --round consumed stdin: %s", out.String())
 	}
 }
+
+func TestExplainSelectionCLIRejectsIntentignoredFileBeforeModel(t *testing.T) {
+	root, state := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".intentignore"), []byte("private.ts\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code := run([]string{"explain-selection", "--root", root, "--state", state}, bytes.NewBufferString(`{"file":"private.ts"}`), &out)
+	if code == 0 || !strings.Contains(out.String(), "当前文件已排除") || !strings.Contains(out.String(), ".intentignore") {
+		t.Fatalf("CLI did not enforce the local file exclusion before model setup: exit=%d output=%s", code, out.String())
+	}
+}

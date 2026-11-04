@@ -112,6 +112,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
     const selectionCall = cliCalls.at(-1);
     assert.equal(selectionCall.command, 'explain-selection');
     assert.deepEqual(selectionCall.input, {
+      file: 'example.ts',
       code: selected,
       language: 'typescript',
       start_line: 12,

@@ -453,6 +453,7 @@ function activate(context) {
     if (Buffer.byteLength(source, 'utf8') > 16 * 1024) throw new Error('选中代码超过 16 KiB 安全上限，请缩小选区。');
     const folder = await folderFor(document.uri);
     if (!folder) return;
+    const file = path.relative(folder.uri.fsPath, document.uri.fsPath).split(path.sep).join('/');
     const samePosition = (a, b) => a.line === b.line && a.character === b.character;
     const assertSavedSnapshot = () => {
       const active = vscode.window.activeTextEditor;
@@ -464,7 +465,7 @@ function activate(context) {
     const diagnostics = selectedErrorDiagnostics(vscode, document.uri, selectionRange);
     const startLine = selection.start.line + 1;
     const endLine = Math.max(startLine, selection.end.line + (selection.end.character > 0 ? 1 : 0));
-    const input = { code: source, language, start_line: startLine, end_line: endLine, selection_range: selectionRange, diagnostics, saved_version: savedVersion };
+    const input = { file, code: source, language, start_line: startLine, end_line: endLine, selection_range: selectionRange, diagnostics, saved_version: savedVersion };
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'IntentLens：解释选中代码', cancellable: false },
       () => cli(folder, 'explain-selection', input),

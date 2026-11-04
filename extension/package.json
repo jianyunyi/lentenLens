@@ -42,7 +42,7 @@
       { "command": "intentlens.shared", "title": "IntentLens: 查看团队共享解释" },
       { "command": "intentlens.inspect", "title": "IntentLens: 查看当前函数解释与证据" },
       { "command": "intentlens.inspectDetails", "title": "IntentLens: 打开函数完整详情与历史" },
-      { "command": "intentlens.explainSelection", "title": "IntentLens: 解释选中代码（作用、流程与设计考虑）", "description": "仅发送所选代码、语言标识和行号；不会发送文件或项目上下文" },
+      { "command": "intentlens.explainSelection", "title": "IntentLens: 解释选中代码（作用、流程与设计考虑）", "description": "文件相对路径仅用于本机排除规则检查；模型仅收到所选代码、语言、坐标及选区内错误，不收到路径或项目上下文" },
       { "command": "intentlens.callPath", "title": "IntentLens: 显示调用路径" },
       { "command": "intentlens.refreshCallPath", "title": "IntentLens: 刷新调用路径", "icon": "$(refresh)" },
       { "command": "intentlens.refreshModelAnswer", "title": "IntentLens: 刷新模型回答与证据", "icon": "$(refresh)" },

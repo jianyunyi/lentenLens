@@ -187,7 +187,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	case "explain":
 		result, e = a.Explain(context.Background(), request.File, request.Line, request.Question, "")
 	case "explain-selection":
-		result, e = a.ExplainSelection(context.Background(), request.Code, request.Language, request.StartLine, request.EndLine, request.SavedVersion, request.SelectionRange, request.Diagnostics, "")
+		result, e = a.ExplainSelection(context.Background(), request.File, request.Code, request.Language, request.StartLine, request.EndLine, request.SavedVersion, request.SelectionRange, request.Diagnostics, "")
 	case "configure":
 		e = a.Configure(request.Settings, request.Consent)
 		result = map[string]bool{"saved": e == nil}
