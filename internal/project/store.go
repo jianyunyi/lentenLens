@@ -189,7 +189,7 @@ func (s *Store) save(st state) error {
 		f.Close()
 		return err
 	}
-	if err = f.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(name, filepath.Join(s.Dir, "state.json"))

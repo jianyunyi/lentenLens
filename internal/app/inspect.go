@@ -166,7 +166,7 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 			continue
 		}
 		var saved Explanation
-		if e = a.read(ent.Name(), &saved); e != nil {
+		if e := a.read(ent.Name(), &saved); e != nil {
 			return result, e
 		}
 		if saved.FunctionID != result.Function.ID {
@@ -174,8 +174,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 		visible := true
 		saved.Freshness = "已引用证据未变"
-		for _, ev := range saved.Evidence {
-			ok, err := a.evidenceAllowed(ev)
+		for i := range saved.Evidence {
+			ok, err := a.evidenceAllowed(saved.Evidence[i])
 			if err != nil {
 				return result, err
 			}
@@ -186,7 +186,7 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 		saved.Freshness = a.freshnessFromSnapshot(saved.Evidence, snap)
 		if visible {
-			if e = a.attachCorrections(&saved); e != nil {
+			if e := a.attachCorrections(&saved); e != nil {
 				return result, e
 			}
 			result.History = append(result.History, saved)
@@ -230,27 +230,11 @@ func (a *App) ExplainSelection(ctx context.Context, file, source, language strin
 	if err := a.requireSelectionFileAllowed(file); err != nil {
 		return result, err
 	}
-	if !utf8.ValidString(source) || strings.TrimSpace(source) == "" {
-		return result, errors.New("请先选中非空代码")
+	if err := validateSelectionSource(source, language); err != nil {
+		return result, err
 	}
-	if len(source) > maxSelectionBytes {
-		return result, errors.New("选中代码超过 16 KiB 安全上限，请缩小选区")
-	}
-	if language == "" || language == "plaintext" || len(language) > 64 || strings.ContainsAny(language, "\r\n\x00") {
-		return result, errors.New("编辑器语言标识无效或不受支持")
-	}
-	if startLine < 1 || endLine < startLine || endLine > 100000000 || savedVersion < 1 || !validEditorRange(selectionRange) {
-		return result, errors.New("选区坐标或已保存版本无效")
-	}
-	expectedEndLine := selectionRange.End.Line + 1
-	if selectionRange.End.Character == 0 && selectionRange.End.Line > selectionRange.Start.Line {
-		expectedEndLine--
-	}
-	if expectedEndLine < startLine {
-		expectedEndLine = startLine
-	}
-	if startLine != selectionRange.Start.Line+1 || endLine != expectedEndLine {
-		return result, errors.New("选区行号与编辑器坐标不一致")
+	if err := validateSelectionCoordinates(startLine, endLine, savedVersion, selectionRange); err != nil {
+		return result, err
 	}
 	for _, diagnostic := range diagnostics {
 		mapped, ok := mapSelectionDiagnostic(diagnostic, selectionRange)
@@ -285,6 +269,36 @@ func (a *App) ExplainSelection(ctx context.Context, file, source, language strin
 	result.Unknowns = doc.Unknowns
 	result.Evidence = evidence
 	return result, nil
+}
+
+func validateSelectionSource(source, language string) error {
+	if !utf8.ValidString(source) || strings.TrimSpace(source) == "" {
+		return errors.New("请先选中非空代码")
+	}
+	if len(source) > maxSelectionBytes {
+		return errors.New("选中代码超过 16 KiB 安全上限，请缩小选区")
+	}
+	if language == "" || language == "plaintext" || len(language) > 64 || strings.ContainsAny(language, "\r\n\x00") {
+		return errors.New("编辑器语言标识无效或不受支持")
+	}
+	return nil
+}
+
+func validateSelectionCoordinates(startLine, endLine, savedVersion int, selectionRange explain.EditorRange) error {
+	if startLine < 1 || endLine < startLine || endLine > 100000000 || savedVersion < 1 || !validEditorRange(selectionRange) {
+		return errors.New("选区坐标或已保存版本无效")
+	}
+	expectedEndLine := selectionRange.End.Line + 1
+	if selectionRange.End.Character == 0 && selectionRange.End.Line > selectionRange.Start.Line {
+		expectedEndLine--
+	}
+	if expectedEndLine < startLine {
+		expectedEndLine = startLine
+	}
+	if startLine != selectionRange.Start.Line+1 || endLine != expectedEndLine {
+		return errors.New("选区行号与编辑器坐标不一致")
+	}
+	return nil
 }
 
 func validEditorRange(r explain.EditorRange) bool {
@@ -392,65 +406,88 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 	if strings.TrimSpace(key) == "" {
 		return explain.Document{}, fmt.Errorf("需要密钥环境变量 %s；请在启动编辑器或 hook 的环境中配置", settings.Model.APIKeyEnv)
 	}
-	reserve := explain.ReservationForMode(settings.Model.VerificationMode, question, evidence)
-	if selection {
-		reserve = explain.ReservationForSelectionMode(settings.Model.VerificationMode, question, evidence)
-	}
+	reserve := analysisReservation(settings.Model.VerificationMode, question, evidence, selection)
 	if reserve > usage.Remaining(settings.Model.TokenLimit) {
 		return explain.Document{}, fmt.Errorf("预算不足；本次保守预留 %d tokens", reserve)
 	}
 	reserved := usage
 	reserved.UncertainTokens += reserve
-	if e = a.write("usage.json", reserved); e != nil {
+	if e := a.write("usage.json", reserved); e != nil {
 		return explain.Document{}, e
 	}
-	runner := a.modelRun
+	runner := a.analysisRunner(selection)
 	if selection {
-		runner = a.selectionRun
-	}
-	if runner == nil {
-		if selection {
-			runner = explain.RunSelection
-		} else {
-			runner = explain.Run
-		}
-	}
-	if selection {
-		if policyErr := a.requireSelectionFileAllowed(selectionFile); policyErr != nil {
-			if restoreErr := a.write("usage.json", usage); restoreErr != nil {
-				return explain.Document{}, fmt.Errorf("%w；无法恢复预算预留：%v", policyErr, restoreErr)
-			}
+		if policyErr := a.checkSelectionReservation(selectionFile, usage); policyErr != nil {
 			return explain.Document{}, policyErr
 		}
 	}
 	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
-	if e = a.write("usage.json", updated); e != nil {
+	if e := a.write("usage.json", updated); e != nil {
 		return explain.Document{}, e
 	}
 	if callErr != nil {
 		return explain.Document{}, callErr
 	}
+	if err := a.validateAnalysisEvidence(evidence, selection, selectionFile); err != nil {
+		return explain.Document{}, err
+	}
+	return doc, nil
+}
+
+func analysisReservation(mode, question string, evidence []explain.Evidence, selection bool) int {
+	if selection {
+		return explain.ReservationForSelectionMode(mode, question, evidence)
+	}
+	return explain.ReservationForMode(mode, question, evidence)
+}
+
+func (a *App) analysisRunner(selection bool) func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error) {
+	runner := a.modelRun
+	if selection {
+		runner = a.selectionRun
+	}
+	if runner != nil {
+		return runner
+	}
+	if selection {
+		return explain.RunSelection
+	}
+	return explain.Run
+}
+
+func (a *App) checkSelectionReservation(file string, usage explain.Usage) error {
+	if policyErr := a.requireSelectionFileAllowed(file); policyErr != nil {
+		if restoreErr := a.write("usage.json", usage); restoreErr != nil {
+			return fmt.Errorf("%w；无法恢复预算预留：%v", policyErr, restoreErr)
+		}
+		return policyErr
+	}
+	return nil
+}
+
+func (a *App) validateAnalysisEvidence(evidence []explain.Evidence, selection bool, selectionFile string) error {
 	// Policy may change while the remote request is running: do not persist newly excluded sources.
-	for _, ev := range evidence {
+	for i := range evidence {
+		ev := &evidence[i]
 		if selection {
 			if policyErr := a.requireSelectionFileAllowed(selectionFile); policyErr != nil {
-				return explain.Document{}, fmt.Errorf("分析期间无法确认选区文件仍被允许；结果未返回：%w", policyErr)
+				return fmt.Errorf("分析期间无法确认选区文件仍被允许；结果未返回：%w", policyErr)
 			}
 			validSelectionEvidence := (ev.Kind == "selection" && ev.ID == "selected-code") || (ev.Kind == "diagnostics" && ev.ID == "selected-diagnostics")
 			if !validSelectionEvidence || ev.File != "" {
-				return explain.Document{}, errors.New("选区证据超出本次请求范围；结果未返回")
+				return errors.New("选区证据超出本次请求范围；结果未返回")
 			}
 			continue
 		}
-		ok, err := a.evidenceAllowed(ev)
+		ok, err := a.evidenceAllowed(*ev)
 		if err != nil {
-			return explain.Document{}, err
+			return err
 		}
 		if !ok {
-			return explain.Document{}, errors.New("分析期间排除规则变化；结果未保存")
+			return errors.New("分析期间排除规则变化；结果未保存")
 		}
 	}
-	return doc, nil
+	return nil
 }
 
 func (a *App) ExplainRound(ctx context.Context, r Round, idx codeindex.Index, key string) (Explanation, error) {

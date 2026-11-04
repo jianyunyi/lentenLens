@@ -79,28 +79,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	if e != nil {
 		return fail(out, e)
 	}
-	var request input
-	// Read stdin only for commands that require it; never hang a background worker.
-	switch command {
-	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
-		limit := int64(32768)
-		if command == "explain-selection" {
-			limit = 128 * 1024
-		}
-		e = json.NewDecoder(io.LimitReader(withoutBOM(in), limit)).Decode(&request)
-		if e != nil {
-			return fail(out, errors.New("需要有效的 JSON 输入"))
-		}
-	case "analyze-round":
-		// VS Code's runCLI sends the round id as JSON. Background hook
-		// workers pass --round explicitly and must not consume stdin.
-		if strings.TrimSpace(*roundID) == "" {
-			e = json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request)
-			if e != nil {
-				return fail(out, errors.New("需要有效的 JSON 输入"))
-			}
-			*roundID = request.RoundID
-		}
+	request, e := decodeRequest(command, in, roundID)
+	if e != nil {
+		return fail(out, e)
 	}
 	var result any
 	switch command {
@@ -220,6 +201,31 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		return fail(out, e)
 	}
 	return emit(out, result)
+}
+
+func decodeRequest(command string, in io.Reader, roundID *string) (input, error) {
+	var request input
+	// Read stdin only for commands that require it; never hang a background worker.
+	switch command {
+	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
+		limit := int64(32768)
+		if command == "explain-selection" {
+			limit = 128 * 1024
+		}
+		if err := json.NewDecoder(io.LimitReader(withoutBOM(in), limit)).Decode(&request); err != nil {
+			return input{}, errors.New("需要有效的 JSON 输入")
+		}
+	case "analyze-round":
+		// VS Code's runCLI sends the round id as JSON. Background hook
+		// workers pass --round explicitly and must not consume stdin.
+		if strings.TrimSpace(*roundID) == "" {
+			if err := json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request); err != nil {
+				return input{}, errors.New("需要有效的 JSON 输入")
+			}
+			*roundID = request.RoundID
+		}
+	}
+	return request, nil
 }
 
 func emit(out io.Writer, v any) int {

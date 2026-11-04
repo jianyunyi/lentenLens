@@ -119,17 +119,18 @@ func TestExplainSelectionRejectsInvalidInputBeforeModel(t *testing.T) {
 	}
 	validRange := explain.EditorRange{Start: explain.EditorPosition{Line: 0, Character: 0}, End: explain.EditorPosition{Line: 0, Character: 8}}
 	cases := []struct {
-		name, code, language string
-		start, end, version  int
-		rangeValue           explain.EditorRange
-		want                 string
+		name, code, language, want string
+		start, end, version        int
+		rangeValue                 explain.EditorRange
 	}{
-		{"empty", "  \n", "go", 1, 1, 1, validRange, "请先选中非空代码"},
-		{"language", "let x = 1", "bad\nlanguage", 1, 1, 1, validRange, "语言标识"},
-		{"plaintext", "let x = 1", "plaintext", 1, 1, 1, validRange, "不受支持"},
-		{"range", "let x = 1", "javascript", 3, 2, 1, validRange, "坐标"},
-		{"version", "let x = 1", "javascript", 1, 1, 0, validRange, "坐标"},
-		{"oversize", strings.Repeat("x", maxSelectionBytes+1), "rust", 1, 1, 1, validRange, "16 KiB"},
+		{name: "empty", code: "  \n", language: "go", start: 1, end: 1, version: 1, rangeValue: validRange, want: "请先选中非空代码"},
+		{name: "invalid-utf8", code: "\xff", language: "go", start: 1, end: 1, version: 1, rangeValue: validRange, want: "请先选中非空代码"},
+		{name: "language", code: "let x = 1", language: "bad\nlanguage", start: 1, end: 1, version: 1, rangeValue: validRange, want: "语言标识"},
+		{name: "plaintext", code: "let x = 1", language: "plaintext", start: 1, end: 1, version: 1, rangeValue: validRange, want: "不受支持"},
+		{name: "range", code: "let x = 1", language: "javascript", start: 3, end: 2, version: 1, rangeValue: validRange, want: "坐标"},
+		{name: "version", code: "let x = 1", language: "javascript", start: 1, end: 1, version: 0, rangeValue: validRange, want: "坐标"},
+		{name: "line-mismatch", code: "let x = 1", language: "javascript", start: 2, end: 2, version: 1, rangeValue: validRange, want: "不一致"},
+		{name: "oversize", code: strings.Repeat("x", maxSelectionBytes+1), language: "rust", start: 1, end: 1, version: 1, rangeValue: validRange, want: "16 KiB"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -171,5 +172,57 @@ func TestExplainSelectionRejectsExcludedFileBeforeModel(t *testing.T) {
 	}
 	if called {
 		t.Fatal("excluded or pathless selection reached the model runner")
+	}
+}
+
+func TestSelectionCoordinatesPreserveExclusiveLineBoundary(t *testing.T) {
+	selection := explain.EditorRange{Start: explain.EditorPosition{Line: 0, Character: 3}, End: explain.EditorPosition{Line: 1, Character: 0}}
+	if err := validateSelectionCoordinates(1, 1, 1, selection); err != nil {
+		t.Fatalf("exclusive next-line boundary rejected: %v", err)
+	}
+	if err := validateSelectionCoordinates(1, 2, 1, selection); err == nil || !strings.Contains(err.Error(), "不一致") {
+		t.Fatalf("exclusive next-line boundary counted as selected: %v", err)
+	}
+}
+
+func TestSelectionPolicyChangeBeforeRunRestoresReservation(t *testing.T) {
+	a, root := fixture(t)
+	usage := explain.Usage{ActualTokens: 5, UncertainTokens: 2}
+	reserved := usage
+	reserved.UncertainTokens += 100
+	if err := a.write("usage.json", reserved); err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, ".intentignore", "private.ts\n")
+	if err := a.checkSelectionReservation("private.ts", usage); err == nil || !strings.Contains(err.Error(), "排除") {
+		t.Fatalf("changed policy did not stop selection: %v", err)
+	}
+	got, err := a.Usage()
+	if err != nil || got != usage {
+		t.Fatalf("original usage not restored: got=%+v want=%+v err=%v", got, usage, err)
+	}
+}
+
+func TestSelectionPolicyChangeDuringAnalysisRejectsResultAndRecordsUsage(t *testing.T) {
+	a, root := fixture(t)
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid/v1", APIKeyEnv: "INTENTLENS_SELECTION_TEST_KEY", Model: "fixture-model", TokenLimit: 200000, VerificationMode: explain.ModeFast}}
+	if err := a.Configure(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	a.selectionRun = func(_ context.Context, _ explain.Config, usage explain.Usage, _, _ string, _ []explain.Evidence) (explain.Document, explain.Usage, error) {
+		calls++
+		put(t, root, ".intentignore", "main.ts\n")
+		usage.ActualTokens += 7
+		return explain.Document{Claims: []explain.Claim{{ID: "c1", Text: "fixture result"}}}, usage, nil
+	}
+	selection := explain.EditorRange{Start: explain.EditorPosition{}, End: explain.EditorPosition{Character: 8}}
+	result, err := a.ExplainSelection(context.Background(), "main.ts", "const x", "typescript", 1, 1, 1, selection, nil, "mock-only-key")
+	if err == nil || !strings.Contains(err.Error(), "分析期间") || calls != 1 || len(result.Claims) != 0 {
+		t.Fatalf("excluded result was returned: calls=%d result=%+v err=%v", calls, result, err)
+	}
+	usage, err := a.Usage()
+	if err != nil || usage.ActualTokens != 7 || usage.UncertainTokens != 0 {
+		t.Fatalf("completed mock usage not recorded: usage=%+v err=%v", usage, err)
 	}
 }
