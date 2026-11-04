@@ -13,14 +13,14 @@ func TestIntegrationInfoNeedsNeitherProjectNorInput(t *testing.T) {
 	var out bytes.Buffer
 	code := run([]string{"integration-info", "--root", filepath.Join(t.TempDir(), "missing")}, nil, &out)
 	var info struct {
-		Schema        int      `json:"schema"`
-		Entries       []string `json:"entries"`
-		ModelCommands []string `json:"model_commands"`
-		ModelRequired bool     `json:"model_required_for_local_evidence"`
-		Event         struct {
+		Event struct {
 			Command string   `json:"command"`
 			Events  []string `json:"events"`
 		} `json:"capture_event"`
+		Entries       []string `json:"entries"`
+		ModelCommands []string `json:"model_commands"`
+		Schema        int      `json:"schema"`
+		ModelRequired bool     `json:"model_required_for_local_evidence"`
 	}
 	if code != 0 || json.Unmarshal(out.Bytes(), &info) != nil || info.Schema != 1 || info.ModelRequired || strings.Join(info.Entries, ",") != "ide,skill,claude" || info.Event.Command != "capture-event" || strings.Join(info.Event.Events, ",") != "start,stop" || !strings.Contains(strings.Join(info.ModelCommands, ","), "test-model") {
 		t.Fatalf("invalid integration contract: %s", out.String())
@@ -30,13 +30,13 @@ func TestIntegrationInfoNeedsNeitherProjectNorInput(t *testing.T) {
 func TestIntegrationInfoDescribesIndexCoverage(t *testing.T) {
 	var info struct {
 		IndexCoverage struct {
-			Responses           []string `json:"responses"`
-			Fields              []string `json:"fields"`
-			OmittedExamplesMax  int      `json:"omitted_examples_max"`
-			ExcludedPathsListed bool     `json:"excluded_paths_listed"`
-			CallStatuses        []string `json:"call_statuses"`
 			PartialIndexWarning string   `json:"partial_index_warning"`
 			CallStatusWarning   string   `json:"call_status_warning"`
+			Responses           []string `json:"responses"`
+			Fields              []string `json:"fields"`
+			CallStatuses        []string `json:"call_statuses"`
+			OmittedExamplesMax  int      `json:"omitted_examples_max"`
+			ExcludedPathsListed bool     `json:"excluded_paths_listed"`
 		} `json:"index_coverage"`
 	}
 	b, err := json.Marshal(integrationInfo())
