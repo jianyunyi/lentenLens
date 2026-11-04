@@ -42,6 +42,55 @@ function confinedPath(root, relative) {
 function escapeHTML(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
+function compareEditorPosition(a, b) { return a.line - b.line || a.character - b.character; }
+function validEditorPosition(value) { return value && Number.isInteger(value.line) && value.line >= 0 && value.line <= 100000000 && Number.isInteger(value.character) && value.character >= 0 && value.character <= 100000000; }
+function rangeOverlapsSelection(range, selection) {
+  if (!validEditorPosition(range?.start) || !validEditorPosition(range?.end) || !validEditorPosition(selection?.start) || !validEditorPosition(selection?.end)) return false;
+  const startToEnd = compareEditorPosition(range.start, range.end);
+  if (startToEnd > 0 || compareEditorPosition(selection.start, selection.end) >= 0) return false;
+  if (startToEnd === 0) return compareEditorPosition(range.start, selection.start) >= 0 && compareEditorPosition(range.start, selection.end) < 0;
+  return compareEditorPosition(range.start, selection.end) < 0 && compareEditorPosition(selection.start, range.end) < 0;
+}
+function selectedErrorDiagnostics(vscode, uri, selection) {
+  const errorSeverity = vscode.DiagnosticSeverity?.Error;
+  if (!Number.isInteger(errorSeverity) || typeof vscode.languages?.getDiagnostics !== 'function') throw new Error('VS Code 错误诊断接口不可用。');
+  const selected = (vscode.languages.getDiagnostics(uri) || []).filter(item => item?.severity === errorSeverity && typeof item.message === 'string' && rangeOverlapsSelection(item.range, selection)).map(item => ({
+    severity: 'error',
+    message: item.message,
+    range: {
+      start: { line: item.range.start.line, character: item.range.start.character },
+      end: { line: item.range.end.line, character: item.range.end.character },
+    },
+  }));
+  return selected.sort((a, b) => compareEditorPosition(a.range.start, b.range.start) || compareEditorPosition(a.range.end, b.range.end) || (a.message < b.message ? -1 : a.message > b.message ? 1 : 0));
+}
+function compareSelectionPosition(a, b) { return a.line - b.line || a.column - b.column; }
+function validSelectionRange(range) {
+  const valid = point => point && Number.isInteger(point.line) && point.line >= 1 && Number.isInteger(point.column) && point.column >= 1;
+  return range && range.end_exclusive === true && valid(range.start) && valid(range.end) && compareSelectionPosition(range.start, range.end) <= 0;
+}
+function validateSelectionResult(data) {
+  if (!data || !Array.isArray(data.claims) || !Array.isArray(data.diagnostics) || !Array.isArray(data.unknowns) || !Array.isArray(data.evidence) || !Number.isInteger(data.saved_version) || data.saved_version < 1) throw new Error('选区解释结果不符合统一结构。');
+  if (!['errors_found', 'no_errors'].includes(data.diagnostics_status) || (data.diagnostics_status === 'errors_found') !== (data.diagnostics.length > 0)) throw new Error('选区错误诊断状态与结果内容不一致。');
+  const evidenceIDs = new Set();
+  for (const item of data.evidence) {
+    if (!item || !['selected-code', 'selected-diagnostics'].includes(item.id) || evidenceIDs.has(item.id) || typeof item.source !== 'string' || item.file !== '') throw new Error('选区证据结构无效或包含文件路径。');
+    if ((item.id === 'selected-code' && (item.kind !== 'selection' || typeof item.language !== 'string' || !Number.isInteger(item.start_line) || !Number.isInteger(item.end_line))) || (item.id === 'selected-diagnostics' && item.kind !== 'diagnostics')) throw new Error('选区证据类型无效。');
+    evidenceIDs.add(item.id);
+  }
+  if (!evidenceIDs.has('selected-code')) throw new Error('统一结果缺少所选代码证据。');
+  if ((data.diagnostics_status === 'errors_found') !== evidenceIDs.has('selected-diagnostics')) throw new Error('选区诊断与证据集合不一致。');
+  const claimIDs = new Set();
+  for (const claim of data.claims) {
+    if (!claim || typeof claim.id !== 'string' || !claim.id || claimIDs.has(claim.id) || typeof claim.text !== 'string' || !claim.text || !['supported', 'uncertain'].includes(claim.status) || !Array.isArray(claim.evidence_ids) || claim.evidence_ids.length === 0 || claim.evidence_ids.some(id => !evidenceIDs.has(id))) throw new Error('选区解释条目缺少有效证据引用。');
+    claimIDs.add(claim.id);
+  }
+  for (const diagnostic of data.diagnostics) {
+    if (!diagnostic || diagnostic.severity !== 'error' || typeof diagnostic.message !== 'string' || !validSelectionRange(diagnostic.absolute_range) || !validSelectionRange(diagnostic.relative_range)) throw new Error('选区诊断结构无效或包含非错误级诊断。');
+  }
+  if (data.unknowns.some(item => typeof item !== 'string')) throw new Error('选区未知项结构无效。');
+  return data;
+}
 function button(action, index, text, group = '') {
   return `<button data-action="${escapeHTML(action)}" data-index="${escapeHTML(index)}" data-group="${escapeHTML(group)}">${escapeHTML(text)}</button>`;
 }
@@ -70,6 +119,25 @@ function renderShared(record, nonce) {
   return page('团队共享解释', `${button('adopt', '', '本地纠错与修订')}<ul>${(record.issues || []).map(x => `<li>${escapeHTML(x)}</li>`).join('')}</ul>${explanationHTML(record, 'shared', false)}`, nonce);
 }
 function renderSaved(record, nonce) { return page('本地解释版本', explanationHTML(record, 'saved'), nonce); }
+function renderSelectionExplanation(data, nonce) {
+  const labels = { purpose: '意义 / 可能用途', contract: '可见的输入、输出与副作用', flow: '执行流程', design: '可能的设计考虑', dependency: '依赖' };
+  const claims = data.claims || [];
+  const evidence = new Map((data.evidence || []).map(item => [item.id, item]));
+  const selectedCode = evidence.get('selected-code');
+  const formatRange = range => `${range.start.line}:${range.start.column}–${range.end.line}:${range.end.column}（末端不含）`;
+  const sections = ['purpose', 'contract', 'flow', 'design', 'dependency'].map(section => {
+    const items = claims.filter(claim => claim.section === section);
+    if (!items.length) return '';
+    return `<section><h2>${labels[section]}</h2>${items.map(claim => `<p><strong>${escapeHTML(claim.status || '待核对')}</strong> ${escapeHTML(claim.text)}<br><small>依据：${escapeHTML((claim.evidence_ids || []).map(id => id === 'selected-code' ? '所选代码' : id === 'selected-diagnostics' ? '所选范围内错误诊断' : id).join('、'))}</small></p>`).join('')}</section>`;
+  }).join('');
+  const unclassified = claims.filter(claim => !labels[claim.section]).map(claim => `<p><strong>${escapeHTML(claim.status || '待核对')}</strong> ${escapeHTML(claim.text)}</p>`).join('');
+  const unknowns = (data.unknowns || []).map(item => `<li>${escapeHTML(item)}</li>`).join('');
+  const diagnostics = data.diagnostics_status === 'no_errors'
+    ? '<p>保存后读取的选区诊断中没有 VS Code Error 级错误。</p>'
+    : `<ul>${data.diagnostics.map(item => `<li><strong>绝对位置：</strong>${escapeHTML(formatRange(item.absolute_range))}；<strong>选区内：</strong>${escapeHTML(formatRange(item.relative_range))}<pre>${escapeHTML(item.message)}</pre></li>`).join('')}</ul>`;
+  const code = selectedCode ? `<details><summary>查看本次选区证据</summary><pre>${escapeHTML(selectedCode.source)}</pre></details>` : '';
+  return page('选中代码解释与错误诊断', `<p>保存版本：${escapeHTML(data.saved_version)} · 选区行 ${escapeHTML(selectedCode?.start_line)}–${escapeHTML(selectedCode?.end_line)}${selectedCode?.language ? ` · 语言 <code>${escapeHTML(selectedCode.language)}</code>` : ''}</p><p class="muted">只读取保存后的 VS Code Error 级诊断；只传送所选代码及与选区相交的错误消息，不发送文件路径或其他项目上下文。诊断消息作为不可信数据处理。此结果不写入解释历史。</p><section><h2>选区内的保存后错误</h2>${diagnostics}<p class="muted">位置按 1 起始行列显示；诊断区间的末端不包含在范围内。</p></section>${code}${sections}${unclassified}${claims.length ? '' : '<p>当前没有可展示的解释条目；若上方有错误诊断，仍可按原始消息和位置核对。</p>'}<section><h2>未知项与缺少上下文</h2><ul>${unknowns || '<li>仅凭选区无法验证完整调用上下文、运行效果或测试结果。</li>'}</ul></section>`, nonce);
+}
 function coverageHTML(coverage) {
   return `<section aria-label="索引覆盖范围"><h2>索引覆盖范围</h2><ul>${coverageLines(coverage).map(line => `<li>${escapeHTML(line)}</li>`).join('')}</ul></section>`;
 }
@@ -84,4 +152,4 @@ function renderRound(round, nonce) {
   const analysis = `${button('analyzeRound', '', round.analysis ? '重新生成轮次解释' : '生成轮次解释')}<p class="muted">此手动入口仅在点击并确认后请求项目配置的模型；查看和折叠不会调用模型。可选 Claude Stop hook 在启用模型后仍可自动分析。解释依据本轮历史快照，不代表当前代码。</p>`;
   return page(`轮次 ${round.id}`, `<p>${escapeHTML(round.started)} → ${escapeHTML(round.ended)}</p><p>来源: ${escapeHTML(round.source)} · 工作区净变化，不能据此推断作者动机。</p>${analysis}<ul>${(round.notes || []).map(x => `<li>${escapeHTML(x)}</li>`).join('')}</ul>${(round.changes || []).map((c, i) => `<section><h2>${escapeHTML(c.path)} · ${escapeHTML(c.kind)}</h2>${button('change', i, '查看 before / after 快照')} ${button('changeCurrent', i, '打开当前文件')}<details ${c.folded ? '' : 'open'}><summary>净变化${c.folded ? '（辅助文件已折叠）' : ''}</summary><h3>Before</h3><pre>${escapeHTML(c.before?.content ?? '(不存在)')}</pre><h3>After</h3><pre>${escapeHTML(c.after?.content ?? '(不存在)')}</pre></details></section>`).join('')}<h2>未捕获文件</h2><ul>${(round.omitted || []).map(x => `<li>${escapeHTML(x)}</li>`).join('')}</ul>${round.analysis ? explanationHTML(round.analysis, 'analysis') : '<p>本轮没有已保存的模型解释。</p>'}`, nonce);
 }
-module.exports = { runCLI, confinedPath, escapeHTML, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page };
+module.exports = { runCLI, confinedPath, escapeHTML, compareEditorPosition, rangeOverlapsSelection, selectedErrorDiagnostics, validateSelectionResult, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, renderSelectionExplanation, page };

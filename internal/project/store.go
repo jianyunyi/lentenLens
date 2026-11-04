@@ -272,12 +272,12 @@ func (s *Store) End() (Round, error) {
 			return err
 		}
 		// Read policy again in Take; filter the baseline with that same latest policy.
-		p, err := capture.LoadPolicy(s.Root)
+		latestPolicy, err := capture.LoadPolicy(s.Root)
 		if err != nil {
 			return err
 		}
-		before := p.Filter(st.Active.Baseline)
-		after = p.Filter(after)
+		before := latestPolicy.Filter(st.Active.Baseline)
+		after = latestPolicy.Filter(after)
 		result = Round{ID: st.Active.ID, StartedAt: st.Active.StartedAt, EndedAt: time.Now().UTC(), Changes: capture.Diff(before, after), Skipped: append(before.Omitted, after.Omitted...), AnalysisStatus: "not_generated_no_model_configured"}
 		st.Rounds = append(st.Rounds, result)
 		st.Active = nil

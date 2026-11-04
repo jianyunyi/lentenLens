@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded CI workflow with coverage reporting and artifact uploads
 
 ### Security
+- Selected-code explanations now reject files excluded by default rules or `.intentignore` before any model request; the file path is used locally and is not included in model evidence.
 - Documented that exercise execution (`exercise-run`) is disabled due to lack of OS-level sandboxing
 - Clarified data storage locations and privacy practices
 - Established security vulnerability reporting process

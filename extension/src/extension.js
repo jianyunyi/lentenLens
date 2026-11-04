@@ -11,7 +11,7 @@ const { createCaptureRecovery } = require('./recovery');
 const { createCallPathProvider } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
-const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page, escapeHTML } = require('./core');
+const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, selectedErrorDiagnostics, validateSelectionResult, renderSelectionExplanation, page, escapeHTML } = require('./core');
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
@@ -67,7 +67,7 @@ function activate(context) {
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const modelCommands = new Set(['explain', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'exercise-share-prepare', 'test-model']);
+    const modelCommands = new Set(['explain', 'explain-selection', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'exercise-share-prepare', 'test-model']);
     const secret = modelCommands.has(command) ? await context.secrets?.get(workspaceSecretKey(folder.uri.fsPath)) : undefined;
     const env = modelCommands.has(command) ? { ...process.env, [SECURE_API_KEY_ENV]: secret || '' } : process.env;
     const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal, env });
@@ -432,6 +432,48 @@ function activate(context) {
   command('openModelEvidence', async (_folder, evidence) => {
     if (!evidence || typeof evidence.source !== 'string') throw new Error('本地引用证据无效。');
     await snapshot(evidence.source, evidence.file);
+  });
+  command('explainSelection', async () => {
+    trusted();
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) throw new Error('请先打开代码文件并选中一段代码。');
+    const { document, selection } = editor;
+    if (document.uri.scheme !== 'file') throw new Error('选区解释仅支持本地工作区文件。');
+    if (document.isDirty) throw new Error('请先保存文件，再分析选区内保存后出现的错误。');
+    if (!selection || selection.isEmpty) throw new Error('请先选中一段代码，再执行“解释选中代码”。');
+    const language = document.languageId;
+    if (!language || language === 'plaintext') throw new Error('当前语言模式不支持代码解释；请将语言模式切换为对应的代码语言后重试。');
+    const savedVersion = document.version;
+    const selectionRange = {
+      start: { line: selection.start.line, character: selection.start.character },
+      end: { line: selection.end.line, character: selection.end.character },
+    };
+    const source = document.getText(selection);
+    if (!source.trim()) throw new Error('选区为空白，请选中包含代码的文本。');
+    if (Buffer.byteLength(source, 'utf8') > 16 * 1024) throw new Error('选中代码超过 16 KiB 安全上限，请缩小选区。');
+    const folder = await folderFor(document.uri);
+    if (!folder) return;
+    const file = path.relative(folder.uri.fsPath, document.uri.fsPath).split(path.sep).join('/');
+    const samePosition = (a, b) => a.line === b.line && a.character === b.character;
+    const assertSavedSnapshot = () => {
+      const active = vscode.window.activeTextEditor;
+      if (document.isDirty || document.version !== savedVersion || document.languageId !== language || active?.document.uri.toString() !== document.uri.toString() || !samePosition(editor.selection.start, selectionRange.start) || !samePosition(editor.selection.end, selectionRange.end)) {
+        throw new Error('保存版本或选区已变化；为避免使用过期诊断，请重新保存并运行解释。');
+      }
+    };
+    assertSavedSnapshot();
+    const diagnostics = selectedErrorDiagnostics(vscode, document.uri, selectionRange);
+    const startLine = selection.start.line + 1;
+    const endLine = Math.max(startLine, selection.end.line + (selection.end.character > 0 ? 1 : 0));
+    const input = { file, code: source, language, start_line: startLine, end_line: endLine, selection_range: selectionRange, diagnostics, saved_version: savedVersion };
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'IntentLens：解释选中代码', cancellable: false },
+      () => cli(folder, 'explain-selection', input),
+    );
+    assertSavedSnapshot();
+    if (JSON.stringify(selectedErrorDiagnostics(vscode, document.uri, selectionRange)) !== JSON.stringify(diagnostics)) throw new Error('保存后的选区错误诊断已变化；请重新运行解释以使用最新诊断。');
+    const combined = validateSelectionResult(result);
+    panel('IntentLens · 选中代码与错误诊断', nonce => renderSelectionExplanation(combined, nonce), async () => {}, folder);
   });
   command('openCallPathSite', async call => {
     if (!call || typeof call.file !== 'string' || !Number.isInteger(call.line) || call.line < 1 || !Number.isInteger(call.column) || call.column < 0 || call.column > 100000000) throw new Error('源码调用点证据无效。');
