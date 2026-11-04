@@ -169,6 +169,7 @@ try {
                 $relative -ne 'release-manifest.json' -and
                 -not $relative.StartsWith('test/') -and
                 -not $relative.StartsWith('node_modules/') -and
+                $relative -ne 'package-lock.json' -and
                 $relative -ne '.ds_store' -and
                 -not $relative.EndsWith('.vsix')
             } |

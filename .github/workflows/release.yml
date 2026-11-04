@@ -81,9 +81,6 @@ jobs:
         with:
           node-version: '22'
       
-      - name: Install @vsce/vsce
-        run: npm install -g @vscode/vsce@4.0.0
-      
       - name: Build release package
         shell: pwsh
         run: |
