@@ -40,7 +40,7 @@ func Tool() (Executable, error) {
 	// Keep the absolute lookup path: Windows tool caches may be reached through
 	// junctions that EvalSymlinks cannot canonicalize across volumes. Hashing and
 	// hashing the executable at this same path preserves a stable preview identity.
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is the absolute executable resolved by LookPath("go"), which this feature intentionally fingerprints.
 	if err != nil {
 		return Executable{}, err
 	}

@@ -166,8 +166,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 			continue
 		}
 		var saved Explanation
-		if e := a.read(ent.Name(), &saved); e != nil {
-			return result, e
+		if readErr := a.read(ent.Name(), &saved); readErr != nil {
+			return result, readErr
 		}
 		if saved.FunctionID != result.Function.ID {
 			continue
@@ -186,8 +186,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		}
 		saved.Freshness = a.freshnessFromSnapshot(saved.Evidence, snap)
 		if visible {
-			if e := a.attachCorrections(&saved); e != nil {
-				return result, e
+			if correctionsErr := a.attachCorrections(&saved); correctionsErr != nil {
+				return result, correctionsErr
 			}
 			result.History = append(result.History, saved)
 		} else {
@@ -412,8 +412,8 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 	}
 	reserved := usage
 	reserved.UncertainTokens += reserve
-	if e := a.write("usage.json", reserved); e != nil {
-		return explain.Document{}, e
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return explain.Document{}, writeErr
 	}
 	runner := a.analysisRunner(selection)
 	if selection {
@@ -422,8 +422,8 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 		}
 	}
 	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
-	if e := a.write("usage.json", updated); e != nil {
-		return explain.Document{}, e
+	if writeErr := a.write("usage.json", updated); writeErr != nil {
+		return explain.Document{}, writeErr
 	}
 	if callErr != nil {
 		return explain.Document{}, callErr

@@ -60,10 +60,10 @@ func TestCaptureStatusReturnsDirectActiveState(t *testing.T) {
 		t.Fatal(out.String())
 	}
 	var status struct {
+		Active  any    `json:"active"`
 		ID      string `json:"id"`
 		Session string `json:"session"`
 		Started string `json:"started"`
-		Active  any    `json:"active"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &status); err != nil {
 		t.Fatal(err)

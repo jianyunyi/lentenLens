@@ -4,6 +4,7 @@ package capture
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"go/format"
 	"io"
@@ -58,7 +59,7 @@ func Take(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if ok, err := safePath(root, ""); err != nil || !ok {
+	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
 		return Snapshot{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)
@@ -121,9 +122,9 @@ func Take(root string) (Snapshot, error) {
 			return fmt.Errorf("cannot read capture path %q", rel)
 		}
 		data, e := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
-		f.Close()
-		if e != nil {
-			return fmt.Errorf("cannot read capture path %q", rel)
+		closeErr := f.Close()
+		if e != nil || closeErr != nil {
+			return fmt.Errorf("cannot read capture path %q: %w", rel, errors.Join(e, closeErr))
 		}
 		if len(data) > MaxFileBytes || len(data) > MaxSnapshotBytes-total || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 			s.Omitted = append(s.Omitted, rel)
@@ -147,7 +148,7 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
 	}
-	if ok, err := safePath(root, ""); err != nil || !ok {
+	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
 		return Snapshot{}, Coverage{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)
@@ -233,9 +234,9 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			return fmt.Errorf("cannot read capture path %q", rel)
 		}
 		data, e := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
-		f.Close()
-		if e != nil {
-			return fmt.Errorf("cannot read capture path %q", rel)
+		closeErr := f.Close()
+		if e != nil || closeErr != nil {
+			return fmt.Errorf("cannot read capture path %q: %w", rel, errors.Join(e, closeErr))
 		}
 		if len(data) > MaxFileBytes {
 			addCoverageOmission(&c, rel, "file_too_large")

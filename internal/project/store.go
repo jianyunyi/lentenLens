@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -58,9 +59,9 @@ func Open(root, stateRoot string) (*Store, error) {
 		return nil, fmt.Errorf("project is not a directory")
 	}
 	if stateRoot == "" {
-		cache, err := os.UserCacheDir()
-		if err != nil {
-			return nil, err
+		cache, cacheErr := os.UserCacheDir()
+		if cacheErr != nil {
+			return nil, cacheErr
 		}
 		stateRoot = filepath.Join(cache, "IntentLens", "projects")
 	}
@@ -71,8 +72,8 @@ func Open(root, stateRoot string) (*Store, error) {
 	if within(root, stateRoot) {
 		return nil, fmt.Errorf("private state directory must be outside the project")
 	}
-	if err = os.MkdirAll(stateRoot, 0700); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(stateRoot, 0o700); mkdirErr != nil {
+		return nil, mkdirErr
 	}
 	stateRoot, err = filepath.EvalSymlinks(stateRoot)
 	if err != nil {
@@ -87,8 +88,8 @@ func Open(root, stateRoot string) (*Store, error) {
 	}
 	sum := sha256.Sum256([]byte(key))
 	dir := filepath.Join(stateRoot, hex.EncodeToString(sum[:]))
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+	if mkdirErr := os.MkdirAll(dir, 0o700); mkdirErr != nil {
+		return nil, mkdirErr
 	}
 	canonical, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -105,27 +106,48 @@ func within(root, name string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-func (s *Store) transact(fn func(*state, capture.Policy) error) error {
-	lockPath := filepath.Join(s.Dir, "state.lock")
-	lock, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+func (s *Store) transact(fn func(*state, capture.Policy) error) (retErr error) {
+	stateRoot, err := os.OpenRoot(s.Dir)
+	if err != nil {
+		return err
+	}
+	defer stateRoot.Close()
+	lock, err := stateRoot.OpenFile("state.lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("cannot lock local state (another process or interrupted run): %w", err)
 	}
-	defer os.Remove(lockPath)
-	defer lock.Close()
+	defer func() {
+		if closeErr := lock.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
+		}
+		if removeErr := stateRoot.Remove("state.lock"); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			retErr = errors.Join(retErr, removeErr)
+		}
+	}()
 	policy, err := capture.LoadPolicy(s.Root)
 	if err != nil {
 		return err
 	}
 	st := state{Version: 1, Root: s.Root, Rounds: []Round{}}
-	name := filepath.Join(s.Dir, "state.json")
-	if info, err := os.Lstat(name); err == nil {
+	if info, statErr := stateRoot.Lstat("state.json"); statErr == nil {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("state must be a regular file")
 		}
-		data, err := os.ReadFile(name)
+		f, err := stateRoot.Open("state.json")
 		if err != nil {
 			return err
+		}
+		openedInfo, openedStatErr := f.Stat()
+		if openedStatErr != nil {
+			return errors.Join(openedStatErr, f.Close())
+		}
+		if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			return errors.Join(fmt.Errorf("state path changed while opening"), f.Close())
+		}
+		data, readErr := io.ReadAll(f)
+		closeErr := f.Close()
+		if joinedErr := errors.Join(readErr, closeErr); joinedErr != nil {
+			return joinedErr
 		}
 		if err = json.Unmarshal(data, &st); err != nil {
 			return fmt.Errorf("invalid state: %w", err)
@@ -133,8 +155,8 @@ func (s *Store) transact(fn func(*state, capture.Policy) error) error {
 		if st.Version != 1 || st.Root != s.Root {
 			return fmt.Errorf("state version or project mismatch")
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
 	}
 	// Enforce current exclusions on historical content before returning any output.
 	if st.Active != nil {
@@ -157,42 +179,65 @@ func (s *Store) transact(fn func(*state, capture.Policy) error) error {
 		st.Rounds[i].Skipped = skips
 	}
 	// Save the scrubbed state even if the requested operation subsequently fails.
-	if err = s.save(st); err != nil {
-		return err
+	if saveErr := s.save(st); saveErr != nil {
+		return saveErr
 	}
-	if err = fn(&st, policy); err != nil {
-		return err
+	if callbackErr := fn(&st, policy); callbackErr != nil {
+		return callbackErr
 	}
 	return s.save(st)
 }
 
-func (s *Store) save(st state) error {
+func (s *Store) save(st state) (retErr error) {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.Dir, ".state-*")
+	stateRoot, err := os.OpenRoot(s.Dir)
 	if err != nil {
 		return err
 	}
-	name := f.Name()
-	defer os.Remove(name)
-	if err = f.Chmod(0600); err != nil {
-		f.Close()
+	defer stateRoot.Close()
+	nameBytes := make([]byte, 12)
+	if _, randomErr := rand.Read(nameBytes); randomErr != nil {
+		return randomErr
+	}
+	name := ".state-" + hex.EncodeToString(nameBytes)
+	f, err := stateRoot.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return err
+	}
+	fileOpen := true
+	tempExists := true
+	defer func() {
+		if fileOpen {
+			retErr = errors.Join(retErr, f.Close())
+		}
+		if tempExists {
+			if removeErr := stateRoot.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				retErr = errors.Join(retErr, removeErr)
+			}
+		}
+	}()
+	if chmodErr := f.Chmod(0o600); chmodErr != nil {
+		return chmodErr
 	}
 	if _, err = f.Write(data); err != nil {
-		f.Close()
 		return err
 	}
-	if err = f.Sync(); err != nil {
-		f.Close()
+	if syncErr := f.Sync(); syncErr != nil {
+		return syncErr
+	}
+	if err = f.Close(); err != nil {
+		fileOpen = false
 		return err
 	}
-	if err := f.Close(); err != nil {
-		return err
+	fileOpen = false
+	if renameErr := stateRoot.Rename(name, "state.json"); renameErr != nil {
+		return renameErr
 	}
-	return os.Rename(name, filepath.Join(s.Dir, "state.json"))
+	tempExists = false
+	return nil
 }
 
 func (s *Store) Start() (Active, error) {

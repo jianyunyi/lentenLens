@@ -71,9 +71,10 @@ func TestVerificationModesUseExpectedRequestCountsAndCapsAcrossProviders(t *test
 					t.Fatal(err)
 				}
 				wantCalls, wantFirst, wantReview := 2, lightAnswerLimit, lightReviewLimit
-				if mode == ModeFast {
+				switch mode {
+				case ModeFast:
 					wantCalls, wantFirst, wantReview = 1, fastAnswerLimit, 0
-				} else if mode == ModeStrict {
+				case ModeStrict:
 					wantFirst, wantReview = strictAnswerLimit, strictReviewLimit
 				}
 				if calls != wantCalls || modeRequestLimit(provider, requests[0]) != wantFirst {
@@ -229,9 +230,10 @@ func TestLightReviewRejectsProviderSpecificTruncationReasons(t *testing.T) {
 	for _, provider := range []string{"anthropic", "openai", "openai-compatible", "gemini"} {
 		t.Run(provider, func(t *testing.T) {
 			valid, truncated := modeFixtureFinish(provider), "length"
-			if provider == "anthropic" {
+			switch provider {
+			case "anthropic":
 				truncated = "max_tokens"
-			} else if provider == "gemini" {
+			case "gemini":
 				truncated = "MAX_TOKENS"
 			}
 			if _, _, err := decodeResponse(provider, mustJSON(modeFixtureResponse(provider, `{}`, truncated))); err == nil {

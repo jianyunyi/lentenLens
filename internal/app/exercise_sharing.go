@@ -42,9 +42,12 @@ func (a *App) PrepareExerciseShare(id string) (ExerciseShareDraft, error) {
 	spec.Reference = nil
 	record := SharedExercise{Schema: 1, ID: e.ID, Version: e.Version, PackageDir: e.PackageDir, Spec: spec, AuthorValidation: "作者环境通过：原测试、基线预期失败、参考修改通过；接收者本地尚未验证"}
 	if e.Supersedes != "" {
-		records, _ := a.SharedExercises()
-		for _, r := range records {
-			if r.ID == e.Supersedes {
+		records, recordsErr := a.SharedExercises()
+		if recordsErr != nil {
+			return ExerciseShareDraft{}, recordsErr
+		}
+		for i := range records {
+			if records[i].ID == e.Supersedes {
 				record.Supersedes = e.Supersedes
 			}
 		}
@@ -66,8 +69,8 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 	}
 	defer unlock()
 	var draft ExerciseShareDraft
-	if err = a.read("exercise-share-"+id+".json", &draft); err != nil {
-		return err
+	if readErr := a.read("exercise-share-"+id+".json", &draft); readErr != nil {
+		return readErr
 	}
 	if draft.Digest != previewDigest || digest(draft.Record) != previewDigest {
 		return errors.New("题目预览摘要变化")
@@ -84,11 +87,14 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 		return err
 	}
 	defer root.Close()
-	b, _ := json.MarshalIndent(draft.Record, "", "  ")
+	b, err := json.MarshalIndent(draft.Record, "", "  ")
+	if err != nil {
+		return err
+	}
 	if len(b) > maxShareBytes {
 		return errors.New("题目共享记录过大")
 	}
-	f, err := root.OpenFile(id+".json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := root.OpenFile(id+".json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return errors.New("题目已共享或目标不可写，未覆盖已有版本")
 	}
@@ -98,7 +104,9 @@ func (a *App) ConfirmExerciseShare(id, previewDigest string, confirm bool) error
 		err = ce
 	}
 	if err != nil {
-		_ = root.Remove(id + ".json")
+		if removeErr := root.Remove(id + ".json"); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return errors.Join(err, removeErr)
+		}
 	}
 	return err
 }
@@ -111,7 +119,7 @@ func (a *App) exerciseSharedDir(create bool) (*os.Root, error) {
 	for _, p := range []string{".intent", ".intent/exercises"} {
 		info, e := root.Lstat(p)
 		if errors.Is(e, os.ErrNotExist) && create {
-			if e = root.Mkdir(p, 0700); e != nil && !errors.Is(e, os.ErrExist) {
+			if e = root.Mkdir(p, 0o700); e != nil && !errors.Is(e, os.ErrExist) {
 				return nil, e
 			}
 			info, e = root.Lstat(p)
@@ -140,7 +148,8 @@ func (a *App) SharedExercises() ([]SharedExercise, error) {
 		return nil, err
 	}
 	entries, err := dir.ReadDir(-1)
-	dir.Close()
+	closeErr := dir.Close()
+	err = errors.Join(err, closeErr)
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +171,12 @@ func (a *App) SharedExercises() ([]SharedExercise, error) {
 		err = decoder.Decode(&r)
 		var extra any
 		end := decoder.Decode(&extra)
-		f.Close()
-		if err != nil || end != io.EOF || r.Schema != 1 || !validID(r.ID) || entry.Name() != r.ID+".json" || r.Version != exercise.Version(r.Spec) || len(r.Spec.Reference) > 0 || (r.PackageDir != "." && !safeRelative(r.PackageDir)) {
-			return nil, errors.New("共享题目版本、字段或路径无效")
+		closeErr := f.Close()
+		if err != nil || end != io.EOF || closeErr != nil || r.Schema != 1 || !validID(r.ID) || entry.Name() != r.ID+".json" || r.Version != exercise.Version(r.Spec) || len(r.Spec.Reference) > 0 || (r.PackageDir != "." && !safeRelative(r.PackageDir)) {
+			return nil, errors.Join(errors.New("共享题目版本、字段或路径无效"), err, closeErr)
 		}
-		if err = exercise.Check(r.Spec); err != nil {
-			return nil, err
+		if checkErr := exercise.Check(r.Spec); checkErr != nil {
+			return nil, checkErr
 		}
 		allowed := true
 		for name := range exercise.Files(r.Spec, false) {
@@ -191,7 +200,8 @@ func (a *App) ImportExercise(id string) (ExerciseDisplay, error) {
 	if err != nil {
 		return ExerciseDisplay{}, err
 	}
-	for _, r := range records {
+	for i := range records {
+		r := &records[i]
 		if r.ID != id {
 			continue
 		}
@@ -199,8 +209,8 @@ func (a *App) ImportExercise(id string) (ExerciseDisplay, error) {
 			return a.ExerciseView(id)
 		}
 		e := Exercise{ID: r.ID, Version: r.Version, Supersedes: r.Supersedes, PackageDir: r.PackageDir, Spec: r.Spec, Imported: true}
-		if err = a.write("exercise-"+id+".json", e); err != nil {
-			return ExerciseDisplay{}, err
+		if writeErr := a.write("exercise-"+id+".json", e); writeErr != nil {
+			return ExerciseDisplay{}, writeErr
 		}
 		return a.ExerciseView(id)
 	}
@@ -227,7 +237,10 @@ func (a *App) ExerciseFeedback(ctx context.Context, id, attemptID, reason, key s
 		if attempt.ID != attemptID {
 			continue
 		}
-		payload, _ := json.Marshal(map[string]any{"requirements": view.Spec.Requirements, "answer": attempt.Files, "result": attempt.Result, "reason": reason})
+		payload, err := json.Marshal(map[string]any{"requirements": view.Spec.Requirements, "answer": attempt.Files, "result": attempt.Result, "reason": reason})
+		if err != nil {
+			return view, err
+		}
 		raw, err := a.exerciseModel(ctx, key, `仅评价用户对修改理由的解释质量，返回 JSON {"feedback":"中文补充反馈"}。不要给分，不改变测试结果，不宣称完全理解或测试未覆盖的正确性。测试失败必须保留，未验证题目反馈只能暂定。材料：`+string(payload))
 		if err != nil {
 			return view, err
@@ -243,8 +256,8 @@ func (a *App) ExerciseFeedback(ctx context.Context, id, attemptID, reason, key s
 		}
 		attempt.Reason = reason
 		attempt.Feedback = response.Feedback
-		if err = a.write("exercise-attempts-"+id+".json", view.Attempts); err != nil {
-			return view, err
+		if writeErr := a.write("exercise-attempts-"+id+".json", view.Attempts); writeErr != nil {
+			return view, writeErr
 		}
 		return a.ExerciseView(id)
 	}

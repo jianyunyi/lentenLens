@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
   pull-requests: read
 
@@ -43,6 +42,27 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+          output: codeql-results
+          post-processed-sarif-path: codeql-processed-sarif
+          upload: never
+      - name: Explain skipped GitHub Code Scanning upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Code Scanning upload: skipped"
+            echo
+            echo "CodeQL analysis runs locally in this workflow. Uploading SARIF to the GitHub Security tab is not available for this repository, so no Code Scanning upload was attempted. The SARIF artifact is retained below when produced. This is not a successful GitHub Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve CodeQL SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: |
+            codeql-results/
+            codeql-processed-sarif/
+          if-no-files-found: warn
+          retention-days: 14
 
   gosec:
     name: Go Security Scan (gosec)
@@ -52,17 +72,29 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
           args: '-fmt sarif -out gosec-results.sarif ./...'
       
-      - name: Upload Gosec results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Explain skipped GitHub Security upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Gosec SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Gosec SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: gosec-results.sarif
+          name: gosec-sarif
+          path: gosec-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   nancy:
     name: Go Dependency Vulnerability Scan (nancy)
@@ -72,14 +104,24 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install nancy
         run: go install github.com/sonatype-nexus-community/nancy@latest
       
       - name: Run nancy
-        run: go list -json -deps ./... | nancy sleuth
-        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          go list -json -deps ./... | nancy sleuth 2>&1 | tee nancy-results.txt
+      - name: Preserve nancy scan output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nancy-results
+          path: nancy-results.txt
+          if-no-files-found: warn
+          retention-days: 14
 
   npm-audit:
     name: npm Audit
@@ -98,7 +140,6 @@ jobs:
         working-directory: ${{ matrix.directory }}
         run: |
           npm audit --audit-level=moderate
-        continue-on-error: true
 
   trivy:
     name: Trivy Vulnerability Scanner
@@ -115,10 +156,22 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
       
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Explain skipped GitHub Security upload
+        if: always()
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Trivy SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Trivy SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: 'trivy-results.sarif'
+          name: trivy-sarif
+          path: trivy-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   semgrep:
     name: Semgrep Security Scan
@@ -132,13 +185,22 @@ jobs:
         run: semgrep scan --sarif --output=semgrep-results.sarif --config=auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-        continue-on-error: true
-      
-      - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Explain skipped GitHub Security upload
         if: always()
+        run: |
+          {
+            echo "## GitHub Security upload: skipped"
+            echo
+            echo "Semgrep SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Semgrep SARIF as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: semgrep-results.sarif
+          name: semgrep-sarif
+          path: semgrep-results.sarif
+          if-no-files-found: warn
+          retention-days: 14
 
   license-check:
     name: License Compliance Check
@@ -148,18 +210,20 @@ jobs:
       
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
+          go-version: '1.25.0'
       
       - name: Install go-licenses
         run: go install github.com/google/go-licenses@latest
       
       - name: Check licenses
         run: go-licenses check ./...
-        continue-on-error: true
 
   secrets-scan:
     name: Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

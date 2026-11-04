@@ -164,7 +164,8 @@ func fastEligible(question string, evidence []Evidence) bool {
 	}
 	total := 0
 	for i := range evidence {
-		if len(evidence[i].Source) > fastMaxEvidenceBytes-total {
+		item := &evidence[i]
+		if len(item.Source) > fastMaxEvidenceBytes-total {
 			return false
 		}
 		total += len(evidence[i].Source)
@@ -220,6 +221,8 @@ func ReservationForSelectionMode(mode, question string, evidence []Evidence) int
 func reservationForProfile(profile runProfile, question string, evidence []Evidence) int {
 	b, err := json.Marshal(evidence)
 	if err != nil {
+		// This API returns a budget estimate, not an error; reserve the
+		// maximum representable amount rather than under-reserving.
 		return math.MaxInt
 	}
 	return 2 * (len(b) + len(question) + len(profile.answerPrompt) + len(profile.reviewPrompt) + 4096 + (profile.answerLimit+profile.reviewLimit)*12)
@@ -252,7 +255,7 @@ func run(ctx context.Context, config *Config, usage Usage, key, question string,
 	}
 	payload, err := json.Marshal(map[string]any{"question": question, "evidence": evidence})
 	if err != nil {
-		return doc, usage, errors.New("分析请求无法编码")
+		return doc, usage, errors.New("模型请求无法编码为 JSON")
 	}
 	raw, n, err := callLimitMode(ctx, cfg, key, profile.answerPrompt, string(payload), profile.answerLimit, profile.mode)
 	if err != nil {
@@ -318,7 +321,8 @@ func profileForRun(mode, question string, evidence []Evidence, selection bool) (
 func filterClaims(doc *Document, evidence []Evidence) {
 	valid := map[string]bool{}
 	for i := range evidence {
-		valid[evidence[i].ID] = true
+		e := &evidence[i]
+		valid[e.ID] = true
 	}
 	claims := []Claim{}
 	seen := map[string]bool{}
@@ -395,7 +399,7 @@ func applyReviewChecks(doc *Document, raw string, reviewEvidence []Evidence, mod
 			doc.Unknowns = append(doc.Unknowns, "一项说法未获证据支持，已省略")
 			continue
 		}
-		if s == "supported" && mode == ModeStrict && strictNeedsUsageEvidence(c) && !hasPurposeEvidence(c, reviewEvidence) {
+		if s == "supported" && mode == ModeStrict && strictNeedsUsageEvidence(&c) && !hasPurposeEvidence(&c, reviewEvidence) {
 			doc.Unknowns = append(doc.Unknowns, "strict 模式无法仅凭函数实现确认用途或调用场景；缺少被引用的调用点或明确文档，已保留待确认")
 			checked = append(checked, c)
 			continue
@@ -426,14 +430,15 @@ func citedEvidence(claims []Claim, evidence []Evidence) []Evidence {
 	}
 	selected := make([]Evidence, 0, len(used))
 	for i := range evidence {
-		if used[evidence[i].ID] {
-			selected = append(selected, evidence[i])
+		item := &evidence[i]
+		if used[item.ID] {
+			selected = append(selected, *item)
 		}
 	}
 	return selected
 }
 
-func strictNeedsUsageEvidence(claim Claim) bool {
+func strictNeedsUsageEvidence(claim *Claim) bool {
 	if strings.EqualFold(strings.TrimSpace(claim.Section), "purpose") {
 		return true
 	}
@@ -446,7 +451,7 @@ func strictNeedsUsageEvidence(claim Claim) bool {
 	return false
 }
 
-func hasPurposeEvidence(claim Claim, evidence []Evidence) bool {
+func hasPurposeEvidence(claim *Claim, evidence []Evidence) bool {
 	cited := make(map[string]bool, len(claim.EvidenceIDs))
 	for _, id := range claim.EvidenceIDs {
 		cited[id] = true

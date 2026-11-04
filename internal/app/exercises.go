@@ -79,16 +79,16 @@ func (a *App) exerciseModel(ctx context.Context, key, prompt string) (string, er
 	}
 	reserved := u
 	reserved.UncertainTokens += reserve
-	if err = a.write("usage.json", reserved); err != nil {
-		return "", err
+	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+		return "", writeErr
 	}
 	run := a.exerciseRun
 	if run == nil {
 		run = explain.Structured
 	}
 	raw, updated, callErr := run(ctx, cfg.Model, u, key, prompt)
-	if err = a.write("usage.json", updated); err != nil {
-		return "", err
+	if writeErr := a.write("usage.json", updated); writeErr != nil {
+		return "", writeErr
 	}
 	return raw, callErr
 }
@@ -112,9 +112,10 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 		return Exercise{}, errors.New("请选择已获证据支持的行为说法")
 	}
 	target := false
-	for _, ev := range source.Evidence {
+	for i := range source.Evidence {
+		ev := &source.Evidence[i]
 		for _, id := range selected.EvidenceIDs {
-			if ev.ID == id && ev.File == file && codeEvidence(ev) && ev.Role != "before" {
+			if ev.ID == id && ev.File == file && codeEvidence(*ev) && ev.Role != "before" {
 				target = true
 			}
 		}
@@ -157,21 +158,25 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 		}
 		files[name] = f.Content
 	}
-	if err = exercise.Qualify(files); err != nil {
-		return Exercise{}, err
+	if qualifyErr := exercise.Qualify(files); qualifyErr != nil {
+		return Exercise{}, qualifyErr
 	}
 	targetEvidence := []explain.Evidence{}
-	for _, ev := range source.Evidence {
+	for i := range source.Evidence {
+		ev := &source.Evidence[i]
 		for _, id := range selected.EvidenceIDs {
-			if ev.ID == id && codeEvidence(ev) && ev.Visibility != "local" && filepath.ToSlash(filepath.Dir(ev.File)) == dir {
-				targetEvidence = append(targetEvidence, ev)
+			if ev.ID == id && codeEvidence(*ev) && ev.Visibility != "local" && filepath.ToSlash(filepath.Dir(ev.File)) == dir {
+				targetEvidence = append(targetEvidence, *ev)
 			}
 		}
 	}
 	if len(targetEvidence) == 0 {
 		return Exercise{}, errors.New("所选行为没有获准用于练习的代码片段")
 	}
-	payload, _ := json.Marshal(map[string]any{"target_file": filepath.Base(file), "target_evidence": targetEvidence, "baseline": files})
+	payload, err := json.Marshal(map[string]any{"target_file": filepath.Base(file), "target_evidence": targetEvidence, "baseline": files})
+	if err != nil {
+		return Exercise{}, err
+	}
 	prompt := `根据给定 Go 包代码为熟悉编程的开发者生成一道小行为修改题，中文。仅使用代码，不推测作者动机。不得需要外部服务、依赖下载或凭据。只允许修改已有非测试 Go 文件；保持已有测试通过。返回 JSON {"title":"...","requirements":[{"id":"r1","text":"明确行为要求","test":"TestIntentLensName"}],"acceptance":"一个完整 Go 测试文件源码","reference":{"已有文件.go":"完整参考修改源码"}}。验收文件仅包含 TestIntentLens 前缀测试函数（不定义其他函数、init、TestMain），每个要求一项测试。所有新增测试必须在基线因预期行为缺失而失败，失败断言包含 INTENTLENS_EXPECTED_MISSING；参考修改使所有新旧测试通过。输出不包含 baseline。参考修改不会展示给作答者。材料：` + string(payload)
 	prompt += "\n出题必须围绕 target_evidence 标识的行为片段；包其余代码仅用于构建和回归，不任意换成另一处练习。"
 	raw, err := a.exerciseModel(ctx, key, prompt)
@@ -186,8 +191,8 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 	if len(spec.Reference) == 0 {
 		return Exercise{}, errors.New("题目缺少内部验证参考修改")
 	}
-	if err = exercise.Check(spec); err != nil {
-		return Exercise{}, err
+	if checkErr := exercise.Check(spec); checkErr != nil {
+		return Exercise{}, checkErr
 	}
 	latest, err := a.ExplanationByID(sourceID)
 	if err != nil || latest.Freshness != "已引用证据未变" || len(latest.Corrections) > 0 {
@@ -245,7 +250,7 @@ func (a *App) exerciseDirectory(id string) (string, error) {
 		return "", errors.New("无效题目 ID")
 	}
 	dir := filepath.Join(a.State, "exercise-work-"+id)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(dir)

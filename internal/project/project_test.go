@@ -86,8 +86,8 @@ func TestPolicyChangePurgesHistoricalContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	put(t, root, ".intentignore", "secret.go\n")
-	if _, err := s.History(); err != nil {
-		t.Fatal(err)
+	if _, historyErr := s.History(); historyErr != nil {
+		t.Fatal(historyErr)
 	}
 	data, err := os.ReadFile(filepath.Join(s.Dir, "state.json"))
 	if err != nil {

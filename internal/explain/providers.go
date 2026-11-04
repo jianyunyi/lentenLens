@@ -55,7 +55,7 @@ func (c Config) Resolved() (Config, error) {
 	}
 	ip := net.ParseIP(u.Hostname())
 	loopback := strings.EqualFold(u.Hostname(), "localhost") || (ip != nil && ip.IsLoopback())
-	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !loopback) {
 		return c, errors.New("API 必须使用 HTTPS；仅本机 loopback 可使用 HTTP")
 	}
 	if c.APIKeyEnv == "" {
@@ -107,7 +107,10 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 	if cfg.Endpoint != "" {
 		endpoint = cfg.Endpoint
 	} // Non-serializable test seam.
-	data, _ := json.Marshal(payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", 0, errors.New("模型请求无法编码为 JSON")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return "", 0, errors.New("模型请求地址无效")

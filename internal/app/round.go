@@ -5,6 +5,7 @@ import (
 	"intentlens/internal/capture"
 	"intentlens/internal/explain"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -93,11 +94,11 @@ func (a *App) Stop(session string) (Round, error) {
 		}
 	}
 	round := Round{ID: active.ID, Session: session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}
-	if e = a.write("round-"+round.ID+".json", round); e != nil {
-		return Round{}, e
+	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
+		return Round{}, writeErr
 	}
-	if e = os.Remove(a.State + string(os.PathSeparator) + "active.json"); e != nil {
-		return Round{}, e
+	if removeErr := os.Remove(filepath.Join(a.State, "active.json")); removeErr != nil {
+		return Round{}, removeErr
 	}
 	return round, nil
 }
@@ -108,7 +109,7 @@ func (a *App) Abort() error {
 		return e
 	}
 	defer unlock()
-	e = os.Remove(a.State + string(os.PathSeparator) + "active.json")
+	e = os.Remove(filepath.Join(a.State, "active.json"))
 	if errors.Is(e, os.ErrNotExist) {
 		return nil
 	}
@@ -129,8 +130,8 @@ func (a *App) List() ([]Round, error) {
 			continue
 		}
 		var r Round
-		if e = a.read(entry.Name(), &r); e != nil {
-			return nil, e
+		if readErr := a.read(entry.Name(), &r); readErr != nil {
+			return nil, readErr
 		}
 		filtered := []capture.Change{}
 		for _, c := range r.Changes {
@@ -145,8 +146,8 @@ func (a *App) List() ([]Round, error) {
 		r.Changes = filtered
 		rounds = append(rounds, r)
 	}
-	if e = a.attachRoundAnalyses(rounds, entries); e != nil {
-		return nil, e
+	if analysesErr := a.attachRoundAnalyses(rounds, entries); analysesErr != nil {
+		return nil, analysesErr
 	}
 	sort.Slice(rounds, func(i, j int) bool { return rounds[i].Started > rounds[j].Started })
 	return rounds, nil

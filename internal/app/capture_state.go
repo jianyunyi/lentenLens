@@ -62,8 +62,8 @@ func (a *App) AbortCapture(session, roundID string, confirm bool) error {
 	if active.Session != session || active.ID != roundID {
 		return errors.New("session 与 round_id 与活动轮次基线不匹配")
 	}
-	if err = os.Remove(filepath.Join(a.State, "active.json")); err != nil {
-		return err
+	if removeErr := os.Remove(filepath.Join(a.State, "active.json")); removeErr != nil {
+		return removeErr
 	}
 	return nil
 }
