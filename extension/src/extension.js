@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 const vscode = require('vscode');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -12,11 +12,20 @@ const { createCallPathProvider } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, page, escapeHTML } = require('./core');
+const { TaskTreeProvider } = require('./taskpanel');
+const { TaskBoundaryDecorator } = require('./boundaries');
+const { EnhancedCallPathProvider } = require('./callpath-enhanced');
+const { TaskManagementPanel } = require('./taskmanagement');
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
   const panels = new Map(), policyVersions = new Map();
-  let callPathProvider;
+    // Task management providers
+  let taskProvider;
+  let taskBoundaryDecorator;
+  let enhancedCallPathProvider;
+  let taskManagementPanel;
+let callPathProvider;
   let callPathView;
   let callPathState;
   let modelAnswerProvider;
@@ -355,7 +364,17 @@ function activate(context) {
   callPathView = vscode.window.createTreeView('intentlens.callPath', { treeDataProvider: callPathProvider });
   const modelAnswerChanged = new vscode.EventEmitter();
   modelAnswerProvider = createModelAnswerProvider({ vscode, treeChanged: modelAnswerChanged, getCurrentTarget: getCurrentModelTarget });
-  const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });
+  const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });  
+  // Initialize task management UI components
+  taskProvider = new TaskTreeProvider(vscode);
+  const taskView = vscode.window.createTreeView('intentlens.tasks', { treeDataProvider: taskProvider });
+  
+  taskBoundaryDecorator = new TaskBoundaryDecorator(vscode);
+  taskBoundaryDecorator.registerCommands(context);
+  
+  enhancedCallPathProvider = new EnhancedCallPathProvider(vscode);
+  
+  taskManagementPanel = new TaskManagementPanel(vscode, context);
   context.subscriptions.push(callPathProvider, callPathView, modelAnswerProvider, modelAnswerChanged, modelAnswerView);
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
@@ -550,7 +569,48 @@ function activate(context) {
 	    vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
 	  });
   command('pauseModel', async () => {
-    const folder = await folderFor(); if (!folder) return;
+    const folder = await folderFor();  
+  // Task management commands
+  command('task.create', async () => {
+    if (taskManagementPanel) {
+      await taskManagementPanel.show();
+    }
+  });
+  
+  command('taskmanagement.show', async () => {
+    if (taskManagementPanel) {
+      await taskManagementPanel.show();
+    }
+  });
+  
+  command('boundary.toggle', async () => {
+    if (taskBoundaryDecorator) {
+      const enabled = taskBoundaryDecorator.toggle();
+      vscode.window.showInformationMessage(enabled ? '任务边框已启用' : '任务边框已禁用');
+    }
+  });
+  
+  command('callpath.export', async () => {
+    if (enhancedCallPathProvider && callPathState?.data) {
+      const text = enhancedCallPathProvider.exportAsText();
+      await vscode.env.clipboard.writeText(text);
+      vscode.window.showInformationMessage('调用图已导出到剪贴板');
+    }
+  });
+  
+  command('callpath.sort', async () => {
+    if (enhancedCallPathProvider) {
+      const sortBy = await vscode.window.showQuickPick([
+        { label: '⏱ 按执行时间', value: 'executionTime' },
+        { label: '📝 按名称', value: 'name' },
+        { label: '📊 按调用次数', value: 'callCount' },
+      ], { placeHolder: '选择排序方式' });
+      
+      if (sortBy) {
+        enhancedCallPathProvider.setSortBy(sortBy.value);
+      }
+    }
+  }); if (!folder) return;
     const status = await cli(folder, 'status');
     await cli(folder, 'configure', { settings: { ...status.settings, model: { ...status.settings.model, enabled: false } }, consent: false });
     vscode.window.showInformationMessage('IntentLens：已暂停新的模型分析；正在执行的请求可能仍完成。'); refresh();
@@ -570,7 +630,18 @@ function activate(context) {
   if (vscode.window.onDidChangeActiveTextEditor) context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => modelAnswerProvider?.refresh()));
   if (vscode.window.onDidChangeTextEditorSelection) context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => modelAnswerProvider?.refresh()));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
-    if (event.document.uri.scheme === 'file' && event.contentChanges.length) clearInline();
+    if (event.document.uri.scheme === 'file' && event.contentChanges.length) clearInline();  
+  // Update task boundaries when editor changes
+  if (vscode.window.onDidChangeActiveTextEditor && taskBoundaryDecorator) {
+    context.subscriptions.push(
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        // Task boundary updates will be handled when tasks are loaded
+        if (editor && taskBoundaryDecorator && callPathState?.data) {
+          // Future: integrate task data display
+        }
+      })
+    );
+  }
   }));
   const policyWatcher = vscode.workspace.createFileSystemWatcher('**/.intentignore');
   const policyChanged = guard(async uri => {
@@ -588,3 +659,4 @@ function activate(context) {
   context.subscriptions.push(sourceWatcher, sourceWatcher.onDidCreate(clearInline), sourceWatcher.onDidChange(clearInline), sourceWatcher.onDidDelete(clearInline));
 }
 module.exports = { activate };
+
