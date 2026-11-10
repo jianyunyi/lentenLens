@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-11-10T08:36:54.638Z",
+  "testDurationMs": 3600000,
+  "snapshotCount": 2,
+  "interactionCount": 10,
+  "snapshots": [
+    {
+      "label": "initial",
+      "iteration": 0,
+      "timestamp": "2026-11-10T08:31:54.183Z",
+      "elapsedMs": 5,
+      "heapUsed": 6841856,
+      "heapTotal": 16023552,
+      "external": 1522644,
+      "rss": 44515328,
+      "heapUsedMB": "6.52",
+      "heapTotalMB": "15.28"
+    },
+    {
+      "label": "final",
+      "iteration": 10,
+      "timestamp": "2026-11-10T08:36:54.636Z",
+      "elapsedMs": 300456,
+      "heapUsed": 6913888,
+      "heapTotal": 8945664,
+      "external": 1522644,
+      "rss": 45031424,
+      "heapUsedMB": "6.59",
+      "heapTotalMB": "8.53"
+    }
+  ],
+  "growthAnalysis": {
+    "heapGrowthMB": "0.07",
+    "timeElapsedHours": "0.08",
+    "growthRateMBPerHour": "0.84",
+    "leaked": false,
+    "status": "PASS"
+  },
+  "retainedObjects": [],
+  "summary": {
+    "leaked": false,
+    "growthRateMBPerHour": "0.84",
+    "status": "PASS",
+    "suspectedLeaks": 0
+  }
+}

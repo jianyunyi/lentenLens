@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-11-10T08:42:05.524Z",
+  "optimization": "Lazy Decoration (Task 8)",
+  "comparisonResults": [
+    {
+      "taskCount": 100,
+      "full": {
+        "p50": 156.16570000000002,
+        "p95": 157.93189000000007,
+        "memoryDelta": 800
+      },
+      "lazy": {
+        "p50": 155.9528499999999,
+        "p95": 158.42321499999997,
+        "memoryDelta": 24857.6
+      },
+      "improvement": 0.1,
+      "improvementStatus": "REVIEW"
+    },
+    {
+      "taskCount": 500,
+      "full": {
+        "p50": 153.37069999999994,
+        "p95": 158.21828500000004,
+        "memoryDelta": 136168
+      },
+      "lazy": {
+        "p50": 155.92769999999973,
+        "p95": 157.67595000000014,
+        "memoryDelta": -63061.6
+      },
+      "improvement": -1.7,
+      "improvementStatus": "REVIEW"
+    },
+    {
+      "taskCount": 1000,
+      "full": {
+        "p50": 157.45090000000027,
+        "p95": 160.94340499999984,
+        "memoryDelta": 95133.6
+      },
+      "lazy": {
+        "p50": 159.63965000000007,
+        "p95": 168.72352499999954,
+        "memoryDelta": -147559.2
+      },
+      "improvement": -1.4,
+      "improvementStatus": "REVIEW"
+    }
+  ],
+  "scrollResults": {
+    "p50": 160.42109999999957,
+    "p95": 162.09703999999908,
+    "target": 50,
+    "status": "REVIEW"
+  },
+  "summary": {
+    "avgImprovement": "-1.0%",
+    "scrollLatency": "160.42ms",
+    "allPass": false
+  }
+}

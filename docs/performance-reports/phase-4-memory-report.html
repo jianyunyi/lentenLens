@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Memory Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; }
+    h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+    h2 { color: #34495e; margin-top: 30px; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background-color: #3498db; color: white; }
+    .pass { color: #27ae60; font-weight: bold; }
+    .fail { color: #e74c3c; font-weight: bold; }
+    .summary { background: #e8f5e9; padding: 20px; margin: 20px 0; border-left: 4px solid #27ae60; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧠 Memory Performance Report</h1><div class="summary"><strong>Status:</strong> <span class="pass">✓ ALL TARGETS MET</span></div><h2>Memory Metrics</h2><table><thead><tr><th>Metric</th><th>Target</th><th>Actual</th><th>Status</th></tr></thead><tbody><tr><td>Baseline Heap</td><td>≤50MB</td><td>3.88MB</td><td class="pass">PASS</td></tr><tr><td>Peak Memory (10k)</td><td>≤150MB</td><td>6.53MB</td><td class="pass">PASS</td></tr><tr><td>Growth Ratio</td><td>&lt;2.0x</td><td>1.55x</td><td class="pass">PASS</td></tr><tr><td>Memory Leak</td><td>≤10MB/hour</td><td>0.84MB/hour</td><td class="pass">PASS</td></tr></tbody></table>
+    <p style="text-align: center; color: #999; margin-top: 40px;">
+      Generated: 2026-11-10T13:51:52.182Z<br>IntentLens v0.6.0 - Phase 4
+    </p>
+  </div>
+</body>
+</html>

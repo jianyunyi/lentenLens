@@ -1,0 +1,1163 @@
+{
+  "timestamp": "2026-11-10T08:27:47.040Z",
+  "totalBenchmarks": 5,
+  "successCount": 5,
+  "failureCount": 0,
+  "results": [
+    {
+      "name": "Boundary Decoration: Render Performance",
+      "benchmarks": [
+        {
+          "name": "Benchmark 1: applyDecorations() at Varying Densities",
+          "sub_benchmarks": [
+            {
+              "density": 100,
+              "name": "applyDecorations-100",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.031799999999975626,
+                "p95": 1.2140750000000018,
+                "p99": 1.9716950000000049,
+                "min": 0.02400000000000091,
+                "max": 2.1611000000000047,
+                "mean": 0.2474799999999931
+              },
+              "memoryDelta": {
+                "heapUsed": 49971.2,
+                "heapTotal": 0,
+                "external": 4,
+                "rss": 48742.4
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "density": 500,
+              "name": "applyDecorations-500",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.1862000000000137,
+                "p95": 0.6668650000000211,
+                "p99": 0.713773000000013,
+                "min": 0.08390000000002829,
+                "max": 0.7255000000000109,
+                "mean": 0.256350000000009
+              },
+              "memoryDelta": {
+                "heapUsed": -23088,
+                "heapTotal": 209715.2,
+                "external": 0,
+                "rss": 119603.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "density": 1000,
+              "name": "applyDecorations-1000",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.24330000000000496,
+                "p95": 0.7101100000000198,
+                "p99": 0.8066620000000125,
+                "min": 0.1827000000000112,
+                "max": 0.8308000000000106,
+                "mean": 0.34389000000000464
+              },
+              "memoryDelta": {
+                "heapUsed": -214368,
+                "heapTotal": 419430.4,
+                "external": 0,
+                "rss": 166707.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "baseline_100_latency_ms": 0.031799999999975626,
+          "status": "PASS"
+        },
+        {
+          "name": "Benchmark 2: VS Code setDecorations() API Latency",
+          "sub_benchmarks": [
+            {
+              "decoration_count": 50,
+              "name": "setDecorations-50",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.0012000000000114142,
+                "p95": 0.00556999999997742,
+                "p99": 0.00751399999998057,
+                "min": 0.0004999999999881766,
+                "max": 0.007999999999981355,
+                "mean": 0.0019000000000005458
+              },
+              "memoryDelta": {
+                "heapUsed": 496,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 409.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0,
+              "latency_per_100_ms": 0.0024000000000228283
+            },
+            {
+              "decoration_count": 100,
+              "name": "setDecorations-100",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.0022499999999752163,
+                "p95": 0.004125000000004773,
+                "p99": 0.004664999999992006,
+                "min": 0.0004000000000132786,
+                "max": 0.004799999999988813,
+                "mean": 0.002469999999993888
+              },
+              "memoryDelta": {
+                "heapUsed": 499.2,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 12288
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0,
+              "latency_per_100_ms": 0.0022499999999752163
+            },
+            {
+              "decoration_count": 200,
+              "name": "setDecorations-200",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.0010000000000331966,
+                "p95": 0.0021649999999738155,
+                "p99": 0.002272999999987633,
+                "min": 0.0005999999999630745,
+                "max": 0.002299999999991087,
+                "mean": 0.0011399999999923693
+              },
+              "memoryDelta": {
+                "heapUsed": 496,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 2457.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0,
+              "latency_per_100_ms": 0.0005000000000165983
+            }
+          ],
+          "baseline_per_100_decorations_ms": 0.0022499999999752163,
+          "status": "PASS"
+        },
+        {
+          "name": "Benchmark 3: Hover Provider Registration",
+          "sub_benchmarks": [
+            {
+              "hover_count": 50,
+              "name": "hoverRegistration-50",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.00519999999997367,
+                "p95": 0.09648500000000965,
+                "p99": 0.14497700000001318,
+                "min": 0.004199999999968895,
+                "max": 0.157100000000014,
+                "mean": 0.022189999999994825
+              },
+              "memoryDelta": {
+                "heapUsed": 7587.2,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 11468.8
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "hover_count": 100,
+              "name": "hoverRegistration-100",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.006100000000003547,
+                "p95": 0.00897500000002651,
+                "p99": 0.009155000000022256,
+                "min": 0.005899999999996908,
+                "max": 0.009200000000021191,
+                "mean": 0.006670000000008258
+              },
+              "memoryDelta": {
+                "heapUsed": 12496,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 13107.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "hover_count": 200,
+              "name": "hoverRegistration-200",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.014899999999983038,
+                "p95": 0.030330000000000697,
+                "p99": 0.03918600000000823,
+                "min": 0.011699999999962074,
+                "max": 0.041400000000010095,
+                "mean": 0.016789999999991777
+              },
+              "memoryDelta": {
+                "heapUsed": 24497.6,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 24985.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "baseline_100_hovers_ms": 0.006100000000003547,
+          "status": "PASS"
+        },
+        {
+          "name": "Benchmark 4: Click Handler Registration",
+          "sub_benchmarks": [
+            {
+              "handler_count": 50,
+              "name": "clickHandlers-50",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.012750000000011141,
+                "p95": 0.17681999999999207,
+                "p99": 0.21872399999999179,
+                "min": 0.011000000000024102,
+                "max": 0.22919999999999163,
+                "mean": 0.04454000000000633
+              },
+              "memoryDelta": {
+                "heapUsed": -386987.2,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 7372.8
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "handler_count": 100,
+              "name": "clickHandlers-100",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.021700000000009823,
+                "p95": 0.030559999999994134,
+                "p99": 0.03603199999999163,
+                "min": 0.021000000000015007,
+                "max": 0.037399999999990996,
+                "mean": 0.02318000000000211
+              },
+              "memoryDelta": {
+                "heapUsed": 25688,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "handler_count": 200,
+              "name": "clickHandlers-200",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.04774999999997931,
+                "p95": 0.08872499999996816,
+                "p99": 0.09646499999996934,
+                "min": 0.043000000000006366,
+                "max": 0.09839999999996962,
+                "mean": 0.055109999999990576
+              },
+              "memoryDelta": {
+                "heapUsed": 50961.6,
+                "heapTotal": 26214.4,
+                "external": 0,
+                "rss": 12288
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "baseline_100_handlers_ms": 0.021700000000009823,
+          "status": "PASS"
+        },
+        {
+          "name": "Benchmark 5: Decoration Cache Memory",
+          "sub_benchmarks": [
+            {
+              "scale": 1000,
+              "name": "decorationMemory-1000",
+              "iterations": 1,
+              "latency": {
+                "p50": 1.167099999999948,
+                "p95": 1.167099999999948,
+                "p99": 1.167099999999948,
+                "min": 1.167099999999948,
+                "max": 1.167099999999948,
+                "mean": 1.167099999999948
+              },
+              "memoryDelta": {
+                "heapUsed": 920312,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 69632
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "scale": 5000,
+              "name": "decorationMemory-5000",
+              "iterations": 1,
+              "latency": {
+                "p50": 6.804100000000005,
+                "p95": 6.804100000000005,
+                "p99": 6.804100000000005,
+                "min": 6.804100000000005,
+                "max": 6.804100000000005,
+                "mean": 6.804100000000005
+              },
+              "memoryDelta": {
+                "heapUsed": 3013552,
+                "heapTotal": 2883584,
+                "external": 0,
+                "rss": 3252224
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "scale": 10000,
+              "name": "decorationMemory-10000",
+              "iterations": 1,
+              "latency": {
+                "p50": 8.29079999999999,
+                "p95": 8.29079999999999,
+                "p99": 8.29079999999999,
+                "min": 8.29079999999999,
+                "max": 8.29079999999999,
+                "mean": 8.29079999999999
+              },
+              "memoryDelta": {
+                "heapUsed": 6920424,
+                "heapTotal": 11796480,
+                "external": 0,
+                "rss": 9187328
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "memory_at_10k_tasks_mb": 6.599830627441406,
+          "status": "PASS"
+        }
+      ],
+      "all_passed": true
+    },
+    {
+      "benchmarks": [
+        {
+          "name": "Call Path: getChildren() at Varying Tree Depths",
+          "benchmarks": [
+            {
+              "depth": 10,
+              "latency": {
+                "p50": 0.01120000000000232,
+                "p95": 2.777410000000005,
+                "p99": 4.119562000000014,
+                "min": 0.002200000000016189,
+                "max": 4.455100000000016,
+                "mean": 0.5792500000000018
+              },
+              "memoryDelta": {
+                "heapUsed": 206696,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 226099.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 15,
+              "latency": {
+                "p50": 0.001999999999981128,
+                "p95": 5.256705000000025,
+                "p99": 7.945581000000044,
+                "min": 0.0013000000000147338,
+                "max": 8.617800000000045,
+                "mean": 1.0406900000000063
+              },
+              "memoryDelta": {
+                "heapUsed": -683867.2,
+                "heapTotal": 1651507.2,
+                "external": 0,
+                "rss": 536985.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 20,
+              "latency": {
+                "p50": 0.0014500000000055024,
+                "p95": 9.659029999999989,
+                "p99": 13.954046000000012,
+                "min": 0.001099999999951251,
+                "max": 15.027800000000013,
+                "mean": 1.869189999999992
+              },
+              "memoryDelta": {
+                "heapUsed": 1136289.6,
+                "heapTotal": 45056,
+                "external": -4,
+                "rss": 1547878.4
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 30,
+              "latency": {
+                "p50": 0.00294999999960055,
+                "p95": 1574.2579699999992,
+                "p99": 1879.5399140000002,
+                "min": 0.0018000000000029104,
+                "max": 1955.8604,
+                "mean": 410.17716999999993
+              },
+              "memoryDelta": {
+                "heapUsed": 145085839.2,
+                "heapTotal": 149769011.2,
+                "external": 0,
+                "rss": 150154854.4
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "totalIterations": 40
+        },
+        {
+          "name": "Call Path: sortChildren() with Varying Child Count",
+          "benchmarks": [
+            {
+              "childCount": 100,
+              "latency": {
+                "p50": 0.12310000000024957,
+                "p95": 1.1462749999999213,
+                "p99": 1.7562950000001094,
+                "min": 0.09979999999995925,
+                "max": 1.9088000000001557,
+                "mean": 0.30665000000008147
+              },
+              "memoryDelta": {
+                "heapUsed": 113132.8,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 10649.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "childCount": 500,
+              "latency": {
+                "p50": 0.4942999999998392,
+                "p95": 0.793814999999813,
+                "p99": 0.8590829999998824,
+                "min": 0.4048000000002503,
+                "max": 0.8753999999998996,
+                "mean": 0.5518299999999726
+              },
+              "memoryDelta": {
+                "heapUsed": 490280,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 220364.8
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "childCount": 1000,
+              "latency": {
+                "p50": 1.4342499999997926,
+                "p95": 1.5636650000000825,
+                "p99": 1.5976129999999922,
+                "min": 0.9904000000005908,
+                "max": 1.6060999999999694,
+                "mean": 1.3443200000000615
+              },
+              "memoryDelta": {
+                "heapUsed": 878940.8,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 391987.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "totalIterations": 30
+        },
+        {
+          "name": "Call Path: Recursive Tree Expansion",
+          "expandDepth": 3,
+          "benchmarks": [
+            {
+              "treeDepth": 10,
+              "latency": {
+                "p50": 0.006150000000161526,
+                "p95": 1.083055000000194,
+                "p99": 1.4409310000004827,
+                "min": 0.005499999999301508,
+                "max": 1.5304000000005544,
+                "mean": 0.24509000000007292
+              },
+              "memoryDelta": {
+                "heapUsed": 149342.4,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 69632
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "treeDepth": 15,
+              "latency": {
+                "p50": 0.008699999999862484,
+                "p95": 7.712535000000194,
+                "p99": 12.030987000000025,
+                "min": 0.0015000000003055902,
+                "max": 13.110599999999977,
+                "mean": 1.4675900000001092
+              },
+              "memoryDelta": {
+                "heapUsed": -816416.8,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": -475136
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "treeDepth": 20,
+              "latency": {
+                "p50": 0.0011500000005071342,
+                "p95": 12.072455000000346,
+                "p99": 15.288011000000353,
+                "min": 0.0009000000000014552,
+                "max": 16.09190000000035,
+                "mean": 2.4207800000000135
+              },
+              "memoryDelta": {
+                "heapUsed": -72038.4,
+                "heapTotal": 131072,
+                "external": 0,
+                "rss": 106496
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "treeDepth": 30,
+              "latency": {
+                "p50": 0.005100000000311411,
+                "p95": 2124.316994999999,
+                "p99": 2622.563799000001,
+                "min": 0.003999999998995918,
+                "max": 2747.125500000001,
+                "mean": 515.5297500000003
+              },
+              "memoryDelta": {
+                "heapUsed": 11202441.6,
+                "heapTotal": 12478054.4,
+                "external": 0,
+                "rss": 112769843.2
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "totalIterations": 40
+        },
+        {
+          "name": "Call Path: Search Filtering on Tree",
+          "treeDepth": 20,
+          "benchmarks": [
+            {
+              "searchQuery": "Function",
+              "expectedMatches": "many",
+              "latency": {
+                "p50": 0.012349999999969441,
+                "p95": 8.270489999999239,
+                "p99": 10.868177999999226,
+                "min": 0.004800000000614091,
+                "max": 11.51759999999922,
+                "mean": 1.7967800000000351
+              },
+              "memoryDelta": {
+                "heapUsed": 232436.8,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "searchQuery": "Function 5",
+              "expectedMatches": "few",
+              "latency": {
+                "p50": 0.004800000000614091,
+                "p95": 11.260254999999852,
+                "p99": 17.678371000000098,
+                "min": 0.004000000000814907,
+                "max": 19.282900000000154,
+                "mean": 2.1741400000000795
+              },
+              "memoryDelta": {
+                "heapUsed": 1018963.2,
+                "heapTotal": 97484.8,
+                "external": 0,
+                "rss": 18841.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "searchQuery": "Function 99",
+              "expectedMatches": "few",
+              "latency": {
+                "p50": 0.004550000000563159,
+                "p95": 9.942284999999895,
+                "p99": 12.342297000000473,
+                "min": 0.003800000000410364,
+                "max": 12.942300000000614,
+                "mean": 2.0900600000002667
+              },
+              "memoryDelta": {
+                "heapUsed": -1051224.8,
+                "heapTotal": -18841.6,
+                "external": 0,
+                "rss": -18841.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "totalIterations": 30
+        },
+        {
+          "name": "Call Path: Tree Structure Memory Usage",
+          "benchmarks": [
+            {
+              "depth": 10,
+              "nodeCount": 1393,
+              "maxDepth": 10,
+              "avgChildren": 0.9992821249102656,
+              "latency": {
+                "p50": 0.0136000000002241,
+                "p95": 1.7337249999999564,
+                "p99": 2.466504999999943,
+                "min": 0.007600000000820728,
+                "max": 2.649699999999939,
+                "mean": 0.3941800000002331
+              },
+              "memoryDelta": {
+                "heapUsed": 305114.4,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 2048
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 15,
+              "nodeCount": 8039,
+              "maxDepth": 15,
+              "avgChildren": 0.9998756064187088,
+              "latency": {
+                "p50": 0.00439999999889551,
+                "p95": 55.36556000000046,
+                "p99": 86.38143200000094,
+                "min": 0.0007000000005064066,
+                "max": 94.13540000000103,
+                "mean": 10.427779999999984
+              },
+              "memoryDelta": {
+                "heapUsed": 29476.8,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 36044.8
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 20,
+              "nodeCount": 5835,
+              "maxDepth": 20,
+              "avgChildren": 0.9998286203941731,
+              "latency": {
+                "p50": 0.0011999999996987754,
+                "p95": 17.89189499999963,
+                "p99": 27.68925899999866,
+                "min": 0.0007999999997991836,
+                "max": 30.138599999998405,
+                "mean": 3.5090100000001256
+              },
+              "memoryDelta": {
+                "heapUsed": 1248220.8,
+                "heapTotal": 576716.8,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            {
+              "depth": 25,
+              "nodeCount": 138593,
+              "maxDepth": 25,
+              "avgChildren": 0.9999927846283723,
+              "latency": {
+                "p50": 0.010399999999208376,
+                "p95": 201.8277299999997,
+                "p99": 202.79922599999895,
+                "min": 0.002800000000206637,
+                "max": 203.04209999999875,
+                "mean": 54.35970999999991
+              },
+              "memoryDelta": {
+                "heapUsed": 16937188.8,
+                "heapTotal": 18061721.6,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          ],
+          "totalIterations": 40
+        }
+      ]
+    },
+    {
+      "name": "Example: Task Generation Performance",
+      "iterations": 30,
+      "latency": {
+        "p50": 0.19069999999919673,
+        "p95": 0.4131999999990512,
+        "p99": 0.5347999999994499,
+        "min": 0.025200000000040745,
+        "max": 0.5347999999994499
+      },
+      "memoryDelta": {
+        "heapUsed": 0
+      },
+      "gcCount": 0,
+      "gcTotalTime": 0
+    },
+    {
+      "name": "Task Panel: Initialize & Filter/Sort Performance",
+      "benchmarks": [
+        {
+          "name": "Benchmark 1: TaskTreeProvider Initialization",
+          "scales": {
+            "1k": {
+              "name": "init-1000",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.12635000000045693,
+                "p95": 5.128855000000194,
+                "p99": 8.119771000000274,
+                "min": 0.11300000000119326,
+                "max": 8.867500000000291,
+                "mean": 1.0499700000002121
+              },
+              "memoryDelta": {
+                "heapUsed": -405210.4,
+                "heapTotal": 655360,
+                "external": 0,
+                "rss": 409.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "5k": {
+              "name": "init-5000",
+              "iterations": 10,
+              "latency": {
+                "p50": 1.176499999999578,
+                "p95": 3.9281649999998947,
+                "p99": 5.387712999999822,
+                "min": 0.6269000000011147,
+                "max": 5.752599999999802,
+                "mean": 1.5816500000000815
+              },
+              "memoryDelta": {
+                "heapUsed": 397269.6,
+                "heapTotal": 314572.8,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "10k": {
+              "name": "init-10000",
+              "iterations": 10,
+              "latency": {
+                "p50": 2.5786499999994703,
+                "p95": 6.279354999999032,
+                "p99": 6.421230999998861,
+                "min": 1.1432000000004336,
+                "max": 6.456699999998818,
+                "mean": 3.1433799999997065
+              },
+              "memoryDelta": {
+                "heapUsed": 421502.4,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 409.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "50k": {
+              "name": "init-50000",
+              "iterations": 10,
+              "latency": {
+                "p50": 29.087500000000546,
+                "p95": 39.051209999999536,
+                "p99": 40.09816199999948,
+                "min": 22.337100000000646,
+                "max": 40.35989999999947,
+                "mean": 30.693850000000204
+              },
+              "memoryDelta": {
+                "heapUsed": 13566239.2,
+                "heapTotal": 13042483.2,
+                "external": 0,
+                "rss": 626278.4
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          },
+          "aggregated": {
+            "latency": {
+              "p50": 2.5786499999994703,
+              "p95": 6.279354999999032,
+              "p99": 6.421230999998861,
+              "min": 1.1432000000004336,
+              "max": 6.456699999998818,
+              "mean": 3.1433799999997065
+            },
+            "iterations": 10,
+            "memoryDelta": {
+              "heapUsed": 421502.4,
+              "heapTotal": 0,
+              "external": 0,
+              "rss": 409.6
+            },
+            "gcCount": 0,
+            "gcTotalTime": 0,
+            "status": "PASS",
+            "threshold": "< 500ms (p95)"
+          }
+        },
+        {
+          "name": "Benchmark 2: getChildren() Root Expansion",
+          "scales": {
+            "1k": {
+              "name": "getChildren-1000",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.07525000000077853,
+                "p95": 0.7898950000001593,
+                "p99": 1.1883790000004046,
+                "min": 0.06069999999999709,
+                "max": 1.2880000000004657,
+                "mean": 0.20480999999999766
+              },
+              "memoryDelta": {
+                "heapUsed": 95242.4,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 409.6
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "5k": {
+              "name": "getChildren-5000",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.14360000000033324,
+                "p95": 0.18683999999966544,
+                "p99": 0.19000800000017987,
+                "min": 0.10519999999996799,
+                "max": 0.1908000000003085,
+                "mean": 0.14667999999983294
+              },
+              "memoryDelta": {
+                "heapUsed": 410420,
+                "heapTotal": 0,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "10k": {
+              "name": "getChildren-10000",
+              "iterations": 10,
+              "latency": {
+                "p50": 0.4143000000003667,
+                "p95": 4.429844999999561,
+                "p99": 6.909488999999468,
+                "min": 0.20310000000063155,
+                "max": 7.529399999999441,
+                "mean": 1.0922900000001392
+              },
+              "memoryDelta": {
+                "heapUsed": -225997.6,
+                "heapTotal": 340787.2,
+                "external": 0,
+                "rss": 0
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            },
+            "50k": {
+              "name": "getChildren-50000",
+              "iterations": 10,
+              "latency": {
+                "p50": 3.077650000000176,
+                "p95": 13.095579999999517,
+                "p99": 13.445355999999139,
+                "min": 1.7620999999999185,
+                "max": 13.532799999999042,
+                "mean": 5.673809999999685
+              },
+              "memoryDelta": {
+                "heapUsed": 1273364.8,
+                "heapTotal": 2319155.2,
+                "external": 0,
+                "rss": 342016
+              },
+              "gcCount": 0,
+              "gcTotalTime": 0
+            }
+          },
+          "aggregated": {
+            "latency": {
+              "p50": 0.4143000000003667,
+              "p95": 4.429844999999561,
+              "p99": 6.909488999999468,
+              "min": 0.20310000000063155,
+              "max": 7.529399999999441,
+              "mean": 1.0922900000001392
+            },
+            "iterations": 10,
+            "memoryDelta": {
+              "heapUsed": -225997.6,
+              "heapTotal": 340787.2,
+              "external": 0,
+              "rss": 0
+            },
+            "gcCount": 0,
+            "gcTotalTime": 0,
+            "status": "PASS",
+            "note": "Time should be proportional to task count"
+          }
+        },
+        {
+          "name": "Benchmark 3: applyFilter() Performance",
+          "filter": "priority === \"P0\"",
+          "taskCount": 10000,
+          "aggregated": {
+            "latency": {
+              "p50": 0.16350000000056752,
+              "p95": 0.8880500000003844,
+              "p99": 1.0518500000003588,
+              "min": 0.12359999999898719,
+              "max": 1.0928000000003522,
+              "mean": 0.3257800000001225
+            },
+            "iterations": 10,
+            "memoryDelta": {
+              "heapUsed": 71496.8,
+              "heapTotal": 0,
+              "external": 0,
+              "rss": 0
+            },
+            "gcCount": 0,
+            "gcTotalTime": 0,
+            "status": "PASS",
+            "threshold": "≤ 100ms (p95)"
+          }
+        },
+        {
+          "name": "Benchmark 4: applySortBy() Performance",
+          "sortBy": "executionTime (descending)",
+          "taskCount": 10000,
+          "aggregated": {
+            "latency": {
+              "p50": 3.7064999999993233,
+              "p95": 8.60664499999993,
+              "p99": 10.354048999999959,
+              "min": 1.7889000000013766,
+              "max": 10.790899999999965,
+              "mean": 4.334219999999732
+            },
+            "iterations": 10,
+            "memoryDelta": {
+              "heapUsed": -283440.8,
+              "heapTotal": 498073.6,
+              "external": 0,
+              "rss": 81100.8
+            },
+            "gcCount": 0,
+            "gcTotalTime": 0,
+            "status": "PASS",
+            "threshold": "≤ 100ms (p95)"
+          }
+        },
+        {
+          "name": "Benchmark 5: Memory Consumption",
+          "scales": {
+            "1k": {
+              "heapUsedMB": "0.34"
+            },
+            "5k": {
+              "heapUsedMB": "-0.76"
+            },
+            "10k": {
+              "heapUsedMB": "1.29"
+            },
+            "50k": {
+              "heapUsedMB": "13.70"
+            }
+          },
+          "aggregated": {
+            "latency": {
+              "p50": 3.1621999999988475,
+              "p95": 8.390740000000369,
+              "p99": 9.346628000000345,
+              "min": 1.9346999999997934,
+              "max": 9.58560000000034,
+              "mean": 4.20753999999979
+            },
+            "memoryDelta": {
+              "heapUsed": 1353172.8,
+              "heapTotal": 0,
+              "external": 0,
+              "rss": 0
+            },
+            "iterations": 5,
+            "heapUsedMB": "1.29",
+            "status": "PASS",
+            "threshold": "≤ 150MB (10k tasks)"
+          }
+        }
+      ],
+      "status": "PASS"
+    },
+    {
+      "name": "Task Management Panel: Form & Validation Performance",
+      "passed": true,
+      "results": [
+        {
+          "name": "Benchmark 1: Webview HTML Generation",
+          "description": "Generate HTML for task form",
+          "target": "<200ms",
+          "result": 0.0007999999997991836,
+          "unit": "ms",
+          "passed": true,
+          "details": {
+            "p50": 0.0007999999997991836,
+            "p95": 0.0017599999988306078,
+            "p99": 0.0019519999986368928,
+            "iterations": 5
+          }
+        },
+        {
+          "name": "Benchmark 2: Form Rendering (panel.show())",
+          "description": "Time from show() to webview ready",
+          "target": "≤400ms",
+          "result": 0.0023499999997511622,
+          "unit": "ms",
+          "passed": true,
+          "details": {
+            "p50": 0.0023499999997511622,
+            "p95": 0.11079500000078024,
+            "p99": 0.17231900000047976,
+            "iterations": 10
+          }
+        },
+        {
+          "name": "Benchmark 3: Cyclic Dependency Detection (DFS)",
+          "description": "Time to detect cycle or confirm no cycle",
+          "target": "≤10ms",
+          "result": 0.0010999999994965037,
+          "unit": "ms",
+          "passed": true,
+          "details": {
+            "p50": 0.0010999999994965037,
+            "p95": 0.0019799999994575047,
+            "p99": 0.002075999999651685,
+            "iterations": 5
+          }
+        },
+        {
+          "name": "Benchmark 4: Form Validation on Input",
+          "description": "Validation latency per keystroke/field change",
+          "target": "≤50ms",
+          "result": 0.002900000000408909,
+          "unit": "ms",
+          "passed": true,
+          "details": {
+            "p50": 0.002900000000408909,
+            "p95": 0.03553999999921866,
+            "p99": 0.10863300000042735,
+            "iterations": 30,
+            "validationTestCount": 3
+          }
+        },
+        {
+          "name": "Benchmark 5: Webview Memory Consumption",
+          "description": "Memory usage of webview panel + assets",
+          "target": "≤20MB",
+          "result": 0.04947357177734375,
+          "unit": "MB",
+          "passed": true,
+          "details": {
+            "heapUsedMB": 0.04947357177734375,
+            "heapUsedBytes": 51876.8,
+            "p50": 0.04947357177734375,
+            "p95": 0.04947357177734375,
+            "iterations": 5
+          }
+        }
+      ],
+      "passCount": 5,
+      "totalCount": 5
+    }
+  ]
+}
