@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-11-10T09:14:15.849Z",
+  "optimization": "CPU Optimization (Task 10)",
+  "debounceResults": {
+    "rapidCalls": 10,
+    "actualExecutions": 1,
+    "reductionPercent": "90.0%",
+    "status": "PASS"
+  },
+  "filterResults": [
+    {
+      "scale": 1000,
+      "linearP50": "0.007ms",
+      "indexedP50": "0.005ms",
+      "speedup": "1.46x",
+      "status": "GOOD"
+    },
+    {
+      "scale": 5000,
+      "linearP50": "0.061ms",
+      "indexedP50": "0.010ms",
+      "speedup": "5.87x",
+      "status": "PASS"
+    },
+    {
+      "scale": 10000,
+      "linearP50": "0.087ms",
+      "indexedP50": "0.020ms",
+      "speedup": "4.27x",
+      "status": "PASS"
+    }
+  ],
+  "sortResults": {
+    "taskCount": 10000,
+    "topN": 100,
+    "fullSortP50": "1.89ms",
+    "partialSortP50": "1.86ms",
+    "speedup": "1.01x",
+    "status": "GOOD"
+  },
+  "throttleResults": {
+    "rapidCalls": "~100",
+    "actualExecutions": 7,
+    "expectedCalls": 4,
+    "status": "REVIEW"
+  },
+  "combinedResults": {
+    "taskCount": 10000,
+    "baselineP50": "0.44ms",
+    "baselineP95": "0.73ms",
+    "optimizedP50": "0.38ms",
+    "optimizedP95": "0.60ms",
+    "speedup": "1.16x",
+    "target": "≤100ms",
+    "status": "PASS"
+  },
+  "summary": {
+    "allPass": true
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "timestamp": "2026-11-10T08:37:34.439Z",
+  "hotspots": [
+    {
+      "operation": "Task Generation",
+      "totalAllocationMB": "2.89",
+      "allocations": [
+        {
+          "operation": "generateTasks(10000)",
+          "sizeMB": "7.17",
+          "timestamp": 1794299854398
+        },
+        {
+          "operation": "generateTasks(1000)",
+          "sizeMB": "4.68",
+          "timestamp": 1794299854388
+        }
+      ],
+      "topAllocations": [
+        {
+          "operation": "generateTasks(10000)",
+          "sizeMB": "7.17",
+          "timestamp": 1794299854398
+        },
+        {
+          "operation": "generateTasks(1000)",
+          "sizeMB": "4.68",
+          "timestamp": 1794299854388
+        }
+      ]
+    },
+    {
+      "operation": "Tree Generation",
+      "totalAllocationMB": "1.68",
+      "allocations": [
+        {
+          "operation": "generateCallTree(depth=20)",
+          "sizeMB": "9.49",
+          "timestamp": 1794299854407
+        },
+        {
+          "operation": "generateCallTree(depth=10)",
+          "sizeMB": "7.40",
+          "timestamp": 1794299854405
+        }
+      ],
+      "topAllocations": [
+        {
+          "operation": "generateCallTree(depth=20)",
+          "sizeMB": "9.49",
+          "timestamp": 1794299854407
+        },
+        {
+          "operation": "generateCallTree(depth=10)",
+          "sizeMB": "7.40",
+          "timestamp": 1794299854405
+        }
+      ]
+    },
+    {
+      "operation": "Task Filtering",
+      "totalAllocationMB": "0.02",
+      "allocations": [
+        {
+          "operation": "filter(10k tasks)",
+          "sizeMB": "8.59",
+          "timestamp": 1794299854415
+        }
+      ],
+      "topAllocations": [
+        {
+          "operation": "filter(10k tasks)",
+          "sizeMB": "8.59",
+          "timestamp": 1794299854415
+        }
+      ]
+    },
+    {
+      "operation": "Task Sorting",
+      "totalAllocationMB": "0.08",
+      "allocations": [
+        {
+          "operation": "sort(10k tasks)",
+          "sizeMB": "8.72",
+          "timestamp": 1794299854435
+        }
+      ],
+      "topAllocations": [
+        {
+          "operation": "sort(10k tasks)",
+          "sizeMB": "8.72",
+          "timestamp": 1794299854435
+        }
+      ]
+    }
+  ],
+  "topAllocations": [
+    {
+      "operation": "generateCallTree(depth=20)",
+      "sizeMB": "9.49",
+      "timestamp": 1794299854407
+    },
+    {
+      "operation": "sort(10k tasks)",
+      "sizeMB": "8.72",
+      "timestamp": 1794299854435
+    },
+    {
+      "operation": "filter(10k tasks)",
+      "sizeMB": "8.59",
+      "timestamp": 1794299854415
+    },
+    {
+      "operation": "generateCallTree(depth=10)",
+      "sizeMB": "7.40",
+      "timestamp": 1794299854405
+    },
+    {
+      "operation": "generateTasks(10000)",
+      "sizeMB": "7.17",
+      "timestamp": 1794299854398
+    },
+    {
+      "operation": "generateTasks(1000)",
+      "sizeMB": "4.68",
+      "timestamp": 1794299854388
+    }
+  ]
+}

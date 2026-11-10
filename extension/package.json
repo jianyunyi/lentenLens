@@ -1,382 +1,394 @@
 ﻿{
-  "name": "intentlens",
-  "displayName": "IntentLens",
-  "description": "Enhanced UI: Go function explanations with task management, call paths, and boundaries.",
-  "version": "0.6.0",
-  "publisher": "intentlens",
-  "license": "MIT",
-  "author": {
-    "name": "IntentLens Contributors",
-    "email": "16671100373@163.com"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/jianyunyi/lentenLens.git"
-  },
-  "bugs": {
-    "url": "https://github.com/jianyunyi/lentenLens/issues",
-    "email": "16671100373@163.com"
-  },
-  "homepage": "https://github.com/jianyunyi/lentenLens#readme",
-  "keywords": [
-    "go",
-    "golang",
-    "ai",
-    "code-analysis",
-    "code-understanding",
-    "documentation",
-    "explanations",
-    "llm",
-    "code-review",
-    "task-management",
-    "call-paths"
-  ],
-  "engines": {
-    "vscode": "^1.90.0"
-  },
-  "categories": ["Other"],
-  "main": "./src/extension.js",
-  "activationEvents": [
-    "onLanguage:go",
-    "onView:intentlens.tasks",
-    "onView:intentlens.rounds",
-    "onView:intentlens.callPath",
-    "onView:intentlens.modelAnswer",
-    "onCommand:intentlens.callPath",
-    "onCommand:intentlens.refreshCallPath",
-    "onCommand:intentlens.refreshModelAnswer",
-    "onCommand:intentlens.enableModel",
-    "onCommand:intentlens.testModel"
-  ],
-  "capabilities": {
-    "untrustedWorkspaces": {
-      "supported": "limited",
-      "description": "Views are available; CLI execution requires workspace trust."
-    },
-    "virtualWorkspaces": {
-      "supported": false
-    }
-  },
-  "scripts": {
-    "test": "node --test test/*.test.js",
-    "check": "node --check src/core.js && node --check src/coverage.js && node --check src/extension.js && node --check src/callpath.js && node --check src/sidebar.js && node --check src/sessions.js && node --check src/recovery.js && node --check src/exercises.js && node --check src/inline.js && node --check src/providers.js && node --check src/taskpanel.js && node --check src/boundaries.js && node --check src/callpath-enhanced.js && node --check src/taskmanagement.js"
-  },
-  "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "intentlens",
-          "title": "IntentLens",
-          "icon": "media/intentlens-icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "explorer": [
-        {
-          "id": "intentlens.rounds",
-          "name": "IntentLens · 轮次"
-        }
-      ],
-      "intentlens": [
-        {
-          "id": "intentlens.tasks",
-          "name": "📋 任务面板",
-          "type": "tree"
-        },
-        {
-          "id": "intentlens.callPath",
-          "name": "📞 调用路径",
-          "type": "tree"
-        },
-        {
-          "id": "intentlens.modelAnswer",
-          "name": "💬 模型回答与证据",
-          "type": "tree"
-        }
-      ]
-    },
-    "viewsWelcome": [
-      {
-        "view": "intentlens.rounds",
-        "contents": "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\\n[开始记录](command:intentlens.startRound)\\n[结束记录](command:intentlens.stopRound)\\n[恢复未结束轮次](command:intentlens.resumeRound)\\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\\n[刷新](command:intentlens.refresh)"
-      },
-      {
-        "view": "intentlens.tasks",
-        "contents": "创建任务来管理你的代码分析工作。\\n[创建新任务](command:intentlens.task.create)\\n[打开任务管理](command:intentlens.taskmanagement.show)\\n[查看任务文档](command:intentlens.task.help)"
-      },
-      {
-        "view": "intentlens.callPath",
-        "contents": "在本地 Go 文件中放置光标后加载调用路径；受限工作区不会执行 CLI。\\n[显示调用路径](command:intentlens.callPath)\\n[刷新调用路径](command:intentlens.refreshCallPath)\\n[导出调用图](command:intentlens.callpath.export)"
-      },
-      {
-        "view": "intentlens.modelAnswer",
-        "contents": "只读显示当前函数已保存在本地的回答、历史版本和引用证据。打开或刷新视图不会发起模型请求。\\n[刷新模型回答与证据](command:intentlens.refreshModelAnswer)"
-      }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "intentlens.refresh",
-          "when": "view == intentlens.rounds",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.task.create",
-          "when": "view == intentlens.tasks",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.taskmanagement.show",
-          "when": "view == intentlens.tasks",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.callpath.export",
-          "when": "view == intentlens.callPath",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.refreshCallPath",
-          "when": "view == intentlens.callPath",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.refreshModelAnswer",
-          "when": "view == intentlens.modelAnswer",
-          "group": "navigation"
-        },
-        {
-          "command": "intentlens.testModel",
-          "when": "view == intentlens.rounds",
-          "group": "model@2"
-        },
-        {
-          "command": "intentlens.startRound",
-          "when": "view == intentlens.rounds",
-          "group": "capture@1"
-        },
-        {
-          "command": "intentlens.stopRound",
-          "when": "view == intentlens.rounds",
-          "group": "capture@2"
-        },
-        {
-          "command": "intentlens.resumeRound",
-          "when": "view == intentlens.rounds",
-          "group": "capture@3"
-        },
-        {
-          "command": "intentlens.cancelRound",
-          "when": "view == intentlens.rounds",
-          "group": "capture@4"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "intentlens.task.run",
-          "when": "view == intentlens.tasks && viewItem == intentlens.task.item",
-          "group": "inline"
-        },
-        {
-          "command": "intentlens.task.edit",
-          "when": "view == intentlens.tasks && viewItem == intentlens.task.item"
-        },
-        {
-          "command": "intentlens.task.delete",
-          "when": "view == intentlens.tasks && viewItem == intentlens.task.item"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "intentlens.exercises",
-        "title": "IntentLens: 查看本地练习与评分"
-      },
-      {
-        "command": "intentlens.sharedExercises",
-        "title": "IntentLens: 查看团队共享题目"
-      },
-      {
-        "command": "intentlens.shared",
-        "title": "IntentLens: 查看团队共享解释"
-      },
-      {
-        "command": "intentlens.inspect",
-        "title": "IntentLens: 查看当前函数解释与证据"
-      },
-      {
-        "command": "intentlens.inspectDetails",
-        "title": "IntentLens: 打开函数完整详情与历史"
-      },
-      {
-        "command": "intentlens.callPath",
-        "title": "IntentLens: 显示调用路径"
-      },
-      {
-        "command": "intentlens.refreshCallPath",
-        "title": "IntentLens: 刷新调用路径",
-        "icon": ""
-      },
-      {
-        "command": "intentlens.refreshModelAnswer",
-        "title": "IntentLens: 刷新模型回答与证据",
-        "icon": ""
-      },
-      {
-        "command": "intentlens.refresh",
-        "title": "IntentLens: 刷新轮次与 CodeLens"
-      },
-      {
-        "command": "intentlens.indexStatus",
-        "title": "IntentLens: 查看索引范围与遗漏原因"
-      },
-      {
-        "command": "intentlens.startRound",
-        "title": "IntentLens: 开始记录本轮修改",
-        "description": "以当前磁盘状态开始一个本地轮次"
-      },
-      {
-        "command": "intentlens.stopRound",
-        "title": "IntentLens: 结束记录本轮修改",
-        "description": "以当前磁盘状态结束本地轮次"
-      },
-      {
-        "command": "intentlens.resumeRound",
-        "title": "IntentLens: 恢复未结束的轮次"
-      },
-      {
-        "command": "intentlens.cancelRound",
-        "title": "IntentLens: 取消当前轮次（保留源码）"
-      },
-      {
-        "command": "intentlens.status",
-        "title": "IntentLens: 查看状态与预算"
-      },
-      {
-        "command": "intentlens.enableModel",
-        "title": "IntentLens: 启用或调整模型分析"
-      },
-      {
-        "command": "intentlens.testModel",
-        "title": "IntentLens: 测试当前模型 API（只发送固定探针）"
-      },
-      {
-        "command": "intentlens.pauseModel",
-        "title": "IntentLens: 暂停模型分析"
-      },
-      {
-        "command": "intentlens.hooksConfig",
-        "title": "IntentLens: 预览 Claude Code Hook 配置"
-      },
-      {
-        "command": "intentlens.task.create",
-        "title": "IntentLens: 创建新任务",
-        "icon": ""
-      },
-      {
-        "command": "intentlens.task.run",
-        "title": "IntentLens: 执行任务"
-      },
-      {
-        "command": "intentlens.task.pause",
-        "title": "IntentLens: 暂停任务"
-      },
-      {
-        "command": "intentlens.task.retry",
-        "title": "IntentLens: 重试任务"
-      },
-      {
-        "command": "intentlens.task.edit",
-        "title": "IntentLens: 编辑任务"
-      },
-      {
-        "command": "intentlens.task.delete",
-        "title": "IntentLens: 删除任务"
-      },
-      {
-        "command": "intentlens.task.viewDetails",
-        "title": "IntentLens: 查看任务详情"
-      },
-      {
-        "command": "intentlens.task.viewLogs",
-        "title": "IntentLens: 查看任务日志"
-      },
-      {
-        "command": "intentlens.taskmanagement.show",
-        "title": "IntentLens: 打开任务管理面板",
-        "icon": ""
-      },
-      {
-        "command": "intentlens.boundary.toggle",
-        "title": "IntentLens: 切换任务边框显示"
-      },
-      {
-        "command": "intentlens.boundary.highlight",
-        "title": "IntentLens: 高亮任务边框"
-      },
-      {
-        "command": "intentlens.callpath.export",
-        "title": "IntentLens: 导出调用图"
-      },
-      {
-        "command": "intentlens.callpath.sort",
-        "title": "IntentLens: 调用路径排序"
-      }
-    ],
-    "colors": [
-      {
-        "id": "intentlens.taskBoundary",
-        "description": "Task boundary line color",
-        "dark": "#4EC9B0",
-        "light": "#0066CC"
-      },
-      {
-        "id": "intentlens.priorityP0",
-        "description": "Priority P0 (Critical) color",
-        "dark": "#FF4444",
-        "light": "#CC0000"
-      },
-      {
-        "id": "intentlens.priorityP1",
-        "description": "Priority P1 (High) color",
-        "dark": "#FFA500",
-        "light": "#FF8800"
-      },
-      {
-        "id": "intentlens.priorityP2",
-        "description": "Priority P2 (Medium) color",
-        "dark": "#4A90E2",
-        "light": "#0066FF"
-      },
-      {
-        "id": "intentlens.priorityP3",
-        "description": "Priority P3 (Low) color",
-        "dark": "#50C878",
-        "light": "#00AA00"
-      }
-    ],
-    "configuration": {
-      "title": "IntentLens",
-      "properties": {
-        "intentlens.binaryPath": {
-          "type": "string",
-          "default": "",
-          "scope": "machine-overridable",
-          "restricted": true,
-          "description": "IntentLens executable path. Empty uses bundled bin/intentlens(.exe), then PATH. No shell arguments."
-        },
-        "intentlens.taskBoundaryEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show task boundaries in editor"
-        },
-        "intentlens.callPathEnhanced": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show enhanced call path with performance metrics"
-        }
-      }
-    }
-  }
+    "name":  "intentlens",
+    "displayName":  "IntentLens",
+    "description":  "Enhanced UI: Go function explanations with task management, call paths, and boundaries.",
+    "version":  "0.6.0",
+    "publisher":  "intentlens",
+    "license":  "MIT",
+    "author":  {
+                   "name":  "IntentLens Contributors",
+                   "email":  "16671100373@163.com"
+               },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "https://github.com/jianyunyi/lentenLens.git"
+                   },
+    "bugs":  {
+                 "url":  "https://github.com/jianyunyi/lentenLens/issues",
+                 "email":  "16671100373@163.com"
+             },
+    "homepage":  "https://github.com/jianyunyi/lentenLens#readme",
+    "keywords":  [
+                     "go",
+                     "golang",
+                     "ai",
+                     "code-analysis",
+                     "code-understanding",
+                     "documentation",
+                     "explanations",
+                     "llm",
+                     "code-review",
+                     "task-management",
+                     "call-paths"
+                 ],
+    "engines":  {
+                    "vscode":  "^1.90.0"
+                },
+    "categories":  [
+                       "Other"
+                   ],
+    "main":  "./src/extension.js",
+    "activationEvents":  [
+                             "onLanguage:go",
+                             "onView:intentlens.tasks",
+                             "onView:intentlens.rounds",
+                             "onView:intentlens.callPath",
+                             "onView:intentlens.modelAnswer",
+                             "onCommand:intentlens.callPath",
+                             "onCommand:intentlens.refreshCallPath",
+                             "onCommand:intentlens.refreshModelAnswer",
+                             "onCommand:intentlens.enableModel",
+                             "onCommand:intentlens.testModel"
+                         ],
+    "capabilities":  {
+                         "untrustedWorkspaces":  {
+                                                     "supported":  "limited",
+                                                     "description":  "Views are available; CLI execution requires workspace trust."
+                                                 },
+                         "virtualWorkspaces":  {
+                                                   "supported":  false
+                                               }
+                     },
+    "scripts":  {
+                    "test":  "node --test test/*.test.js",
+                    "check":  "node --check src/core.js \u0026\u0026 node --check src/coverage.js \u0026\u0026 node --check src/extension.js \u0026\u0026 node --check src/callpath.js \u0026\u0026 node --check src/sidebar.js \u0026\u0026 node --check src/sessions.js \u0026\u0026 node --check src/recovery.js \u0026\u0026 node --check src/exercises.js \u0026\u0026 node --check src/inline.js \u0026\u0026 node --check src/providers.js \u0026\u0026 node --check src/taskpanel.js \u0026\u0026 node --check src/boundaries.js \u0026\u0026 node --check src/callpath-enhanced.js \u0026\u0026 node --check src/taskmanagement.js",
+                    "bench:all":  "node test/profiling/run-benchmarks.js",
+                    "bench:task-panel":  "node test/profiling/run-benchmarks.js task-panel",
+                    "bench:boundary":  "node test/profiling/run-benchmarks.js boundary",
+                    "bench:callpath":  "node test/profiling/run-benchmarks.js callpath",
+                    "profile:cpu":  "node test/profiling/baseline-cpu-profile.js",
+                    "profile:memory":  "node --expose-gc test/profiling/baseline-heap-snapshot.js",
+                    "profile:baseline":  "node test/profiling/baseline-report.js",
+                    "profile:leak":  "node --expose-gc test/profiling/leak-detector.js",
+                    "test:load":  "node test/profiling/load-testing-report.js",
+                    "report":  "node test/profiling/generate-reports-simple.js"
+                },
+    "contributes":  {
+                        "viewsContainers":  {
+                                                "activitybar":  [
+                                                                    {
+                                                                        "id":  "intentlens",
+                                                                        "title":  "IntentLens",
+                                                                        "icon":  "media/intentlens-icon.svg"
+                                                                    }
+                                                                ]
+                                            },
+                        "views":  {
+                                      "explorer":  [
+                                                       {
+                                                           "id":  "intentlens.rounds",
+                                                           "name":  "IntentLens · 轮次"
+                                                       }
+                                                   ],
+                                      "intentlens":  [
+                                                         {
+                                                             "id":  "intentlens.tasks",
+                                                             "name":  "📋 任务面板",
+                                                             "type":  "tree"
+                                                         },
+                                                         {
+                                                             "id":  "intentlens.callPath",
+                                                             "name":  "📞 调用路径",
+                                                             "type":  "tree"
+                                                         },
+                                                         {
+                                                             "id":  "intentlens.modelAnswer",
+                                                             "name":  "💬 模型回答与证据",
+                                                             "type":  "tree"
+                                                         }
+                                                     ]
+                                  },
+                        "viewsWelcome":  [
+                                             {
+                                                 "view":  "intentlens.rounds",
+                                                 "contents":  "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\\n[开始记录](command:intentlens.startRound)\\n[结束记录](command:intentlens.stopRound)\\n[恢复未结束轮次](command:intentlens.resumeRound)\\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\\n[刷新](command:intentlens.refresh)"
+                                             },
+                                             {
+                                                 "view":  "intentlens.tasks",
+                                                 "contents":  "创建任务来管理你的代码分析工作。\\n[创建新任务](command:intentlens.task.create)\\n[打开任务管理](command:intentlens.taskmanagement.show)\\n[查看任务文档](command:intentlens.task.help)"
+                                             },
+                                             {
+                                                 "view":  "intentlens.callPath",
+                                                 "contents":  "在本地 Go 文件中放置光标后加载调用路径；受限工作区不会执行 CLI。\\n[显示调用路径](command:intentlens.callPath)\\n[刷新调用路径](command:intentlens.refreshCallPath)\\n[导出调用图](command:intentlens.callpath.export)"
+                                             },
+                                             {
+                                                 "view":  "intentlens.modelAnswer",
+                                                 "contents":  "只读显示当前函数已保存在本地的回答、历史版本和引用证据。打开或刷新视图不会发起模型请求。\\n[刷新模型回答与证据](command:intentlens.refreshModelAnswer)"
+                                             }
+                                         ],
+                        "menus":  {
+                                      "view/title":  [
+                                                         {
+                                                             "command":  "intentlens.refresh",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.task.create",
+                                                             "when":  "view == intentlens.tasks",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.taskmanagement.show",
+                                                             "when":  "view == intentlens.tasks",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.callpath.export",
+                                                             "when":  "view == intentlens.callPath",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.refreshCallPath",
+                                                             "when":  "view == intentlens.callPath",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.refreshModelAnswer",
+                                                             "when":  "view == intentlens.modelAnswer",
+                                                             "group":  "navigation"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.testModel",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "model@2"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.startRound",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "capture@1"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.stopRound",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "capture@2"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.resumeRound",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "capture@3"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.cancelRound",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "capture@4"
+                                                         }
+                                                     ],
+                                      "view/item/context":  [
+                                                                {
+                                                                    "command":  "intentlens.task.run",
+                                                                    "when":  "view == intentlens.tasks \u0026\u0026 viewItem == intentlens.task.item",
+                                                                    "group":  "inline"
+                                                                },
+                                                                {
+                                                                    "command":  "intentlens.task.edit",
+                                                                    "when":  "view == intentlens.tasks \u0026\u0026 viewItem == intentlens.task.item"
+                                                                },
+                                                                {
+                                                                    "command":  "intentlens.task.delete",
+                                                                    "when":  "view == intentlens.tasks \u0026\u0026 viewItem == intentlens.task.item"
+                                                                }
+                                                            ]
+                                  },
+                        "commands":  [
+                                         {
+                                             "command":  "intentlens.exercises",
+                                             "title":  "IntentLens: 查看本地练习与评分"
+                                         },
+                                         {
+                                             "command":  "intentlens.sharedExercises",
+                                             "title":  "IntentLens: 查看团队共享题目"
+                                         },
+                                         {
+                                             "command":  "intentlens.shared",
+                                             "title":  "IntentLens: 查看团队共享解释"
+                                         },
+                                         {
+                                             "command":  "intentlens.inspect",
+                                             "title":  "IntentLens: 查看当前函数解释与证据"
+                                         },
+                                         {
+                                             "command":  "intentlens.inspectDetails",
+                                             "title":  "IntentLens: 打开函数完整详情与历史"
+                                         },
+                                         {
+                                             "command":  "intentlens.callPath",
+                                             "title":  "IntentLens: 显示调用路径"
+                                         },
+                                         {
+                                             "command":  "intentlens.refreshCallPath",
+                                             "title":  "IntentLens: 刷新调用路径",
+                                             "icon":  ""
+                                         },
+                                         {
+                                             "command":  "intentlens.refreshModelAnswer",
+                                             "title":  "IntentLens: 刷新模型回答与证据",
+                                             "icon":  ""
+                                         },
+                                         {
+                                             "command":  "intentlens.refresh",
+                                             "title":  "IntentLens: 刷新轮次与 CodeLens"
+                                         },
+                                         {
+                                             "command":  "intentlens.indexStatus",
+                                             "title":  "IntentLens: 查看索引范围与遗漏原因"
+                                         },
+                                         {
+                                             "command":  "intentlens.startRound",
+                                             "title":  "IntentLens: 开始记录本轮修改",
+                                             "description":  "以当前磁盘状态开始一个本地轮次"
+                                         },
+                                         {
+                                             "command":  "intentlens.stopRound",
+                                             "title":  "IntentLens: 结束记录本轮修改",
+                                             "description":  "以当前磁盘状态结束本地轮次"
+                                         },
+                                         {
+                                             "command":  "intentlens.resumeRound",
+                                             "title":  "IntentLens: 恢复未结束的轮次"
+                                         },
+                                         {
+                                             "command":  "intentlens.cancelRound",
+                                             "title":  "IntentLens: 取消当前轮次（保留源码）"
+                                         },
+                                         {
+                                             "command":  "intentlens.status",
+                                             "title":  "IntentLens: 查看状态与预算"
+                                         },
+                                         {
+                                             "command":  "intentlens.enableModel",
+                                             "title":  "IntentLens: 启用或调整模型分析"
+                                         },
+                                         {
+                                             "command":  "intentlens.testModel",
+                                             "title":  "IntentLens: 测试当前模型 API（只发送固定探针）"
+                                         },
+                                         {
+                                             "command":  "intentlens.pauseModel",
+                                             "title":  "IntentLens: 暂停模型分析"
+                                         },
+                                         {
+                                             "command":  "intentlens.hooksConfig",
+                                             "title":  "IntentLens: 预览 Claude Code Hook 配置"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.create",
+                                             "title":  "IntentLens: 创建新任务",
+                                             "icon":  ""
+                                         },
+                                         {
+                                             "command":  "intentlens.task.run",
+                                             "title":  "IntentLens: 执行任务"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.pause",
+                                             "title":  "IntentLens: 暂停任务"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.retry",
+                                             "title":  "IntentLens: 重试任务"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.edit",
+                                             "title":  "IntentLens: 编辑任务"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.delete",
+                                             "title":  "IntentLens: 删除任务"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.viewDetails",
+                                             "title":  "IntentLens: 查看任务详情"
+                                         },
+                                         {
+                                             "command":  "intentlens.task.viewLogs",
+                                             "title":  "IntentLens: 查看任务日志"
+                                         },
+                                         {
+                                             "command":  "intentlens.taskmanagement.show",
+                                             "title":  "IntentLens: 打开任务管理面板",
+                                             "icon":  ""
+                                         },
+                                         {
+                                             "command":  "intentlens.boundary.toggle",
+                                             "title":  "IntentLens: 切换任务边框显示"
+                                         },
+                                         {
+                                             "command":  "intentlens.boundary.highlight",
+                                             "title":  "IntentLens: 高亮任务边框"
+                                         },
+                                         {
+                                             "command":  "intentlens.callpath.export",
+                                             "title":  "IntentLens: 导出调用图"
+                                         },
+                                         {
+                                             "command":  "intentlens.callpath.sort",
+                                             "title":  "IntentLens: 调用路径排序"
+                                         }
+                                     ],
+                        "colors":  [
+                                       {
+                                           "id":  "intentlens.taskBoundary",
+                                           "description":  "Task boundary line color",
+                                           "dark":  "#4EC9B0",
+                                           "light":  "#0066CC"
+                                       },
+                                       {
+                                           "id":  "intentlens.priorityP0",
+                                           "description":  "Priority P0 (Critical) color",
+                                           "dark":  "#FF4444",
+                                           "light":  "#CC0000"
+                                       },
+                                       {
+                                           "id":  "intentlens.priorityP1",
+                                           "description":  "Priority P1 (High) color",
+                                           "dark":  "#FFA500",
+                                           "light":  "#FF8800"
+                                       },
+                                       {
+                                           "id":  "intentlens.priorityP2",
+                                           "description":  "Priority P2 (Medium) color",
+                                           "dark":  "#4A90E2",
+                                           "light":  "#0066FF"
+                                       },
+                                       {
+                                           "id":  "intentlens.priorityP3",
+                                           "description":  "Priority P3 (Low) color",
+                                           "dark":  "#50C878",
+                                           "light":  "#00AA00"
+                                       }
+                                   ],
+                        "configuration":  {
+                                              "title":  "IntentLens",
+                                              "properties":  {
+                                                                 "intentlens.binaryPath":  {
+                                                                                               "type":  "string",
+                                                                                               "default":  "",
+                                                                                               "scope":  "machine-overridable",
+                                                                                               "restricted":  true,
+                                                                                               "description":  "IntentLens executable path. Empty uses bundled bin/intentlens(.exe), then PATH. No shell arguments."
+                                                                                           },
+                                                                 "intentlens.taskBoundaryEnabled":  {
+                                                                                                        "type":  "boolean",
+                                                                                                        "default":  true,
+                                                                                                        "description":  "Show task boundaries in editor"
+                                                                                                    },
+                                                                 "intentlens.callPathEnhanced":  {
+                                                                                                     "type":  "boolean",
+                                                                                                     "default":  true,
+                                                                                                     "description":  "Show enhanced call path with performance metrics"
+                                                                                                 }
+                                                             }
+                                          }
+                    }
 }

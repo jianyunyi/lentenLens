@@ -1,0 +1,148 @@
+{
+  "timestamp": "2026-11-10T08:27:26.273Z",
+  "snapshots": [
+    {
+      "label": "baseline-0",
+      "taskCount": 0,
+      "heapUsedMB": 3.88,
+      "heapTotalMB": 6.53,
+      "topObjects": []
+    },
+    {
+      "label": "scale-1000",
+      "taskCount": 1000,
+      "heapUsedMB": 4.14,
+      "heapTotalMB": 7.03,
+      "topObjects": [
+        {
+          "type": "String Properties",
+          "count": 3000
+        },
+        {
+          "type": "Array Dependencies",
+          "count": 1028
+        },
+        {
+          "type": "Task Objects",
+          "count": 1000
+        },
+        {
+          "type": "Number Properties",
+          "count": 1000
+        }
+      ]
+    },
+    {
+      "label": "scale-5000",
+      "taskCount": 5000,
+      "heapUsedMB": 5.21,
+      "heapTotalMB": 10.53,
+      "topObjects": [
+        {
+          "type": "String Properties",
+          "count": 15000
+        },
+        {
+          "type": "Task Objects",
+          "count": 5000
+        },
+        {
+          "type": "Number Properties",
+          "count": 5000
+        },
+        {
+          "type": "Array Dependencies",
+          "count": 4965
+        }
+      ]
+    },
+    {
+      "label": "scale-10000",
+      "taskCount": 10000,
+      "heapUsedMB": 6.53,
+      "heapTotalMB": 15.53,
+      "topObjects": [
+        {
+          "type": "String Properties",
+          "count": 30000
+        },
+        {
+          "type": "Task Objects",
+          "count": 10000
+        },
+        {
+          "type": "Number Properties",
+          "count": 10000
+        },
+        {
+          "type": "Array Dependencies",
+          "count": 9960
+        }
+      ]
+    },
+    {
+      "label": "scale-50000",
+      "taskCount": 50000,
+      "heapUsedMB": 17.12,
+      "heapTotalMB": 50.93,
+      "topObjects": [
+        {
+          "type": "String Properties",
+          "count": 150000
+        },
+        {
+          "type": "Array Dependencies",
+          "count": 50090
+        },
+        {
+          "type": "Task Objects",
+          "count": 50000
+        },
+        {
+          "type": "Number Properties",
+          "count": 50000
+        }
+      ]
+    }
+  ],
+  "growthAnalysis": [
+    {
+      "from": "baseline-0",
+      "to": "scale-1000",
+      "heapGrowthMB": "0.26",
+      "growthRatio": "1.07",
+      "scaleRatio": "Infinity",
+      "linearityCheck": "PASS"
+    },
+    {
+      "from": "scale-1000",
+      "to": "scale-5000",
+      "heapGrowthMB": "1.07",
+      "growthRatio": "1.26",
+      "scaleRatio": "5.00",
+      "linearityCheck": "PASS"
+    },
+    {
+      "from": "scale-5000",
+      "to": "scale-10000",
+      "heapGrowthMB": "1.32",
+      "growthRatio": "1.25",
+      "scaleRatio": "2.00",
+      "linearityCheck": "PASS"
+    },
+    {
+      "from": "scale-10000",
+      "to": "scale-50000",
+      "heapGrowthMB": "10.59",
+      "growthRatio": "2.62",
+      "scaleRatio": "5.00",
+      "linearityCheck": "PASS"
+    }
+  ],
+  "summary": {
+    "baselineHeapMB": 3.88,
+    "scale10kHeapMB": 6.53,
+    "linearityCheck": "PASS",
+    "avgGrowthRatio": "1.55"
+  }
+}

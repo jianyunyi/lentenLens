@@ -1,8 +1,8 @@
-﻿'use strict';
+'use strict';
 
 /**
- * Task Boundaries Decorator
- * 在编辑器中绘制任务代码范围的虚线边框
+ * Task Boundaries Decorator with Lazy Rendering Optimization
+ * Phase 4 Task 8: Only decorates visible tasks in viewport
  */
 
 class TaskBoundaryDecorator {
@@ -10,22 +10,25 @@ class TaskBoundaryDecorator {
     this.vscode = vscode;
     this._decorationType = null;
     this._boundaries = [];
+    this._allTasks = []; // Store all tasks
     this._enabled = true;
+    this._lazyMode = true; // Enable lazy decoration by default
+    this._debounceTimer = null;
+    this._debounceDelay = 100; // 100ms debounce
     this.initializeDecorationTypes();
   }
 
   /**
-   * 初始化装饰类型
+   * Initialize decoration types
    */
   initializeDecorationTypes() {
     const colors = {
-      P0: '#FF4444', // 红色
-      P1: '#FFA500', // 橙色
-      P2: '#4A90E2', // 蓝色
-      P3: '#50C878', // 绿色
+      P0: '#FF4444',
+      P1: '#FFA500',
+      P2: '#4A90E2',
+      P3: '#50C878',
     };
 
-    // 为每个优先级创建装饰类型
     this._decorationTypes = {};
     for (const [priority, color] of Object.entries(colors)) {
       this._decorationTypes[priority] = 
@@ -34,50 +37,110 @@ class TaskBoundaryDecorator {
           borderStyle: 'dashed',
           borderColor: color,
           borderWidth: '1px 0px 1px 0px',
-          backgroundColor: color + '15', // 透明度 15%
+          backgroundColor: color + '15',
           overviewRulerColor: color,
           overviewRulerLane: this.vscode.OverviewRulerLane.Right,
-          after: {
-            contentText: '  ◀ Task Boundary ▶',
-            color: color,
-            fontStyle: 'italic',
-            margin: '0 0 0 10px',
-          },
         });
     }
 
-    // 任务边界头部装饰
     this._headerDecorationType = 
       this.vscode.window.createTextEditorDecorationType({
         backgroundColor: new this.vscode.ThemeColor('editor.lineHighlightBackground'),
         fontWeight: 'bold',
-        border: '2px solid',
-        borderColor: new this.vscode.ThemeColor('editor.lineHighlightBorder'),
-        after: {
-          contentText: ' [Task Start]',
-          color: new this.vscode.ThemeColor('editor.foreground'),
-          margin: '0 0 0 10px',
-          fontWeight: 'bold',
-        },
       });
   }
 
   /**
-   * 为编辑器添加任务边框
+   * Get visible line range in editor (viewport culling)
+   */
+  getVisibleRange(editor) {
+    if (!editor || !editor.visibleRanges || editor.visibleRanges.length === 0) {
+      return null;
+    }
+
+    const firstRange = editor.visibleRanges[0];
+    const lastRange = editor.visibleRanges[editor.visibleRanges.length - 1];
+
+    return {
+      start: firstRange.start.line,
+      end: lastRange.end.line
+    };
+  }
+
+  /**
+   * Filter tasks to only those visible in viewport
+   */
+  filterVisibleTasks(tasks, editor) {
+    if (!this._lazyMode) {
+      return tasks; // Return all if lazy mode disabled
+    }
+
+    const visibleRange = this.getVisibleRange(editor);
+    if (!visibleRange) {
+      return tasks; // Return all if no visible range
+    }
+
+    // Filter tasks whose code range overlaps with visible range
+    return tasks.filter(task => {
+      if (!task.codeRange) return false;
+      
+      const taskStart = task.codeRange.startLine;
+      const taskEnd = task.codeRange.endLine;
+      
+      // Check if task range overlaps with visible range
+      return !(taskEnd < visibleRange.start || taskStart > visibleRange.end);
+    });
+  }
+
+  /**
+   * Set task boundaries with lazy rendering
+   * Only decorates visible tasks in viewport
    */
   setTaskBoundaries(editor, tasks) {
     if (!this._enabled || !editor) return;
 
+    // Store all tasks for later use
+    this._allTasks = tasks;
+
+    // Apply decorations (debounced)
+    this._applyDecorationsDebounced(editor);
+  }
+
+  /**
+   * Apply decorations with debouncing
+   */
+  _applyDecorationsDebounced(editor) {
+    // Clear existing timer
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+    }
+
+    // Set new timer
+    this._debounceTimer = setTimeout(() => {
+      this._applyDecorations(editor);
+      this._debounceTimer = null;
+    }, this._debounceDelay);
+  }
+
+  /**
+   * Internal: Apply decorations to editor
+   */
+  _applyDecorations(editor) {
+    if (!editor) return;
+
+    // Filter to visible tasks only (lazy decoration)
+    const visibleTasks = this.filterVisibleTasks(this._allTasks, editor);
+
     const boundaries = [];
     const decorations = {};
 
-    // 初始化每个优先级的装饰列表
+    // Initialize decoration lists
     for (const priority of ['P0', 'P1', 'P2', 'P3']) {
       decorations[priority] = [];
     }
 
-    // 处理每个任务
-    for (const task of tasks) {
+    // Process visible tasks
+    for (const task of visibleTasks) {
       if (!task.codeRange) continue;
 
       const priority = task.priority || 'P3';
@@ -88,7 +151,6 @@ class TaskBoundaryDecorator {
         task.codeRange.endColumn || 999
       );
 
-      // 添加边框装饰
       decorations[priority].push({
         range,
         hoverMessage: this.buildHoverMessage(task),
@@ -102,44 +164,52 @@ class TaskBoundaryDecorator {
       });
     }
 
-    // 应用装饰
+    // Apply decorations
     for (const [priority, decs] of Object.entries(decorations)) {
-      if (decs.length > 0) {
-        editor.setDecorations(this._decorationTypes[priority], decs);
-      }
+      editor.setDecorations(this._decorationTypes[priority], decs);
     }
 
     this._boundaries = boundaries;
   }
 
   /**
-   * 构建悬停提示信息
+   * Update decorations when editor scrolls
+   */
+  onEditorScroll(editor) {
+    if (!this._enabled || !this._lazyMode || !editor) return;
+    
+    // Debounced update when scrolling
+    this._applyDecorationsDebounced(editor);
+  }
+
+  /**
+   * Build hover message for task
    */
   buildHoverMessage(task) {
     const parts = [
-      \### 📋 \\,
+      `### 📋 ${task.name}`,
       '',
-      \**优先级**: \\,
-      \**状态**: \\,
-      \**进度**: \%\,
+      `**Priority**: ${task.priority}`,
+      `**Status**: ${task.status}`,
+      `**Progress**: ${task.progress}%`,
     ];
 
     if (task.executionTime) {
-      parts.push(\**执行时间**: \ms\);
+      parts.push(`**Execution Time**: ${task.executionTime}ms`);
     }
     if (task.memoryUsage) {
-      parts.push(\**内存**: \MB\);
+      parts.push(`**Memory**: ${task.memoryUsage}MB`);
     }
     if (task.description) {
       parts.push('');
       parts.push(task.description);
     }
 
-    return new this.vscode.MarkdownString(parts.join('\\n'));
+    return new this.vscode.MarkdownString(parts.join('\n'));
   }
 
   /**
-   * 清除所有边框
+   * Clear all boundaries
    */
   clear(editor) {
     if (!editor) return;
@@ -149,10 +219,11 @@ class TaskBoundaryDecorator {
     }
     editor.setDecorations(this._headerDecorationType, []);
     this._boundaries = [];
+    this._allTasks = [];
   }
 
   /**
-   * 切换边框显示
+   * Toggle decoration rendering
    */
   toggle() {
     this._enabled = !this._enabled;
@@ -160,7 +231,15 @@ class TaskBoundaryDecorator {
   }
 
   /**
-   * 获取指定位置的任务
+   * Toggle lazy mode
+   */
+  toggleLazyMode() {
+    this._lazyMode = !this._lazyMode;
+    return this._lazyMode;
+  }
+
+  /**
+   * Get task at line
    */
   getTaskAtLine(line) {
     for (const boundary of this._boundaries) {
@@ -177,7 +256,7 @@ class TaskBoundaryDecorator {
   }
 
   /**
-   * 高亮显示指定任务的边框
+   * Highlight specific task
    */
   highlightTask(editor, taskId) {
     for (const priority of ['P0', 'P1', 'P2', 'P3']) {
@@ -194,35 +273,21 @@ class TaskBoundaryDecorator {
   }
 
   /**
-   * 注册快捷键处理
+   * Dispose decorator
    */
-  registerCommands(context) {
-    context.subscriptions.push(
-      this.vscode.commands.registerCommand(
-        'intentlens.boundary.toggle',
-        () => {
-          const enabled = this.toggle();
-          this.vscode.window.showInformationMessage(
-            enabled ? '任务边框已启用' : '任务边框已禁用'
-          );
-        }
-      )
-    );
-
-    context.subscriptions.push(
-      this.vscode.commands.registerCommand(
-        'intentlens.boundary.highlight',
-        (taskId) => {
-          const editor = this.vscode.window.activeTextEditor;
-          if (editor) {
-            this.highlightTask(editor, taskId);
-          }
-        }
-      )
-    );
+  dispose() {
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+    }
+    
+    for (const type of Object.values(this._decorationTypes)) {
+      type.dispose();
+    }
+    
+    if (this._headerDecorationType) {
+      this._headerDecorationType.dispose();
+    }
   }
 }
 
-module.exports = {
-  TaskBoundaryDecorator,
-};
+module.exports = TaskBoundaryDecorator;

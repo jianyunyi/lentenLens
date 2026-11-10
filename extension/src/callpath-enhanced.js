@@ -27,7 +27,7 @@ class CallPathNode {
       ((this.executionTime / this.parentExecutionTime) * 100).toFixed(1) : 
       '0.0';
 
-    const label = \\ [\ms · \%]\;
+    const label = `${this.name} [${this.executionTime}ms · ${timePercent}%]`;
     
     const item = new this.vscode.TreeItem(
       label,
@@ -40,7 +40,7 @@ class CallPathNode {
     item.iconPath = this.getIconByPerformance();
     
     // 详细信息
-    item.description = \\ calls · \MB · \%CPU\;
+    item.description = `${this.callCount} calls · ${this.memory}MB · ${this.cpu}%CPU`;
     
     // 快速链接到源代码
     item.command = {
@@ -83,24 +83,24 @@ class CallPathNode {
    */
   buildTooltip() {
     const parts = [
-      \## 📞 \\,
+      `## 📞 ${this.name}`,
       '',
-      \**文件**: \:\:\\,
-      \**执行时间**: \ms\,
-      \**调用次数**: \\,
-      \**内存分配**: \MB\,
-      \**CPU占用**: \%\,
+      `**文件**: ${this.file}:${this.line}`,
+      `**执行时间**: ${this.executionTime}ms`,
+      `**调用次数**: ${this.callCount}`,
+      `**内存分配**: ${this.memory}MB`,
+      `**CPU占用**: ${this.cpu}%`,
     ];
 
     if (this.children.length > 0) {
       parts.push('');
       parts.push('### 子函数调用:');
       for (const child of this.children) {
-        parts.push(\- \ (\ms)\);
+        parts.push(`- ${child.name} (${child.executionTime}ms)`);
       }
     }
 
-    return new this.vscode.MarkdownString(parts.join('\\n'));
+    return new this.vscode.MarkdownString(parts.join('\n'));
   }
 }
 
@@ -219,7 +219,7 @@ class EnhancedCallPathProvider {
     
     let result = '';
     result += ' '.repeat(indent) + 
-      \└─ \ [\ms]\n\;
+      `└─ ${node.name} [${node.executionTime}ms]\n`;
     
     for (const child of node.children) {
       result += this.exportAsText(child, indent + 3);
