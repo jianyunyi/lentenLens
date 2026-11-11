@@ -1,4 +1,4 @@
-// Package codeindex creates a conservative static Go call index without builds.
+﻿// Package codeindex creates a conservative static Go call index without builds.
 package codeindex
 
 import (
@@ -100,9 +100,43 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 		}
 		info := &types.Info{Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}, Instances: map[*ast.Ident]types.Instance{}}
 		// No importer is supplied: dependencies are neither fetched nor executed.
-		cfg := types.Config{Error: func(err error) { out.Issues = append(out.Issues, "type check: "+err.Error()) }}
+		// Collect type-check errors to summarize instead of reporting every import error
+		typeErrors := []string{}
+		importErrors := make(map[string]bool)
+		cfg := types.Config{Error: func(err error) {
+			msg := err.Error()
+			// Track import errors separately to summarize them
+			if strings.Contains(msg, "could not import") {
+				// Extract package name
+				parts := strings.Fields(msg)
+				for i, p := range parts {
+					if p == "import" && i+1 < len(parts) {
+						importErrors[parts[i+1]] = true
+						break
+					}
+				}
+			} else {
+				typeErrors = append(typeErrors, msg)
+			}
+		}}
 		if _, err := cfg.Check(key, set, trees, info); err != nil {
-			out.Issues = append(out.Issues, "type check failed: "+err.Error())
+			// Report non-import errors individually
+			for _, e := range typeErrors {
+				out.Issues = append(out.Issues, "type check: "+e)
+			}
+			// Summarize import errors
+			if len(importErrors) > 0 {
+				pkgs := make([]string, 0, len(importErrors))
+				for pkg := range importErrors {
+					pkgs = append(pkgs, pkg)
+				}
+				sort.Strings(pkgs)
+				if len(pkgs) <= 3 {
+					out.Issues = append(out.Issues, "type check: missing imports: "+strings.Join(pkgs, ", "))
+				} else {
+					out.Issues = append(out.Issues, fmt.Sprintf("type check: %d missing imports (e.g., %s)", len(pkgs), strings.Join(pkgs[:3], ", ")))
+				}
+			}
 		}
 		targets := map[types.Object]string{}
 		declarations := map[string][]string{}
