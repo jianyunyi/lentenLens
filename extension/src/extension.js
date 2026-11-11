@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 const vscode = require('vscode');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -78,6 +78,25 @@ function activate(context) {
     const values = new Map();
     return { get: key => values.get(key), update: (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); return Promise.resolve(); } };
   })();
+  // Deduplication cache to prevent duplicate notifications
+  const notificationCache = new Map();
+  const notificationTTL = 1000; // 1 second
+  function deduplicatedNotify(type, message, showFn) {
+    const key = `${type}:${message}`;
+    const now = Date.now();
+    const cached = notificationCache.get(key);
+    if (cached && (now - cached) < notificationTTL) {
+      return; // Skip duplicate within TTL
+    }
+    notificationCache.set(key, now);
+    // Cleanup old entries
+    if (notificationCache.size > 50) {
+      for (const [k, timestamp] of notificationCache.entries()) {
+        if (now - timestamp > notificationTTL * 10) notificationCache.delete(k);
+      }
+    }
+    showFn(message);
+  }
   const sessions = createSessions({
     workspaceState: sessionState,
     cli: (root, command, input) => {
@@ -86,8 +105,8 @@ function activate(context) {
       return cli(folder, command, input);
     },
     notify: {
-      info: message => vscode.window.showInformationMessage(message),
-      error: message => vscode.window.showErrorMessage(`IntentLens: ${message}`),
+      info: message => deduplicatedNotify('info', message, msg => vscode.window.showInformationMessage(msg)),
+      error: message => deduplicatedNotify('error', message, msg => vscode.window.showErrorMessage(`IntentLens: ${msg}`)),
     },
   });
   const recovery = createCaptureRecovery({ vscode, cli, sessions });
