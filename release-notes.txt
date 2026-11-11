@@ -1,0 +1,30 @@
+﻿## 🐛 Bug Fixes
+
+### 1. Duplicate Notification Messages
+- Problem: IntentLens messages appeared twice
+- Solution: Added deduplication cache with 1-second TTL
+- Files: extension/src/extension.js
+
+### 2. Verbose Parse Restrictions  
+- Problem: Each import error took up a separate line (10+ lines)
+- Solution: Summarize import errors into one line
+- Files: internal/codeindex/index.go
+- Result: type check: 7 missing imports (e.g., fmt, time, gorm.io/gorm)
+
+### 3. UI Test Failures
+- Problem: 5 Phase 3 tests failed with Mocha syntax errors
+- Solution: Convert to Node.js native test runner
+- Result: All 124 tests passing
+
+## Installation & Upgrade
+
+1. Reload VS Code: Ctrl+Shift+P -> Developer: Reload Window
+2. Clear cache: Delete .intent directory if needed
+3. Trigger reindex: Open Go file and analyze
+
+## Known Issues
+
+- Cached index may show old error format until reindex
+- Use IntentLens refresh command to force reindex
+
+See CHANGELOG.md for full details.
