@@ -1,0 +1,55 @@
+﻿# IntentLens v0.6.2 - Parse Restrictions Unified Display
+
+## 🎉 Major Feature Release
+
+本版本引入了**解析限制统一显示**功能，将分散的错误消息转化为结构化、层次化的视图。
+
+### ✨ 新增功能
+
+#### 解析限制统一显示
+- **分层树形视图**: 所有解析限制按 6 个类别组织显示
+  - 类别: Parse Errors, Type Check Errors, Missing Imports, Undefined Identifiers, Ambiguous Calls, Other
+  - 可视化指示器: ❌ 错误, ⚠️ 警告, 🔍 信息
+  - 可展开/折叠的分组，带计数
+
+- **Missing Imports 智能汇总**: 重复导入错误的智能聚合
+  - 之前: 每个导入错误单独一行（重复 10+ 次）
+  - 现在: "10 missing imports (e.g., fmt, context, time)" 可展开完整列表
+  - UI 杂乱减少 90%
+
+- **详情面板**: Webview 全面查看
+  - 按类别过滤
+  - 复制到剪贴板
+  - 导航到源位置
+
+#### 后端改进
+- **高性能聚合器**: 新增 internal/aggregator 包
+  - 零外部依赖
+  - 96.1% 测试覆盖率
+  - 性能: 0.179ms/1000条（比要求快 560 倍）
+  - 超时保护: 200ms 默认
+
+#### 新增命令
+- intentlens.showRestrictionDetails
+- intentlens.navigateToRestriction
+- intentlens.refreshRestrictions
+- intentlens.clearRestrictions
+
+#### 新增配置
+- intentlens.restrictionsAggregation (boolean, 默认: true)
+
+### 📊 性能指标
+
+- 聚合: <1ms for 1000 items
+- 渲染: <50ms tree view
+- 测试: 96 tests, 96.1% coverage
+
+### 📦 安装
+
+下载 intentlens-0.6.2.vsix 并在 VS Code 中安装（Ctrl+Shift+P → Install from VSIX）
+
+### 🔄 迁移
+
+无需迁移，自动生效。禁用: 设置 "intentlens.restrictionsAggregation": false
+
+**完全向后兼容！** 🎊

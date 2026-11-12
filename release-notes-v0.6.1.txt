@@ -1,0 +1,38 @@
+﻿# IntentLens v0.6.1 - Hotfix Release
+
+## 🔥 Critical Bug Fix
+
+修复 v0.6.0 引入的 **capture lock 回归问题**，该问题导致点击"在函数下方生成解释"时出现锁错误。
+
+## 🐛 Bug Fixes
+
+- **Capture Lock Regression**: 恢复 lock.go 中 ilepath.Join 的使用
+  - v0.6.0 将 os.Lstat(filepath.Join(a.State, path)) 改为 oot.Lstat(path)
+  - 导致 os.SameFile() 比较失败，无法获取锁
+  - 现已恢复原始实现，同时保留 octal 语法和 errors.Join 改进
+
+## 📋 Technical Details
+
+**Root Cause Analysis:**
+- v0.5.2: ✅ 工作正常
+- v0.6.0: ❌ Capture lock 错误 
+- v0.6.1: ✅ 修复完成
+
+**Changed Files:**
+- internal/app/lock.go: 恢复 filepath.Join，保留其他改进
+
+## 📦 Installation
+
+下载 intentlens-0.6.1.vsix 并在 VS Code 中安装：
+1. 打开 VS Code
+2. 按 Ctrl+Shift+P
+3. 输入 "Install from VSIX"
+4. 选择下载的 VSIX 文件
+
+## 🔄 Upgrade Notes
+
+如果您正在使用 v0.6.0 且遇到锁错误，请：
+1. 关闭所有 VS Code 实例
+2. 删除项目中的 .intent 目录
+3. 安装 v0.6.1
+4. 重新打开项目
