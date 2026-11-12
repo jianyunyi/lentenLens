@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * Task Management Panel
@@ -49,7 +49,7 @@ class TaskManagementPanel {
    * 获取 Webview HTML 内容
    */
   getWebviewContent() {
-    return \
+    return `
       <!DOCTYPE html>
       <html>
       <head>
@@ -313,7 +313,7 @@ class TaskManagementPanel {
         </script>
       </body>
       </html>
-    \;
+    `;
   }
 
   /**
@@ -358,7 +358,7 @@ class TaskManagementPanel {
     }
 
     this._tasks.set(taskId, task);
-    this.vscode.window.showInformationMessage(\✓ 任务 "\" 已创建\);
+    this.vscode.window.showInformationMessage(`✓ 任务 "${task.name}" 已创建`);
   }
 
   /**
@@ -393,7 +393,7 @@ class TaskManagementPanel {
     if (!task) return;
     
     Object.assign(task, data);
-    this.vscode.window.showInformationMessage(\✓ 任务已更新\);
+    this.vscode.window.showInformationMessage(`✓ 任务已更新`);
   }
 
   /**
@@ -423,3 +423,5 @@ class TaskManagementPanel {
 module.exports = {
   TaskManagementPanel,
 };
+
+
