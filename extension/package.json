@@ -46,7 +46,8 @@
         "onCommand:intentlens.refreshModelAnswer",
         "onCommand:intentlens.enableModel",
         "onCommand:intentlens.testModel",
-        "onCommand:intentlens.explainSelection"
+        "onCommand:intentlens.explainSelection",
+        "onView:intentlens.restrictions"
     ],
     "capabilities": {
         "untrustedWorkspaces": {
@@ -157,6 +158,24 @@
             {
                 "command": "intentlens.hooksConfig",
                 "title": "IntentLens: 预览 Claude Code Hook 配置"
+            },
+            {
+                "command": "intentlens.showRestrictionDetails",
+                "title": "IntentLens: 显示解析限制详情"
+            },
+            {
+                "command": "intentlens.navigateToRestriction",
+                "title": "IntentLens: 跳转到限制位置"
+            },
+            {
+                "command": "intentlens.refreshRestrictions",
+                "title": "IntentLens: 刷新解析限制",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "intentlens.clearRestrictions",
+                "title": "IntentLens: 清除解析限制",
+                "icon": "$(clear-all)"
             }
         ],
         "viewsContainers": {
@@ -183,6 +202,10 @@
                 {
                     "id": "intentlens.modelAnswer",
                     "name": "模型回答与证据"
+                },
+                {
+                    "id": "intentlens.restrictions",
+                    "name": "解析限制（统一视图）"
                 }
             ]
         },
@@ -198,6 +221,10 @@
             {
                 "view": "intentlens.modelAnswer",
                 "contents": "只读显示当前函数已保存在本地的回答、历史版本和引用证据。打开或刷新视图不会发起模型请求。\n[刷新模型回答与证据](command:intentlens.refreshModelAnswer)"
+            },
+            {
+                "view": "intentlens.restrictions",
+                "contents": "解析限制统一显示。所有代码解析错误、类型检查错误和限制将在此汇总显示。\n[刷新解析限制](command:intentlens.refreshRestrictions)\n[清除解析限制](command:intentlens.clearRestrictions)"
             }
         ],
         "menus": {
@@ -248,6 +275,16 @@
                     "command": "intentlens.cancelRound",
                     "when": "view == intentlens.rounds",
                     "group": "capture@4"
+                },
+                {
+                    "command": "intentlens.refreshRestrictions",
+                    "when": "view == intentlens.restrictions",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentlens.clearRestrictions",
+                    "when": "view == intentlens.restrictions",
+                    "group": "navigation"
                 }
             ]
         },
@@ -260,6 +297,12 @@
                     "scope": "machine-overridable",
                     "restricted": true,
                     "description": "IntentLens executable path. Empty uses bundled bin/intentlens(.exe), then PATH. No shell arguments."
+                },
+                "intentlens.restrictionsAggregation": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "window",
+                    "description": "Enable unified display for parse restrictions (aggregates multiple errors into hierarchical view)"
                 }
             }
         }

@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 const vscode = require('vscode');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -12,6 +12,9 @@ const { createCallPathProvider } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, selectedErrorDiagnostics, validateSelectionResult, renderSelectionExplanation, page, escapeHTML } = require('./core');
+const { RestrictionTreeProvider } = require('./restrictionView');
+const { RestrictionDetailPanel } = require('./restrictionDetailPanel');
+
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
@@ -376,6 +379,46 @@ function activate(context) {
   modelAnswerProvider = createModelAnswerProvider({ vscode, treeChanged: modelAnswerChanged, getCurrentTarget: getCurrentModelTarget });
   const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });
   context.subscriptions.push(callPathProvider, callPathView, modelAnswerProvider, modelAnswerChanged, modelAnswerView);
+
+  // Parse Restrictions Unified Display
+  const restrictionTreeProvider = new RestrictionTreeProvider();
+  const restrictionTreeView = vscode.window.createTreeView('intentlens.restrictions', {
+    treeDataProvider: restrictionTreeProvider,
+    showCollapseAll: true
+  });
+  context.subscriptions.push(restrictionTreeProvider, restrictionTreeView);
+
+  // Schema validation for aggregated data
+  function validateAggregatedSchema(data) {
+    if (!data) return false;
+    if (!data.summary || typeof data.summary.totalRestrictions !== 'number') return false;
+    if (!Array.isArray(data.categories)) return false;
+    return true;
+  }
+
+  // Show aggregated restrictions function
+  function showAggregatedRestrictions(aggregated) {
+    if (!validateAggregatedSchema(aggregated)) {
+      vscode.window.showErrorMessage('IntentLens: 解析限制数据格式无效');
+      return;
+    }
+
+    // Update tree view
+    restrictionTreeProvider.refresh(aggregated);
+
+    // Show notification with action buttons
+    const totalCount = aggregated.summary.totalRestrictions;
+    const categoryCount = aggregated.summary.totalCategories;
+    
+    vscode.window.showWarningMessage(
+      `IntentLens: 发现 ${totalCount} 个解析限制（${categoryCount} 类）`,
+      '展开详情', '忽略'
+    ).then(selection => {
+      if (selection === '展开详情') {
+        RestrictionDetailPanel.show(context, aggregated);
+      }
+    });
+  }
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
     async provideCodeLenses(document, token) {
@@ -442,12 +485,40 @@ function activate(context) {
     const data = await cli(folder, 'call-path', { file, line });
     if (epoch !== documentEpoch || callPathState?.requestEpoch !== requestEpoch) return;
     callPathProvider.setData(data);
+
+    // Check for aggregated restrictions in CLI response
+    if (data.aggregated && vscode.workspace.getConfiguration('intentlens').get('restrictionsAggregation', true)) {
+      showAggregatedRestrictions(data.aggregated);
+    }
     callPathState = { requestEpoch, folderRoot: folder.uri.fsPath, input: { file, line }, data };
     return data;
   }
   command('callPath', loadCallPath);
   command('refreshCallPath', loadCallPath);
   command('refreshModelAnswer', () => modelAnswerProvider?.refresh());
+
+  // Register restriction view commands
+  command('showRestrictionDetails', () => {
+    const aggregated = restrictionTreeProvider.aggregatedData;
+    if (aggregated) {
+      RestrictionDetailPanel.show(context, aggregated);
+    }
+  });
+  command('navigateToRestriction', (filePath, lineNumber) => {
+    vscode.workspace.openTextDocument(filePath).then(doc => {
+      vscode.window.showTextDocument(doc).then(editor => {
+        const position = new vscode.Position(lineNumber - 1, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position));
+      });
+    });
+  });
+  command('refreshRestrictions', () => {
+    restrictionTreeProvider.refresh(restrictionTreeProvider.aggregatedData);
+  });
+  command('clearRestrictions', () => {
+    restrictionTreeProvider.clear();
+  });
   command('openModelEvidence', async (_folder, evidence) => {
     if (!evidence || typeof evidence.source !== 'string') throw new Error('本地引用证据无效。');
     await snapshot(evidence.source, evidence.file);
