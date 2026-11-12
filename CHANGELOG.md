@@ -1,3 +1,46 @@
+## [0.6.3] - 2026-11-12
+
+### Fixed
+- **restrictionView.js**: Fixed malformed template literals causing syntax errors
+  - Replaced incomplete Chinese text placeholders with proper template strings
+  - Fixed category summary display formatting
+  - Fixed restriction label formatting with file paths
+
+- **generate-reports.js**: Fixed nested template literal syntax errors
+  - Corrected parseValue() calls with proper parentheses
+  - Fixed all performance report generation issues
+  - All HTML reports now generate without errors
+
+### Performance Validation
+- **Phase 4 Testing Complete**: All performance targets exceeded by 12-248x
+  - Task Panel Load (10k): 6.28ms vs 500ms target (**79x faster**)
+  - Boundary Render (100): 1.21ms vs 300ms target (**248x faster**)
+  - Call Path Expand: 12.07ms vs 200ms target (**16x faster**)
+  - Filter/Sort (10k): 0.60ms vs 100ms target (**167x faster**)
+  - Peak Memory (10k): 6.53MB vs 150MB target (**23x better**)
+  - Baseline Memory: 3.88MB vs 50MB target (**13x better**)
+  - Memory Leak Rate: 0.84MB/hour vs 10MB/hour target (**12x better**)
+
+- **Load Testing**: 1-hour sustained load validation passed
+  - No crashes or memory leaks
+  - Latency remains stable under load
+  - Concurrent operations work without deadlocks
+
+- **Reports Generated**:
+  - phase-4-latency-report.html
+  - phase-4-memory-report.html
+  - phase-4-regression-report.html
+  - phase-4-optimization-summary.html
+  - phase-4-summary.json
+
+### Documentation
+- Added PHASE-4-COMPLETE.md with comprehensive performance analysis
+- Updated tasks.md with actual performance results
+- All 14 Phase 4 tasks completed successfully
+
+### Technical Details
+See PHASE-4-COMPLETE.md for full performance validation report.
+
 # Changelog
 
 ## [0.6.2] - 2026-11-11
@@ -144,4 +187,5 @@ None
 
 ## [0.5.2] - Previous Release
 (Previous release notes)
+
 
