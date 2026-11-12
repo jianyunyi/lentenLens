@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 /**
@@ -397,25 +397,25 @@ function generateMemoryReport(reports) {
         <tr>
           <td><strong>Baseline Heap (0 tasks)</strong></td>
           <td>≤${metrics.baselineMemory.target} ${metrics.baselineMemory.unit}</td>
-          <td>${parseValue(metrics.baselineMemory.value.toFixed(2)} ${metrics.baselineMemory.unit}</td>
+          <td>${parseValue(metrics.baselineMemory.value).toFixed(2)} ${metrics.baselineMemory.unit}</td>
           <td class="${metrics.baselineMemory.status.toLowerCase()}">${metrics.baselineMemory.status}</td>
         </tr>
         <tr>
           <td><strong>Peak Memory (10k tasks)</strong></td>
           <td>≤${metrics.peakMemory.target} ${metrics.peakMemory.unit}</td>
-          <td>${parseValue(metrics.peakMemory.value.toFixed(2)} ${metrics.peakMemory.unit}</td>
+          <td>${parseValue(metrics.peakMemory.value).toFixed(2)} ${metrics.peakMemory.unit}</td>
           <td class="${metrics.peakMemory.status.toLowerCase()}">${metrics.peakMemory.status}</td>
         </tr>
         <tr>
           <td><strong>Growth Ratio (avg)</strong></td>
           <td>&lt;${metrics.growthRatio.target}${metrics.growthRatio.unit} per 10x scale</td>
-          <td>${parseValue(metrics.growthRatio.value.toFixed(2)}${metrics.growthRatio.unit}</td>
+          <td>${parseValue(metrics.growthRatio.value).toFixed(2)}${metrics.growthRatio.unit}</td>
           <td class="${metrics.growthRatio.status.toLowerCase()}">${metrics.growthRatio.status}</td>
         </tr>
         <tr>
           <td><strong>Memory Leak Rate</strong></td>
           <td>≤${metrics.memoryLeak.target} ${metrics.memoryLeak.unit}</td>
-          <td>${parseValue(metrics.memoryLeak.value.toFixed(2)} ${metrics.memoryLeak.unit}</td>
+          <td>${parseValue(metrics.memoryLeak.value).toFixed(2)} ${metrics.memoryLeak.unit}</td>
           <td class="${metrics.memoryLeak.status.toLowerCase()}">${metrics.memoryLeak.status}</td>
         </tr>
       </tbody>
@@ -441,8 +441,8 @@ function generateMemoryReport(reports) {
       html += `
         <tr>
           <td>${snap.taskCount.toLocaleString()}</td>
-          <td>${parseValue(${snap.heapUsedMB).toFixed(2)}</td>
-          <td>${parseValue(${snap.heapTotalMB).toFixed(2)}</td>
+          <td>${parseValue(snap.heapUsedMB).toFixed(2)}</td>
+          <td>${parseValue(snap.heapTotalMB).toFixed(2)}</td>
           <td><small>${topObj}</small></td>
         </tr>`;
     });
@@ -525,7 +525,7 @@ function generateMemoryReport(reports) {
         <tr>
           <td>${hotspot.rank}</td>
           <td><code>${hotspot.function}</code></td>
-          <td>${parseValue(${hotspot.allocatedMB).toFixed(2)}</td>
+          <td>${parseValue(hotspot.allocatedMB).toFixed(2)}</td>
         </tr>`;
     });
 
@@ -794,7 +794,7 @@ function generateOptimizationSummary(reports) {
     html += `
         <tr>
           <td>Combined Filter+Sort (10k)</td>
-          <td class="pass">${reports.cpu_optimization.combinedResults.optimizedP95.toFixed(2)} ms (p95) - ${reports.cpu_optimization.combinedResults.status}</td>
+          <td class="pass">${parseValue(reports.cpu_optimization.combinedResults.optimizedP95).toFixed(2)} ms (p95) - ${reports.cpu_optimization.combinedResults.status}</td>
         </tr>`;
   }
 

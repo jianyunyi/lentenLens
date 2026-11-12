@@ -32,8 +32,10 @@ class RestrictionTreeProvider {
             const items = [];
             
             // Summary header
+            const categoryCount = this.aggregatedData.categories.length;
+            const totalCount = this.aggregatedData.categories.reduce((sum, cat) => sum + cat.count, 0);
             const summaryItem = new vscode.TreeItem(
-                📋 解析限制汇总 (类，共个问题),
+                `📋 解析限制汇总 (${categoryCount}类，共${totalCount}个问题)`,
                 vscode.TreeItemCollapsibleState.Expanded
             );
             summaryItem.contextValue = 'summary';
@@ -42,11 +44,11 @@ class RestrictionTreeProvider {
             // Category items
             for (const category of this.aggregatedData.categories) {
                 const categoryItem = new vscode.TreeItem(
-                    ${category.icon}  (),
+                    `${category.icon} ${category.name} (${category.count})`,
                     category.count > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None
                 );
                 categoryItem.contextValue = 'category';
-                categoryItem.tooltip = ${category.count} issues in ;
+                categoryItem.tooltip = `${category.count} issues in ${category.name}`;
                 categoryItem.category = category;
                 items.push(categoryItem);
             }
@@ -67,7 +69,7 @@ class RestrictionTreeProvider {
                         vscode.TreeItemCollapsibleState.None
                     );
                     summaryItem.contextValue = 'itemSummary';
-                    summaryItem.tooltip = Full list: ;
+                    summaryItem.tooltip = `Full list: ${item.details || item.message}`;
                     summaryItem.command = {
                         command: 'intentlens.showRestrictionDetails',
                         title: 'Show Details',
@@ -107,11 +109,11 @@ class RestrictionTreeProvider {
         
         if (restriction.filePath) {
             const fileName = restriction.filePath.split(/[/\\]/).pop();
-            label = ${fileName};
+            label = `${fileName}`;
             if (restriction.lineNumber > 0) {
-                label += :;
+                label += `:${restriction.lineNumber}`;
             }
-            label +=  - ;
+            label += ` - `;
         }
         
         // Truncate long messages
