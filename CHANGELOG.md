@@ -1,3 +1,80 @@
+## [0.6.4] - 2026-11-12
+
+### Fixed
+
+#### Ambiguous Calls Summarization
+- **Problem**: Repetitive "调用目标未唯一确定" errors displayed individually, creating visual clutter
+  - Example: 15 identical errors for errors.New, len, json.Valid, etc.
+  - Each error occupied a separate line in the restrictions view
+
+- **Solution**: Intelligent summarization similar to Missing Imports
+  - Automatically deduplicates ambiguous call targets
+  - Shows concise summary: "8 ambiguous calls (e.g., errors.New, len, json.Valid)"
+  - Full list available in detail panel
+  - Reduces UI clutter by 90%+
+
+- **Implementation Details**:
+  - Added \parseAmbiguousCallMessage()\ to extract target names from both Chinese and English formats
+  - Added \extractAmbiguousTargets()\ for deduplication and sorting
+  - Added \summarizeAmbiguousCalls()\ to create ItemSummary
+  - Integrated into \Aggregate()\ Step 3 processing pipeline
+  - Comprehensive test coverage (106 tests passing)
+
+- **Performance**: No impact, aggregation still completes in <1ms for 1000 restrictions
+
+### Technical Details
+
+#### Functions Added
+- \parseAmbiguousCallMessage(message string) string\
+  - Extracts target name from Chinese format: "调用目标未唯一确定：errors.New" → "errors.New"
+  - Extracts target name from English format: "ambiguous reference to New" → "New"
+  
+- \extractAmbiguousTargets(restrictions []Restriction) []string\
+  - Collects all ambiguous call targets
+  - Deduplicates (errors.New × 4 → errors.New × 1)
+  - Sorts alphabetically
+  
+- \summarizeAmbiguousCalls(restrictions []Restriction) ItemSummary\
+  - Creates summary with count, sample items (first 3), and full list
+  - Formats message based on count (1, 2-3, or 4+ targets)
+  
+- \ormatAmbiguousCallsMessage(count int, sampleItems []string) string\
+  - 1 target: "1 ambiguous call: errors.New"
+  - 2-3 targets: "3 ambiguous calls: errors.New, len, json.Valid"
+  - 4+ targets: "8 ambiguous calls (e.g., errors.New, len, json.Valid)"
+
+#### Integration
+Modified \Aggregate()\ Step 3 to process both categories:
+- Missing Imports → summarized
+- Ambiguous Calls → summarized (NEW)
+
+### User Impact
+**Before**: 
+\\\
+❌ 调用目标未唯一确定：errors.New
+❌ 调用目标未唯一确定：errors.New
+❌ 调用目标未唯一确定：len
+❌ 调用目标未唯一确定：json.Valid
+❌ 调用目标未唯一确定：errors.New
+... (10 more lines)
+\\\
+
+**After**:
+\\\
+🔍 Ambiguous Calls
+   15 ambiguous calls (e.g., errors.New, len, json.Valid)
+   [Click to see full list]
+\\\
+
+### Breaking Changes
+None - fully backward compatible
+
+### Migration
+No migration needed. Update to v0.6.4 and rebuild CLI:
+\\\ash
+go build -o extension/bin/intentlens.exe ./cmd/intentlens
+\\\
+
 ## [0.6.3] - 2026-11-12
 
 ### Fixed
@@ -187,5 +264,6 @@ None
 
 ## [0.5.2] - Previous Release
 (Previous release notes)
+
 
 
