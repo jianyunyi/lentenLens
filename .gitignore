@@ -8,3 +8,20 @@ node_modules/
 
 
 /history-acceptance/
+
+# 临时工作文件
+BUGFIX-SUMMARY.md
+FIX-CAPTURE-LOCK.md
+LOCK-FIX-QUICK.md
+LOCK-RESOLVED.md
+PUSH-SUMMARY.txt
+test-fix-summary.md
+extension/error-analysis.md
+extension/src/extension-part1.txt
+extension/test-errors.log
+test_fixture/
+test_imports.go
+intentlens.exe
+
+# PR 模板应该在 .github 目录
+# PR-TEMPLATE.md
