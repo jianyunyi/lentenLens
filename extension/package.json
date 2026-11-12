@@ -2,7 +2,7 @@
     "name":  "intentlens",
     "displayName":  "IntentLens",
     "description":  "Go explanations tied to local source evidence, plus selected-code explanations.",
-    "version":  "0.6.4",
+    "version": "0.7.0",
     "publisher":  "intentlens",
     "license":  "MIT",
     "author":  {
