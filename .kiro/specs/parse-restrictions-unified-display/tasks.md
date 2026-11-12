@@ -122,7 +122,7 @@ This feature transforms IntentLens's restriction reporting from individual notif
     - Return error on timeout or panic
     - _Requirements: 8.3, 10.3_
 
-- [ ] 8. Checkpoint - Backend aggregator core complete
+- [x] 8. Checkpoint - Backend aggregator core complete
   - Ensure all aggregator functions implemented
   - Verify code compiles without errors
   - Run go vet and golangci-lint
@@ -674,7 +674,7 @@ This feature transforms IntentLens's restriction reporting from individual notif
     - _Requirements: All_
 
 - [ ] 27. Update developer documentation
-  - [ ] 27.1 Document aggregator package API
+  - [-] 27.1 Document aggregator package API
     - Add godoc comments to all exported functions
     - Document data structures with examples
     - Add package-level documentation
