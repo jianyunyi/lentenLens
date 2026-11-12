@@ -565,6 +565,141 @@ func formatMissingImportsMessage(count int, sampleItems []string) string {
 	return countStr + " missing imports (e.g., " + sample + ")"
 }
 
+// parseAmbiguousCallMessage extracts the target name from an ambiguous call error.
+// Input: "调用目标未唯一确定：errors.New" or "ambiguous reference to New"
+// Returns: "errors.New" or "New", or empty string if not an ambiguous call message
+func parseAmbiguousCallMessage(message string) string {
+// Check for Chinese format: "调用目标未唯一确定：target"
+chinesePrefix := "调用目标未唯一确定："
+if len(message) >= len(chinesePrefix) {
+// Try to find the Chinese prefix
+for i := 0; i <= len(message)-len(chinesePrefix); i++ {
+match := true
+for j := 0; j < len(chinesePrefix); j++ {
+if i+j >= len(message) || message[i+j] != chinesePrefix[j] {
+match = false
+break
+}
+}
+if match {
+// Extract target after the colon
+target := trimSpace(message[i+len(chinesePrefix):])
+if target != "" {
+return target
+}
+}
+}
+}
+
+// Check for English format: "ambiguous reference to <target>"
+ambiguousPrefix := "ambiguous reference to "
+lowerMsg := toLower(message)
+idx := -1
+
+for i := 0; i <= len(lowerMsg)-len(ambiguousPrefix); i++ {
+match := true
+for j := 0; j < len(ambiguousPrefix); j++ {
+if lowerMsg[i+j] != ambiguousPrefix[j] {
+match = false
+break
+}
+}
+if match {
+idx = i
+break
+}
+}
+
+if idx != -1 {
+target := trimSpace(message[idx+len(ambiguousPrefix):])
+if target != "" {
+return target
+}
+}
+
+// Also check for "ambiguous call" format
+if contains(lowerMsg, "ambiguous") {
+// Return a generic marker
+return "ambiguous"
+}
+
+return ""
+}
+
+// extractAmbiguousTargets collects all ambiguous call targets from restrictions, deduplicates, and sorts.
+func extractAmbiguousTargets(restrictions []Restriction) []string {
+targetSet := make(map[string]bool)
+
+for _, r := range restrictions {
+if r.Category == "Ambiguous Calls" {
+target := parseAmbiguousCallMessage(r.Message)
+if target != "" {
+targetSet[target] = true
+}
+}
+}
+
+// Convert map to slice
+var targets []string
+for target := range targetSet {
+targets = append(targets, target)
+}
+
+// Sort alphabetically
+for i := 0; i < len(targets); i++ {
+for j := i + 1; j < len(targets); j++ {
+if targets[i] > targets[j] {
+targets[i], targets[j] = targets[j], targets[i]
+}
+}
+}
+
+return targets
+}
+
+// summarizeAmbiguousCalls creates an ItemSummary from ambiguous call restrictions.
+func summarizeAmbiguousCalls(restrictions []Restriction) ItemSummary {
+targets := extractAmbiguousTargets(restrictions)
+count := len(targets)
+
+var sampleItems []string
+if count <= 3 {
+sampleItems = targets
+} else {
+sampleItems = targets[:3]
+}
+
+message := formatAmbiguousCallsMessage(count, sampleItems)
+
+return ItemSummary{
+Type:        "summary",
+Count:       count,
+SampleItems: sampleItems,
+FullList:    targets,
+Message:     message,
+}
+}
+
+// formatAmbiguousCallsMessage formats the human-readable summary message for ambiguous calls.
+func formatAmbiguousCallsMessage(count int, sampleItems []string) string {
+if count == 0 {
+return "No ambiguous calls"
+}
+
+if count == 1 {
+return "1 ambiguous call: " + sampleItems[0]
+}
+
+if count <= 3 {
+return itoa(count) + " ambiguous calls: " + join(sampleItems, ", ")
+}
+
+// Format: "15 ambiguous calls (e.g., errors.New, len, json.Valid)"
+countStr := itoa(count)
+sample := join(sampleItems, ", ")
+return countStr + " ambiguous calls (e.g., " + sample + ")"
+}
+
 // Helper function to join strings with a separator
 func join(strs []string, sep string) string {
 	if len(strs) == 0 {
@@ -700,6 +835,23 @@ func Aggregate(issues []string) AggregatedResult {
 			// Replace Items with summary
 			groups[i].Items = []interface{}{summary}
 			// Keep count as total restrictions, not summary count
+			} else if groups[i].Name == "Ambiguous Calls" {
+    // Convert Items back to []Restriction
+    restrictions := make([]Restriction, 0, len(groups[i].Items))
+    for _, item := range groups[i].Items {
+        if r, ok := item.(Restriction); ok {
+            restrictions = append(restrictions, r)
+        }
+    }
+
+    // Create summary
+    summary := summarizeAmbiguousCalls(restrictions)
+
+    // Replace Items with summary
+    groups[i].Items = []interface{}{summary}
+    // Keep count as total restrictions, not summary count
+
+
 		}
 	}
 
@@ -782,3 +934,5 @@ type aggregationError struct {
 func (e *aggregationError) Error() string {
 	return e.msg
 }
+
+
