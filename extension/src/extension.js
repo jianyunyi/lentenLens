@@ -14,6 +14,7 @@ const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, selectedErrorDiagnostics, validateSelectionResult, renderSelectionExplanation, page, escapeHTML } = require('./core');
 const { RestrictionTreeProvider } = require('./restrictionView');
 const { RestrictionDetailPanel } = require('./restrictionDetailPanel');
+const { AIConfigPanel } = require('./aiConfigPanel');
 
 
 function activate(context) {
@@ -681,6 +682,10 @@ function activate(context) {
 	    if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
 	    vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
 	  });
+  command('configureAPI', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    AIConfigPanel.show(context, folder);
+  });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;
     const status = await cli(folder, 'status');
