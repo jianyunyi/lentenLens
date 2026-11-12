@@ -9,9 +9,12 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"intentlens/internal/aggregator"
+	"log"
 	"path"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Function struct {
@@ -33,9 +36,10 @@ type Call struct {
 	Source  string   `json:"source"`
 }
 type Index struct {
-	Functions []Function `json:"functions"`
-	Issues    []string   `json:"issues"`
-	Coverage  Coverage   `json:"coverage"`
+	Functions  []Function                   `json:"functions"`
+	Issues     []string                     `json:"issues"`
+	Coverage   Coverage                     `json:"coverage"`
+	Aggregated *aggregator.AggregatedResult `json:"aggregated,omitempty"`
 }
 type CoverageOmission struct {
 	File   string `json:"file"`
@@ -215,6 +219,25 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 		return a.StartLine < b.StartLine
 	})
 	sort.Strings(out.Issues)
+	
+	// Aggregate restrictions with timeout protection (Requirements 10.1, 10.2, 10.3)
+	if len(out.Issues) > 0 {
+		aggregated, err := aggregator.AggregateWithTimeout(out.Issues, 200*time.Millisecond)
+		if err != nil {
+			// Aggregation failed or timed out - log and fallback to issues-only
+			log.Printf("Aggregation failed: %v, falling back to issues array", err)
+			// On timeout with >5 issues, limit to first 5 (Requirement 10.4)
+			if strings.Contains(err.Error(), "timeout") && len(out.Issues) > 5 {
+				out.Issues = out.Issues[:5]
+			}
+			// Set Aggregated to nil to signal fallback to frontend
+			out.Aggregated = nil
+		} else {
+			// Successfully aggregated - include in output
+			out.Aggregated = &aggregated
+		}
+	}
+	
 	return out, omitted
 }
 
