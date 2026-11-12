@@ -48,3 +48,75 @@ func TestInvalidVisibleAndPackagesSeparate(t *testing.T) {
 		t.Fatal("cross-directory resolution")
 	}
 }
+
+// Test that aggregation integration works correctly
+func TestAggregationIntegration(t *testing.T) {
+	// Test case 1: No issues - Aggregated should be nil
+	i := Build(map[string]string{"a.go": "package p\nfunc A() {}\n"})
+	if len(i.Issues) > 0 {
+		t.Errorf("Expected no issues, got %d", len(i.Issues))
+	}
+	if i.Aggregated != nil {
+		t.Error("Expected Aggregated to be nil when there are no issues")
+	}
+
+	// Test case 2: Parse errors - Aggregated should be present
+	i2 := Build(map[string]string{"broken.go": "package ?"})
+	if len(i2.Issues) == 0 {
+		t.Fatal("Expected parse error")
+	}
+	if i2.Aggregated == nil {
+		t.Fatal("Expected Aggregated to be non-nil when there are issues")
+	}
+	if i2.Aggregated.Summary.TotalRestrictions == 0 {
+		t.Error("Expected at least one restriction in aggregated result")
+	}
+
+	// Test case 3: Multiple issues - verify backward compatibility
+	i3 := Build(map[string]string{
+		"broken.go":  "package ?",
+		"broken2.go": "package ??",
+	})
+	if len(i3.Issues) == 0 {
+		t.Fatal("Expected multiple parse errors")
+	}
+	// Both Issues and Aggregated should be present
+	if i3.Aggregated == nil {
+		t.Fatal("Expected Aggregated to be non-nil")
+	}
+	// Verify backward compatibility - Issues field should still be populated
+	if len(i3.Issues) != i3.Aggregated.Summary.TotalRestrictions {
+		t.Errorf("Issues count (%d) doesn't match aggregated count (%d)", 
+			len(i3.Issues), i3.Aggregated.Summary.TotalRestrictions)
+	}
+}
+
+// Test that aggregation includes category grouping
+func TestAggregationCategories(t *testing.T) {
+	i := Build(map[string]string{
+		"parse_error.go": "package ?",
+	})
+	
+	if i.Aggregated == nil {
+		t.Fatal("Expected Aggregated to be non-nil")
+	}
+	
+	if len(i.Aggregated.Categories) == 0 {
+		t.Error("Expected at least one category")
+	}
+	
+	// Verify that Parse Errors category exists
+	foundParseErrors := false
+	for _, cat := range i.Aggregated.Categories {
+		if cat.Name == "Parse Errors" {
+			foundParseErrors = true
+			if cat.Count == 0 {
+				t.Error("Parse Errors category has zero count")
+			}
+		}
+	}
+	
+	if !foundParseErrors {
+		t.Error("Expected Parse Errors category in aggregated result")
+	}
+}

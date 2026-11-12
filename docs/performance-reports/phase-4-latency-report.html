@@ -1,27 +1,146 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Latency Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 4 Latency Performance Report</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
-    h2 { color: #34495e; margin-top: 30px; }
+    h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
+    h3 { color: #555; margin-top: 20px; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background-color: #3498db; color: white; }
+    th { background-color: #3498db; color: white; font-weight: 600; }
+    tr:hover { background-color: #f5f5f5; }
     .pass { color: #27ae60; font-weight: bold; }
     .fail { color: #e74c3c; font-weight: bold; }
-    .summary { background: #e8f5e9; padding: 20px; margin: 20px 0; border-left: 4px solid #27ae60; }
+    .review { color: #f39c12; font-weight: bold; }
+    .metric-box { display: inline-block; margin: 10px; padding: 15px; background: #ecf0f1; border-radius: 5px; min-width: 200px; }
+    .metric-value { font-size: 24px; font-weight: bold; color: #2c3e50; }
+    .metric-label { font-size: 14px; color: #7f8c8d; margin-top: 5px; }
+    .summary { background: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #27ae60; }
+    .summary.fail { background: #ffebee; border-left-color: #e74c3c; }
+    .chart { margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 5px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+    .timestamp { color: #95a5a6; font-size: 12px; margin-top: 30px; text-align: center; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>📊 Latency Performance Report</h1><div class="summary"><strong>Status:</strong> <span class="pass">✓ ALL TARGETS MET</span></div><h2>Performance Results (10k tasks)</h2><table><thead><tr><th>Operation</th><th>Target</th><th>Actual (p95)</th><th>Status</th></tr></thead><tbody><tr><td>Filter/Sort</td><td>≤100ms</td><td>0.60ms</td><td class="pass">PASS</td></tr></tbody></table>
-    <p style="text-align: center; color: #999; margin-top: 40px;">
-      Generated: 2026-11-10T13:51:52.179Z<br>IntentLens v0.6.0 - Phase 4
-    </p>
+    <h1>📊 Latency Performance Report</h1>
+    <div class="summary ">
+      <strong>Overall Status:</strong> <span class="pass">✓ ALL TARGETS MET</span><br>
+      <strong>Test Scale:</strong> 10,000 tasks<br>
+      <strong>Target Release:</strong> v0.6.0
+    </div>
+
+    <h2>Performance Targets vs. Actual Results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Operation</th>
+          <th>Target (p95)</th>
+          <th>Actual p50</th>
+          <th>Actual p95</th>
+          <th>Actual p99</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Task Panel Load (10k)</strong></td>
+          <td>≤500 ms</td>
+          <td>2.58 ms</td>
+          <td>6.28 ms</td>
+          <td>6.42 ms</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Boundary Render (100 tasks)</strong></td>
+          <td>≤300 ms</td>
+          <td>0.03 ms</td>
+          <td>1.21 ms</td>
+          <td>1.97 ms</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Call Path Expand (depth 20)</strong></td>
+          <td>≤200 ms</td>
+          <td>0.00 ms</td>
+          <td>12.07 ms</td>
+          <td>15.29 ms</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Filter/Sort (10k tasks)</strong></td>
+          <td>≤100 ms</td>
+          <td>0.38 ms</td>
+          <td>0.60 ms</td>
+          <td>0.60 ms</td>
+          <td class="pass">PASS</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Key Metrics</h2>
+    <div>
+      <div class="metric-box">
+        <div class="metric-value">6.28 ms</div>
+        <div class="metric-label">task Panel Load (p95)</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-value">1.21 ms</div>
+        <div class="metric-label">boundary Render (p95)</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-value">12.07 ms</div>
+        <div class="metric-label">call Path Expand (p95)</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-value">0.60 ms</div>
+        <div class="metric-label">filter Sort (p95)</div>
+      </div>
+    </div>
+
+    <h2>Optimization Impact</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Optimization</th>
+          <th>Before</th>
+          <th>After</th>
+          <th>Improvement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>CPU Optimization (Filter/Sort 10k)</strong></td>
+          <td>0.73 ms</td>
+          <td>0.60 ms</td>
+          <td class="pass">1.16xx faster</td>
+        </tr>
+        <tr>
+          <td><strong>Indexed Filtering (10k)</strong></td>
+          <td>0.087ms</td>
+          <td>0.020ms</td>
+          <td class="pass">4.27x faster</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Notes</h2>
+    <ul>
+      <li>All measurements at 10,000 task scale unless noted</li>
+      <li>p50/p95/p99 = 50th/95th/99th percentile latencies</li>
+      <li>Targets from Phase 4 Design Document (docs/phase-4-design.md)</li>
+      <li>Debouncing enabled: 300ms for filter input</li>
+    </ul>
+    <div class="timestamp">
+      Generated: 2026-11-12T11:22:52.107Z<br>
+      IntentLens v0.6.0 - Phase 4 Performance Testing
+    </div>
   </div>
 </body>
 </html>

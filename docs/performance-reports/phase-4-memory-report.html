@@ -1,27 +1,189 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Memory Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 4 Memory Performance Report</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
-    h2 { color: #34495e; margin-top: 30px; }
+    h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
+    h3 { color: #555; margin-top: 20px; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-    th { background-color: #3498db; color: white; }
+    th { background-color: #3498db; color: white; font-weight: 600; }
+    tr:hover { background-color: #f5f5f5; }
     .pass { color: #27ae60; font-weight: bold; }
     .fail { color: #e74c3c; font-weight: bold; }
-    .summary { background: #e8f5e9; padding: 20px; margin: 20px 0; border-left: 4px solid #27ae60; }
+    .review { color: #f39c12; font-weight: bold; }
+    .metric-box { display: inline-block; margin: 10px; padding: 15px; background: #ecf0f1; border-radius: 5px; min-width: 200px; }
+    .metric-value { font-size: 24px; font-weight: bold; color: #2c3e50; }
+    .metric-label { font-size: 14px; color: #7f8c8d; margin-top: 5px; }
+    .summary { background: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #27ae60; }
+    .summary.fail { background: #ffebee; border-left-color: #e74c3c; }
+    .chart { margin: 30px 0; padding: 20px; background: #fafafa; border-radius: 5px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+    .timestamp { color: #95a5a6; font-size: 12px; margin-top: 30px; text-align: center; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🧠 Memory Performance Report</h1><div class="summary"><strong>Status:</strong> <span class="pass">✓ ALL TARGETS MET</span></div><h2>Memory Metrics</h2><table><thead><tr><th>Metric</th><th>Target</th><th>Actual</th><th>Status</th></tr></thead><tbody><tr><td>Baseline Heap</td><td>≤50MB</td><td>3.88MB</td><td class="pass">PASS</td></tr><tr><td>Peak Memory (10k)</td><td>≤150MB</td><td>6.53MB</td><td class="pass">PASS</td></tr><tr><td>Growth Ratio</td><td>&lt;2.0x</td><td>1.55x</td><td class="pass">PASS</td></tr><tr><td>Memory Leak</td><td>≤10MB/hour</td><td>0.84MB/hour</td><td class="pass">PASS</td></tr></tbody></table>
-    <p style="text-align: center; color: #999; margin-top: 40px;">
-      Generated: 2026-11-10T13:51:52.182Z<br>IntentLens v0.6.0 - Phase 4
-    </p>
+    <h1>🧠 Memory Performance Report</h1>
+    <div class="summary ">
+      <strong>Overall Status:</strong> <span class="pass">✓ ALL TARGETS MET</span><br>
+      <strong>Test Duration:</strong> 5 minutes (simulated 1 hour)<br>
+      <strong>Memory Leak Status:</strong> <span class="pass">PASS</span>
+    </div>
+
+    <h2>Memory Targets vs. Actual Results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Target</th>
+          <th>Actual</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Baseline Heap (0 tasks)</strong></td>
+          <td>≤50 MB</td>
+          <td>3.88 MB</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Peak Memory (10k tasks)</strong></td>
+          <td>≤150 MB</td>
+          <td>6.53 MB</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Growth Ratio (avg)</strong></td>
+          <td>&lt;2x per 10x scale</td>
+          <td>1.55x</td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Memory Leak Rate</strong></td>
+          <td>≤10 MB/hour</td>
+          <td>0.84 MB/hour</td>
+          <td class="pass">PASS</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Heap Snapshots Analysis</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Task Count</th>
+          <th>Heap Used (MB)</th>
+          <th>Heap Total (MB)</th>
+          <th>Top Objects</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td>3.88</td>
+          <td>6.53</td>
+          <td><small>N/A</small></td>
+        </tr>
+        <tr>
+          <td>1,000</td>
+          <td>4.14</td>
+          <td>7.03</td>
+          <td><small>String Properties (3000), Array Dependencies (1028), Task Objects (1000)</small></td>
+        </tr>
+        <tr>
+          <td>5,000</td>
+          <td>5.21</td>
+          <td>10.53</td>
+          <td><small>String Properties (15000), Task Objects (5000), Number Properties (5000)</small></td>
+        </tr>
+        <tr>
+          <td>10,000</td>
+          <td>6.53</td>
+          <td>15.53</td>
+          <td><small>String Properties (30000), Task Objects (10000), Number Properties (10000)</small></td>
+        </tr>
+        <tr>
+          <td>50,000</td>
+          <td>17.12</td>
+          <td>50.93</td>
+          <td><small>String Properties (150000), Array Dependencies (50090), Task Objects (50000)</small></td>
+        </tr>
+      </tbody>
+    </table>
+    <h2>Memory Optimization Results</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Optimization Strategy</th>
+          <th>Result</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Decoration Type Reuse</strong></td>
+          <td>90.4% memory reduction<br>
+              <small>Without: 0.89 MB | With: 0.09 MB</small></td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Lazy Property Loading</strong></td>
+          <td>527.8% reduction<br>
+              <small>Full: 0.84 MB | Lazy: -3.61 MB</small></td>
+          <td class="pass">PASS</td>
+        </tr>
+        <tr>
+          <td><strong>Object Pooling (10k scale)</strong></td>
+          <td>Reuse rate: 16.88%<br>
+              <small>Memory: 2.16MB</small></td>
+          <td class="pass">PASS</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Allocation Hotspots</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Function</th>
+          <th>Allocation (MB)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>undefined</td>
+          <td><code>undefined</code></td>
+          <td>0.00</td>
+        </tr>
+        <tr>
+          <td>undefined</td>
+          <td><code>undefined</code></td>
+          <td>0.00</td>
+        </tr>
+        <tr>
+          <td>undefined</td>
+          <td><code>undefined</code></td>
+          <td>0.00</td>
+        </tr>
+        <tr>
+          <td>undefined</td>
+          <td><code>undefined</code></td>
+          <td>0.00</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="timestamp">
+      Generated: 2026-11-12T11:22:52.123Z<br>
+      IntentLens v0.6.0 - Phase 4 Performance Testing
+    </div>
   </div>
 </body>
 </html>

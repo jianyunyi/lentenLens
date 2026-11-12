@@ -1,20 +1,72 @@
 {
-  "timestamp": "2026-11-10T13:51:52.187Z",
+  "timestamp": "2026-11-12T11:22:52.128Z",
   "version": "v0.6.0",
   "phase": "Phase 4",
-  "allTargetsMet": true,
   "latency": {
-    "filterSort10k": 0.6
+    "taskPanelLoad": {
+      "p50": 2.5786499999994703,
+      "p95": 6.279354999999032,
+      "p99": 6.421230999998861,
+      "target": 500,
+      "unit": "ms",
+      "status": "PASS"
+    },
+    "boundaryRender": {
+      "p50": 0.031799999999975626,
+      "p95": 1.2140750000000018,
+      "p99": 1.9716950000000049,
+      "target": 300,
+      "unit": "ms",
+      "status": "PASS"
+    },
+    "callPathExpand": {
+      "p50": 0.0011500000005071342,
+      "p95": 12.072455000000346,
+      "p99": 15.288011000000353,
+      "target": 200,
+      "unit": "ms",
+      "status": "PASS"
+    },
+    "filterSort": {
+      "p50": 0.38,
+      "p95": 0.6,
+      "p99": 0.6,
+      "target": 100,
+      "unit": "ms",
+      "status": "PASS"
+    }
   },
   "memory": {
-    "baselineHeapMB": 3.88,
-    "scale10kHeapMB": 6.53,
-    "linearityCheck": "PASS",
-    "avgGrowthRatio": "1.55"
+    "baselineMemory": {
+      "value": 3.88,
+      "target": 50,
+      "unit": "MB",
+      "status": "PASS"
+    },
+    "peakMemory": {
+      "value": 6.53,
+      "target": 150,
+      "unit": "MB",
+      "status": "PASS"
+    },
+    "growthRatio": {
+      "value": "1.55",
+      "target": 2,
+      "unit": "x",
+      "status": "PASS"
+    },
+    "memoryLeak": {
+      "value": "0.84",
+      "target": 10,
+      "unit": "MB/hour",
+      "status": "PASS"
+    }
   },
-  "reports": [
-    "phase-4-latency-report.html",
-    "phase-4-memory-report.html",
-    "phase-4-optimization-summary.html"
-  ]
+  "allTargetsMet": true,
+  "reports": {
+    "latency": "phase-4-latency-report.html",
+    "memory": "phase-4-memory-report.html",
+    "regression": "phase-4-regression-report.html",
+    "optimization": "phase-4-optimization-summary.html"
+  }
 }
