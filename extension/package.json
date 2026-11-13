@@ -47,6 +47,8 @@
                              "onCommand:intentlens.enableModel",
                              "onCommand:intentlens.testModel",
                              "onCommand:intentlens.explainSelection",
+                             "onCommand:intentlens.configureAPI",
+                             "onCommand:intentlens.viewTokenUsage",
                              "onView:intentlens.restrictions"
                          ],
     "capabilities":  {
