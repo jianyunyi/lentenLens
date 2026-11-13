@@ -222,7 +222,7 @@
                         "viewsWelcome":  [
                                              {
                                                  "view":  "intentlens.rounds",
-                                                 "contents":  "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\n[开始记录](command:intentlens.startRound)\n[结束记录](command:intentlens.stopRound)\n[恢复未结束轮次](command:intentlens.resumeRound)\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)"
+                                                 "contents":  "打开并信任本地 Go 工作区。可手动记录轮次，也可通过 Skill / CLI 接入；Claude hooks 为可选适配。\n[⚙️ 配置 AI API](command:intentlens.configureAPI)\n[📊 查看 Token 消耗](command:intentlens.viewTokenUsage)\n[开始记录](command:intentlens.startRound)\n[结束记录](command:intentlens.stopRound)\n[恢复未结束轮次](command:intentlens.resumeRound)\n[取消当前轮次（保留源码）](command:intentlens.cancelRound)\n[预览可选 Claude Hook](command:intentlens.hooksConfig)\n[刷新](command:intentlens.refresh)"
                                              },
                                              {
                                                  "view":  "intentlens.callPath",
