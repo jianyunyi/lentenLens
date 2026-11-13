@@ -247,6 +247,16 @@
                                                          ],
                                       "view/title":  [
                                                          {
+                                                             "command":  "intentlens.configureAPI",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "config@1"
+                                                         },
+                                                         {
+                                                             "command":  "intentlens.viewTokenUsage",
+                                                             "when":  "view == intentlens.rounds",
+                                                             "group":  "config@2"
+                                                         },
+                                                         {
                                                              "command":  "intentlens.refresh",
                                                              "when":  "view == intentlens.rounds",
                                                              "group":  "navigation"
