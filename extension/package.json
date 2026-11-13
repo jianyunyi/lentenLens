@@ -2,7 +2,7 @@
     "name":  "intentlens",
     "displayName":  "IntentLens",
     "description":  "Go explanations tied to local source evidence, plus selected-code explanations.",
-    "version": "0.7.0",
+    "version":  "0.7.0",
     "publisher":  "intentlens",
     "license":  "MIT",
     "author":  {
@@ -176,6 +176,14 @@
                                              "command":  "intentlens.clearRestrictions",
                                              "title":  "IntentLens: 清除解析限制",
                                              "icon":  "$(clear-all)"
+                                         },
+                                         {
+                                             "command":  "intentlens.configureAPI",
+                                             "title":  "IntentLens: 配置 AI API 和选择模型"
+                                         },
+                                         {
+                                             "command":  "intentlens.viewTokenUsage",
+                                             "title":  "IntentLens: 查看 Token 消耗与预算"
                                          }
                                      ],
                         "viewsContainers":  {
