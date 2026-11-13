@@ -15,6 +15,7 @@ const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, 
 const { RestrictionTreeProvider } = require('./restrictionView');
 const { RestrictionDetailPanel } = require('./restrictionDetailPanel');
 const { AIConfigPanel } = require('./aiConfigPanel');
+const { TokenUsagePanel } = require('./tokenUsagePanel');
 
 
 function activate(context) {
@@ -685,6 +686,9 @@ function activate(context) {
   command('configureAPI', async () => {
     const folder = await folderFor(); if (!folder) return;
     AIConfigPanel.show(context, folder);
+  });
+  command('viewTokenUsage', () => {
+    TokenUsagePanel.show(context);
   });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;
