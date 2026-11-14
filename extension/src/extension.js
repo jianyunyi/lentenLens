@@ -707,6 +707,16 @@ function activate(context) {
     const config = await cli(folder, 'hooks-config');
     panel('IntentLens · Claude Code hooks', nonce => page('Hook 配置预览', `<p>手动合并以下配置到 Claude Code 设置；保留已有 hooks。扩展不会覆盖设置。</p><p>确保 Claude Code 进程的 PATH 中有 intentlens 可执行文件。VS Code 的 intentlens.binaryPath 不会更改终端 PATH。配置后在新的 Claude Code 会话中验证 UserPromptSubmit / Stop。</p><pre>${escapeHTML(JSON.stringify(config, null, 2))}</pre>`, nonce), async () => {});
   });
+  // 常驻入口：轮次视图一旦开始记录，viewsWelcome 会被树内容替换，
+  // 那里的「配置 AI API」按钮就消失了。状态栏始终可见，不依赖视图内容。
+  const apiBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 89);
+  if (apiBar) {
+    apiBar.text = '$(gear) IntentLens API';
+    apiBar.tooltip = 'IntentLens：配置 AI API 和选择模型';
+    apiBar.command = 'intentlens.configureAPI';
+    apiBar.show();
+    context.subscriptions.push(apiBar);
+  }
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => { clearInline(); refresh(); }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
   if (vscode.window.onDidChangeActiveTextEditor) context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => modelAnswerProvider?.refresh()));
   if (vscode.window.onDidChangeTextEditorSelection) context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => modelAnswerProvider?.refresh()));
