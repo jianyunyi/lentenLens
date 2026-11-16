@@ -19,7 +19,7 @@ function Verify([string]$Path, [bool]$ShouldPass) {
 try {
     Verify ([IO.Path]::GetFullPath($Vsix)) $true
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    foreach ($kind in @('source-tamper', 'missing-manifest', 'publisher-mismatch', 'id-mismatch', 'version-mismatch')) {
+    foreach ($kind in @('source-tamper', 'missing-manifest', 'publisher-mismatch', 'id-mismatch', 'version-mismatch', 'marketplace-ready-forgery')) {
         $copy = Join-Path $temporary "$kind.vsix"
         Copy-Item -LiteralPath $Vsix -Destination $copy
         $zip = [IO.Compression.ZipFile]::Open($copy, [IO.Compression.ZipArchiveMode]::Update)
@@ -35,6 +35,16 @@ try {
                 $entry = $zip.GetEntry('extension/release-manifest.json')
                 if ($null -eq $entry) { throw 'Candidate missing release manifest.' }
                 $entry.Delete()
+            } elseif ($kind -eq 'marketplace-ready-forgery') {
+                $entry = $zip.GetEntry('extension/release-manifest.json')
+                if ($null -eq $entry) { throw 'Candidate missing release manifest.' }
+                $reader = [IO.StreamReader]::new($entry.Open())
+                try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+                $manifest.marketplaceReady = $true
+                $entry.Delete()
+                $entry = $zip.CreateEntry('extension/release-manifest.json')
+                $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
+                try { $writer.Write(($manifest | ConvertTo-Json -Depth 50)) } finally { $writer.Dispose() }
             } else {
                 $entry = $zip.GetEntry('extension.vsixmanifest')
                 if ($null -eq $entry) { throw 'Candidate missing VSIX manifest.' }
@@ -56,7 +66,7 @@ try {
         } finally { $zip.Dispose() }
         Verify $copy $false
     }
-    Write-Output 'PASS: candidate integrity, source/manifest tamper rejection, and VSIX identity mismatch rejection.'
+    Write-Output 'PASS: candidate integrity, source/manifest tamper rejection, Marketplace readiness forgery rejection, and VSIX identity mismatch rejection.'
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
 }

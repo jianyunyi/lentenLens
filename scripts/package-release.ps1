@@ -210,10 +210,9 @@ try {
         }
     })
 
-    $blockers = @()
-    if ([string]::IsNullOrWhiteSpace($extensionPackage.publisher) -or $extensionPackage.publisher -eq 'intentlens-local') {
-        $blockers += '公开发布到 VS Code Marketplace 前，由项目所有者决定并填写正式的 Marketplace publisher ID。'
-    }
+    # A publisher string is package metadata, not proof that the project owns
+    # that Marketplace identity. Local VSIX builds never attest ownership.
+    $blockers = @('publisher_ownership_unverified')
     $manifest = [ordered]@{
         schema = 2
         channel = 'manual-vsix'
@@ -222,7 +221,8 @@ try {
         publisher = $extensionPackage.publisher
         license = $extensionPackage.license
         target = "$($config.target.goos)/$($config.target.goarch)"
-        marketplaceReady = ($blockers.Count -eq 0)
+        marketplacePublisherVerified = $false
+        marketplaceReady = $false
         blockers = @($blockers)
         source = [ordered]@{
             goModVersion = $goModMatch.Groups[1].Value

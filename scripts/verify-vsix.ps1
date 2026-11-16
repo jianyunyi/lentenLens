@@ -70,8 +70,12 @@ try {
     if ([string]::IsNullOrWhiteSpace($manifest.publisher) -or $manifest.license -ne 'MIT') {
         throw 'Release manifest publisher or license is missing or unsupported.'
     }
-    if ($null -eq $manifest.marketplaceReady -or $null -eq $manifest.blockers) {
+    if ($null -eq $manifest.marketplacePublisherVerified -or $null -eq $manifest.marketplaceReady -or $null -eq $manifest.blockers) {
         throw 'Release manifest is missing Marketplace readiness fields.'
+    }
+    if ($manifest.marketplacePublisherVerified -ne $false -or $manifest.marketplaceReady -ne $false -or
+        @($manifest.blockers) -notcontains 'publisher_ownership_unverified') {
+        throw 'Manual VSIX manifests cannot attest Marketplace publisher ownership or readiness.'
     }
     if ($manifest.target -ne 'windows/amd64') { throw "Unexpected binary target in manifest: $($manifest.target)" }
     if (-not $entryMap.ContainsKey('extension.vsixmanifest')) { throw 'VSIX is missing extension.vsixmanifest.' }
@@ -159,8 +163,10 @@ try {
         foreach ($record in $manifest.files) {
             $relative = ([string]$record.path).Replace('/', '\')
             if ($relative -ieq 'bin\intentlens.exe') { continue }
-            $sourceRelative = if ($relative -ieq 'license.txt') { 'LICENSE' } else { $relative }
-            $sourcePath = Join-Path $sourceRoot $sourceRelative
+            $sourcePath = Join-Path $sourceRoot $relative
+            if ($relative -ieq 'license.txt' -and -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                $sourcePath = Join-Path $sourceRoot 'LICENSE'
+            }
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
                 $errors.Add("Source file missing: $relative")
                 continue
