@@ -7,6 +7,6 @@
     "node": ">=22.0.0"
   },
   "devDependencies": {
-    "@vscode/vsce": "4.1.0"
+    "@vscode/vsce": "4.1.1"
   }
 }
