@@ -6,8 +6,8 @@ IntentLens is currently in active development. Security updates are provided for
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.5.x   | :white_check_mark: |
-| < 0.5.0 | :x:                |
+| 0.7.x   | :white_check_mark: |
+| < 0.7.0 | :x:                |
 
 ## Security Model
 
@@ -152,5 +152,5 @@ For security-related questions that are not vulnerability reports, please:
 
 ---
 
-**Last Updated**: 2026-10-30  
-**Version**: 0.5.2
+**Last Updated**: 2026-11-16
+**Version**: 0.7.1 (extension manifest version)

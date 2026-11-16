@@ -8,8 +8,8 @@
 class TaskTreeItem {
   constructor(vscode, task, isExpanded = false) {
     this.task = task;
-    this.label = \\ \\;
-    this.description = \优先级: \ · 进度: \%\;
+    this.label = `${this.getStatusIcon(task.status)} ${task.name}`;
+    this.description = `优先级: ${task.priority} · 进度: ${task.progress}%`;
     this.collapsibleState = isExpanded ? 
       vscode.TreeItemCollapsibleState.Expanded : 
       vscode.TreeItemCollapsibleState.Collapsed;
@@ -45,24 +45,24 @@ class TaskTreeItem {
 
   buildTooltip(task) {
     const lines = [
-      \📋 Task: \\,
-      \优先级: \\,
-      \状态: \\,
-      \进度: \%\,
+      `📋 Task: ${task.name}`,
+      `优先级: ${task.priority}`,
+      `状态: ${task.status}`,
+      `进度: ${task.progress}%`,
     ];
     
     if (task.executionTime) {
-      lines.push(\执行时间: \ms\);
+      lines.push(`执行时间: ${task.executionTime}ms`);
     }
     if (task.memoryUsage) {
-      lines.push(\内存: \MB\);
+      lines.push(`内存: ${task.memoryUsage}MB`);
     }
     if (task.description) {
       lines.push('---');
       lines.push(task.description);
     }
     
-    return new vscode.MarkdownString(lines.join('  \\n'));
+    return new vscode.MarkdownString(lines.join('  \n'));
   }
 }
 
@@ -120,7 +120,7 @@ class TaskTreeProvider {
     // 添加进度条的可视化
     if (element.task.status === 'running') {
       const progressBar = this.buildProgressBar(element.task.progress);
-      treeItem.label += \ \\;
+      treeItem.label += ` ${progressBar}`;
     }
     
     return treeItem;
@@ -166,7 +166,7 @@ class TaskTreeProvider {
             new TaskDetailsItem(
               this.vscode,
               '⏱ 执行时间',
-              \\ms\,
+              `${task.executionTime}ms`,
               'clock'
             )
           );
@@ -176,7 +176,7 @@ class TaskTreeProvider {
             new TaskDetailsItem(
               this.vscode,
               '💾 内存',
-              \\MB\,
+              `${task.memoryUsage}MB`,
               'memory'
             )
           );
@@ -200,7 +200,7 @@ class TaskTreeProvider {
           new TaskDetailsItem(
             this.vscode,
             '📋 日志',
-            \\ 条\,
+            `${task.logs.length} 条`,
             'output'
           )
         );

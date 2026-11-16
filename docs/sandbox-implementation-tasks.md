@@ -1,8 +1,9 @@
 # 沙箱实现任务清单
 
-**状态**: 设计完成，待实现  
-**优先级**: P0 (阻断问题)  
-**预计完成**: 2026-12-15 (Linux MVP) / 2027-01-15 (完整版本)
+**状态**: 历史跨平台任务清单；现由 [S6 Windows 优先设计](production/sandbox-execution-design.md) 取代，尚未实现
+**优先级**: P0（阻断题目验证与评分）
+
+本清单原定 Linux MVP 优先级已取消。当前发行物是 Windows x64 VSIX，先实现并验证 Windows AppContainer；Linux/macOS 在另行设计和验证前保持 fail-closed。预计日期不再有效。
 
 ---
 

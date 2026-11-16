@@ -120,7 +120,7 @@ class EnhancedCallPathProvider {
    */
   setCallTree(callTreeData) {
     this._callTree = new CallPathNode(this.vscode, callTreeData);
-    this._flattenTree();
+    this._flattenedNodes = this._flattenTree();
     this.refresh();
   }
 

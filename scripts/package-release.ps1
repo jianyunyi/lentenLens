@@ -43,6 +43,8 @@ if ($LASTEXITCODE -ne 0) { throw "Unable to read the pinned npm lock file: $lock
 $lockInfo = $lockInfoJson | ConvertFrom-Json
 $extensionPackagePath = Join-Path $extensionRoot 'package.json'
 $extensionPackage = Get-Content -LiteralPath $extensionPackagePath -Raw | ConvertFrom-Json
+$extensionLock = Get-Content -LiteralPath (Join-Path $extensionRoot 'package-lock.json') -Raw | ConvertFrom-Json -AsHashtable
+$extensionLockRoot = $extensionLock.packages['']
 
 if ($Target -ne $config.target.vscode) {
     throw "Target mismatch: configured $($config.target.vscode), requested $Target."
@@ -56,6 +58,20 @@ if ($lockedVsce -ne $config.vsceVersion) {
 }
 if ($extensionPackage.version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Unsupported extension version: $($extensionPackage.version)"
+}
+if ($extensionLock['name'] -ne $extensionPackage.name -or $extensionLock.version -ne $extensionPackage.version -or
+    $extensionLockRoot.name -ne $extensionPackage.name -or $extensionLockRoot.version -ne $extensionPackage.version -or
+    $extensionPackage.license -ne $extensionLockRoot.license) {
+    throw 'extension/package-lock.json name, version, or license does not match extension/package.json.'
+}
+if ([string]::IsNullOrWhiteSpace($extensionPackage.publisher) -or
+    $extensionPackage.license -ne 'MIT') {
+    throw 'The current local VSIX release contract requires a publisher and the MIT license.'
+}
+$licensePath = Join-Path $repoRoot 'LICENSE'
+if (-not (Test-Path -LiteralPath $licensePath -PathType Leaf)) { throw 'Root LICENSE file is missing.' }
+if ((Get-Content -LiteralPath $licensePath -Raw) -notmatch '(?m)^MIT License\s*$') {
+    throw 'The current local VSIX release contract requires the root MIT License text.'
 }
 
 $goMod = Get-Content -LiteralPath (Join-Path $repoRoot 'go.mod') -Raw
@@ -150,6 +166,13 @@ try {
         throw "Built CLI does not report the expected Go version/target:`n$binaryInfo"
     }
 
+    # vsce normalizes LICENSE to LICENSE.txt in the archive. Normalize staging
+    # first so the signed inventory uses the actual archive path.
+    $stagedLicense = Join-Path $stageRoot 'LICENSE'
+    if (Test-Path -LiteralPath $stagedLicense -PathType Leaf) {
+        Move-Item -LiteralPath $stagedLicense -Destination (Join-Path $stageRoot 'LICENSE.txt')
+    }
+
     $goFiles = @(
         Get-Item -LiteralPath (Join-Path $repoRoot 'go.mod')
         Get-ChildItem -LiteralPath (Join-Path $repoRoot 'cmd') -Recurse -File -Filter '*.go'
@@ -171,6 +194,11 @@ try {
                 -not $relative.StartsWith('node_modules/') -and
                 $relative -ne 'package-lock.json' -and
                 $relative -ne '.ds_store' -and
+                $relative -ne 'error-analysis.md' -and
+                $relative -ne 'test-errors.log' -and
+                $relative -ne 'src/extension-part1.txt' -and
+                -not $relative.EndsWith('.backup') -and
+                -not $relative.EndsWith('.phase1') -and
                 -not $relative.EndsWith('.vsix')
             } |
             Sort-Object { Get-RelativePath $stageRoot $_.FullName }
@@ -184,18 +212,17 @@ try {
 
     $blockers = @()
     if ([string]::IsNullOrWhiteSpace($extensionPackage.publisher) -or $extensionPackage.publisher -eq 'intentlens-local') {
-        $blockers += '发布前由项目所有者决定并填写正式的 VS Code Marketplace publisher ID。'
+        $blockers += '公开发布到 VS Code Marketplace 前，由项目所有者决定并填写正式的 Marketplace publisher ID。'
     }
-    if ($extensionPackage.license -eq 'UNLICENSED' -or -not (Test-Path -LiteralPath (Join-Path $stageRoot 'LICENSE') -PathType Leaf)) {
-        $blockers += '发布前由项目所有者选择合法许可证，并在清单与 LICENSE 文件中一致体现。'
-    }
-
     $manifest = [ordered]@{
-        schema = 1
+        schema = 2
+        channel = 'manual-vsix'
         package = $extensionPackage.name
         version = $extensionPackage.version
+        publisher = $extensionPackage.publisher
+        license = $extensionPackage.license
         target = "$($config.target.goos)/$($config.target.goarch)"
-        distributionReady = ($blockers.Count -eq 0)
+        marketplaceReady = ($blockers.Count -eq 0)
         blockers = @($blockers)
         source = [ordered]@{
             goModVersion = $goModMatch.Groups[1].Value
@@ -235,8 +262,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "VSIX integrity verification failed with exit code $LASTEXITCODE." }
 
     Write-Output "Candidate VSIX: $vsixPath"
-    if (-not $manifest.distributionReady) {
-        Write-Warning 'Package content passed integrity checks, but the manifest records unresolved owner decisions; this package is not cleared for public distribution.'
+    if (-not $manifest.marketplaceReady) {
+        Write-Warning '本地 VSIX 内容完整性检查通过；manifest 中仍记录公开分发前的条件，因此该包未获准用于 Marketplace 发布。'
     }
 }
 catch {

@@ -291,3 +291,4 @@ class TaskBoundaryDecorator {
 }
 
 module.exports = TaskBoundaryDecorator;
+module.exports.TaskBoundaryDecorator = TaskBoundaryDecorator;

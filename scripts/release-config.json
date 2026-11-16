@@ -8,5 +8,5 @@
   "goVersion": "1.26.3",
   "goModVersion": "1.25.0",
   "nodeMajor": 22,
-  "vsceVersion": "4.0.0"
+  "vsceVersion": "4.1.0"
 }

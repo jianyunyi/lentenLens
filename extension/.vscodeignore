@@ -3,3 +3,8 @@ test/**
 node_modules/**
 package-lock.json
 .DS_Store
+error-analysis.md
+test-errors.log
+src/*.backup
+src/*.phase1
+src/extension-part1.txt

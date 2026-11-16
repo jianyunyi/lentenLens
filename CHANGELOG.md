@@ -1,3 +1,16 @@
+## [0.7.1] - 2026-11-16
+
+### Fixed
+- Aligned the extension manifest, npm lockfile, README, security policy, and release instructions on version 0.7.1, publisher `intentlens-local`, and the MIT license.
+- Clarified that this build is distributed as a manually installed VSIX; no Marketplace publisher account has been selected for this Go-focused project.
+- Documented that exercise validation and scoring remain disabled until an OS sandbox is implemented and adversarially verified.
+
+### Security
+- Kept exercise execution fail-closed; the existing platform sandbox implementations remain incomplete and must not be treated as isolation boundaries.
+- Removed the stale safe-mode installer from deliverable paths; its archived local copy is excluded from Git.
+- Restricted the release workflow to manually generated, short-lived VSIX candidate artifacts; it no longer creates GitHub Releases or publishes to the Marketplace.
+- Added release checks that reject package/lockfile/license mismatches and verify publisher and license metadata inside the VSIX.
+
 ## [0.6.4] - 2026-11-12
 
 ### Fixed

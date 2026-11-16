@@ -65,9 +65,35 @@ try {
     $manifestKey = 'extension/release-manifest.json'
     if (-not $entryMap.ContainsKey($manifestKey)) { throw 'VSIX is missing extension/release-manifest.json.' }
     $manifest = Read-ZipText $entryMap[$manifestKey] | ConvertFrom-Json
-    if ($manifest.schema -ne 1) { throw "Unsupported release manifest schema: $($manifest.schema)" }
+    if ($manifest.schema -ne 2) { throw "Unsupported release manifest schema: $($manifest.schema)" }
+    if ($manifest.channel -ne 'manual-vsix') { throw "Unexpected release channel: $($manifest.channel)" }
+    if ([string]::IsNullOrWhiteSpace($manifest.publisher) -or $manifest.license -ne 'MIT') {
+        throw 'Release manifest publisher or license is missing or unsupported.'
+    }
+    if ($null -eq $manifest.marketplaceReady -or $null -eq $manifest.blockers) {
+        throw 'Release manifest is missing Marketplace readiness fields.'
+    }
     if ($manifest.target -ne 'windows/amd64') { throw "Unexpected binary target in manifest: $($manifest.target)" }
     if (-not $entryMap.ContainsKey('extension.vsixmanifest')) { throw 'VSIX is missing extension.vsixmanifest.' }
+
+    $vsixManifestText = Read-ZipText $entryMap['extension.vsixmanifest']
+    $xmlSettings = [System.Xml.XmlReaderSettings]::new()
+    $xmlSettings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+    $xmlSettings.XmlResolver = $null
+    $xmlStringReader = [System.IO.StringReader]::new($vsixManifestText)
+    $xmlReader = $null
+    try {
+        $xmlReader = [System.Xml.XmlReader]::Create($xmlStringReader, $xmlSettings)
+        $vsixXml = [System.Xml.XmlDocument]::new()
+        $vsixXml.XmlResolver = $null
+        $vsixXml.Load($xmlReader)
+    }
+    finally {
+        if ($xmlReader) { $xmlReader.Dispose() }
+        $xmlStringReader.Dispose()
+    }
+    $identity = $vsixXml.SelectSingleNode("/*[local-name()='PackageManifest']/*[local-name()='Metadata']/*[local-name()='Identity']")
+    if (-not $identity) { throw 'VSIX manifest is missing Metadata/Identity.' }
 
     $expectedPaths = [System.Collections.Generic.List[string]]::new()
     foreach ($record in $manifest.files) {
@@ -105,13 +131,36 @@ try {
     if ($package.name -ne $manifest.package) {
         $errors.Add("Package name $($package.name) does not match manifest $($manifest.package).")
     }
+    if ($package.publisher -ne $manifest.publisher) {
+        $errors.Add('Package publisher does not match the release manifest.')
+    }
+    if ($package.license -ne $manifest.license) {
+        $errors.Add('Package license does not match the release manifest.')
+    }
+    if ($identity.GetAttribute('Publisher') -cne $package.publisher) {
+        $errors.Add('VSIX manifest publisher does not match package.json.')
+    }
+    if ($identity.GetAttribute('Id') -cne $package.name) {
+        $errors.Add('VSIX manifest extension ID does not match package.json name.')
+    }
+    if ($identity.GetAttribute('Version') -cne $package.version) {
+        $errors.Add('VSIX manifest version does not match package.json.')
+    }
+    if ($package.license -eq 'MIT') {
+        if (-not $entryMap.ContainsKey('extension/license.txt')) {
+            $errors.Add('MIT package is missing extension/LICENSE.txt from the VSIX.')
+        } elseif ((Read-ZipText $entryMap['extension/license.txt']) -notmatch '(?m)^MIT License\s*$') {
+            $errors.Add('VSIX package declares MIT but does not contain the MIT License text.')
+        }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($SourceExtension)) {
         $sourceRoot = [System.IO.Path]::GetFullPath($SourceExtension)
         foreach ($record in $manifest.files) {
             $relative = ([string]$record.path).Replace('/', '\')
             if ($relative -ieq 'bin\intentlens.exe') { continue }
-            $sourcePath = Join-Path $sourceRoot $relative
+            $sourceRelative = if ($relative -ieq 'license.txt') { 'LICENSE' } else { $relative }
+            $sourcePath = Join-Path $sourceRoot $sourceRelative
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
                 $errors.Add("Source file missing: $relative")
                 continue
@@ -162,7 +211,10 @@ try {
         goSourcesVerified = $goSourcesVerified
         goVersion = $manifest.source.goVersion
         vsceVersion = $manifest.packaging.vsceVersion
-        distributionReady = [bool]$manifest.distributionReady
+        channel = $manifest.channel
+        publisher = $manifest.publisher
+        license = $manifest.license
+        marketplaceReady = [bool]$manifest.marketplaceReady
         blockers = @($manifest.blockers)
         errors = @($errors.ToArray())
     }

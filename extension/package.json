@@ -2,8 +2,8 @@
     "name":  "intentlens",
     "displayName":  "IntentLens",
     "description":  "Go explanations tied to local source evidence, plus selected-code explanations.",
-    "version":  "0.7.0",
-    "publisher":  "intentlens",
+    "version":  "0.7.1",
+    "publisher":  "intentlens-local",
     "license":  "MIT",
     "author":  {
                    "name":  "IntentLens Contributors",
@@ -62,7 +62,7 @@
                      },
     "scripts":  {
                     "test":  "node --test test/*.test.js",
-                    "check":  "node --check src/core.js \u0026\u0026 node --check src/coverage.js \u0026\u0026 node --check src/extension.js \u0026\u0026 node --check src/callpath.js \u0026\u0026 node --check src/sidebar.js \u0026\u0026 node --check src/sessions.js \u0026\u0026 node --check src/recovery.js \u0026\u0026 node --check src/exercises.js \u0026\u0026 node --check src/inline.js \u0026\u0026 node --check src/providers.js",
+                    "check":  "node --check src/core.js \u0026\u0026 node --check src/coverage.js \u0026\u0026 node --check src/extension.js \u0026\u0026 node --check src/callpath.js \u0026\u0026 node --check src/sidebar.js \u0026\u0026 node --check src/sessions.js \u0026\u0026 node --check src/recovery.js \u0026\u0026 node --check src/exercises.js \u0026\u0026 node --check src/inline.js \u0026\u0026 node --check src/providers.js \u0026\u0026 node --check src/taskpanel.js",
                     "bench:all":  "node test/profiling/run-benchmarks.js",
                     "bench:task-panel":  "node test/profiling/run-benchmarks.js task-panel",
                     "bench:boundary":  "node test/profiling/run-benchmarks.js boundary",
