@@ -4,6 +4,7 @@
  * Task Management Panel
  * 创建、编辑、删除任务，管理依赖关系和执行历史
  */
+const { randomUUID } = require('node:crypto');
 
 class TaskManagementPanel {
   constructor(vscode, extensionContext) {
@@ -337,7 +338,7 @@ class TaskManagementPanel {
    * 创建任务
    */
   createTask(data) {
-    const taskId = 'task_' + Date.now();
+    const taskId = `task_${randomUUID()}`;
     const task = {
       id: taskId,
       name: data.name,

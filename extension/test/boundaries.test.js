@@ -33,7 +33,7 @@ const mockVscode = {
   },
 };
 
-test('TaskBoundaryDecorator: setTaskBoundaries() 应该为编辑器设置任务边框', () => {
+test('TaskBoundaryDecorator: setTaskBoundaries() 应该为编辑器设置任务边框', async () => {
   const { TaskBoundaryDecorator } = require('../src/boundaries');
   const decorator = new TaskBoundaryDecorator(mockVscode);
   
@@ -59,12 +59,13 @@ test('TaskBoundaryDecorator: setTaskBoundaries() 应该为编辑器设置任务�
   ];
   
   decorator.setTaskBoundaries(mockEditor, tasks);
+  await new Promise(resolve => setTimeout(resolve, decorator._debounceDelay + 10));
   
   assert.strictEqual(decorator._boundaries.length, 1);
   assert.strictEqual(decorator._boundaries[0].taskId, 'task_1');
 });
 
-test('TaskBoundaryDecorator: setTaskBoundaries() 应该处理多个任务边框', () => {
+test('TaskBoundaryDecorator: setTaskBoundaries() 应该处理多个任务边框', async () => {
   const { TaskBoundaryDecorator } = require('../src/boundaries');
   const decorator = new TaskBoundaryDecorator(mockVscode);
   
@@ -81,6 +82,7 @@ test('TaskBoundaryDecorator: setTaskBoundaries() 应该处理多个任务边框'
   ];
   
   decorator.setTaskBoundaries(mockEditor, tasks);
+  await new Promise(resolve => setTimeout(resolve, decorator._debounceDelay + 10));
   
   assert.strictEqual(decorator._boundaries.length, 3);
 });
