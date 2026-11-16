@@ -687,8 +687,11 @@ function activate(context) {
     const folder = await folderFor(); if (!folder) return;
     AIConfigPanel.show(context, folder);
   });
-  command('viewTokenUsage', () => {
-    TokenUsagePanel.show(context);
+  command('viewTokenUsage', async () => {
+    const activeUri = vscode.window.activeTextEditor?.document?.uri;
+    const folder = await folderFor(activeUri);
+    if (!folder) return;
+    TokenUsagePanel.show(context, () => cli(folder, 'status', {}));
   });
   command('pauseModel', async () => {
     const folder = await folderFor(); if (!folder) return;
