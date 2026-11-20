@@ -62,6 +62,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	root := flags.String("root", ".", "project root")
 	state := flags.String("state", "", "external local state directory")
 	roundID := flags.String("round", "", "round id")
+	editorModelTarget := flags.String("editor-model-target", "", "VS Code credential's bound provider and base URL")
 	if e := flags.Parse(args[1:]); e != nil {
 		return fail(out, e)
 	}
@@ -87,6 +88,13 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	a, e := openApp(*root, *state)
 	if e != nil {
 		return fail(out, e)
+	}
+	if *editorModelTarget != "" {
+		var target app.EditorModelTarget
+		if err := json.Unmarshal([]byte(*editorModelTarget), &target); err != nil || target.Provider == "" || target.BaseURL == "" {
+			return fail(out, errors.New("VS Code 模型密钥绑定无效，请重新保存 API Key"))
+		}
+		a.EditorModelTarget = &target
 	}
 	var result any
 	switch command {

@@ -67,8 +67,9 @@ func (a *App) exerciseModel(ctx context.Context, key, prompt string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if key == "" {
-		key = os.Getenv(cfg.Model.APIKeyEnv)
+	key, err = a.modelAPIKey(cfg.Model, key)
+	if err != nil {
+		return "", err
 	}
 	if !cfg.Model.Enabled || strings.TrimSpace(key) == "" {
 		return "", errors.New("请先确认项目模型发送范围并启用分析")

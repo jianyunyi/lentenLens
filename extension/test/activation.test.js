@@ -4,8 +4,9 @@ const Module = require('node:module');
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('../src/core');
+const { configureModel, presets, workspaceSecretKey, SECURE_API_KEY_ENV } = require('../src/providers');
 
-test('extension registers testModel in manifest, activates it, and dispatches to the matching CLI command', async () => {
+test('extension registers testModel in manifest, activates it, and dispatches to the matching CLI command', async t => {
   const file = path.join(__dirname, '../src/extension.js');
   assert.ok(fs.existsSync(file), 'extension entry exists');
   const registrations = [], commands = new Map();
@@ -18,6 +19,26 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   const state = new Map();
   const workspaceState = { get: key => state.get(key), update: (key, value) => { if (value === undefined) state.delete(key); else state.set(key, value); return Promise.resolve(); } };
   const folder = { name: 'fixture', uri: { scheme: 'file', fsPath: '/fixture/project' } };
+  const baseURL = 'https://api.fixture/v1';
+  const secretName = workspaceSecretKey(folder.uri.fsPath);
+  const stored = new Map([[secretName, 'legacy-key']]);
+  const secrets = {
+    get: async name => stored.get(name),
+    store: async (name, value) => { stored.set(name, value); },
+    delete: async name => { stored.delete(name); },
+  };
+  let model = { enabled: true, provider: 'openai-compatible', base_url: baseURL, model: 'returned-model-id', api_key_env: SECURE_API_KEY_ENV };
+  const status = () => ({ settings: { model: { ...model } }, usage: {} });
+  const save = (base, key) => configureModel({ window: {
+    showQuickPick: async (items, { title }) => title.includes('厂商') ? presets.at(-1) : items[0],
+    showInputBox: async ({ title }) => title.includes('基础地址') ? base : title.includes('API Key') ? key : '4096',
+    showWarningMessage: async (_text, _options, action) => action,
+    showInformationMessage() {},
+  } }, folder, status(), async (_folder, command, input) => {
+    if (command === 'status') return status();
+    assert.equal(command, 'configure');
+    model = input.settings.model;
+  }, secrets, async () => new Response(JSON.stringify({ data: [{ id: 'returned-model-id' }] })));
   const vscode = {
     workspace: { isTrusted: false, workspaceFolders: [], getWorkspaceFolder: uri => uri?.fsPath?.startsWith(folder.uri.fsPath) ? folder : undefined, getConfiguration: () => ({ get: () => '' }), createFileSystemWatcher: () => ({ ...disposable, onDidCreate: () => disposable, onDidChange: () => disposable, onDidDelete: () => disposable }), onDidChangeTextDocument: () => ({ dispose() {} }), onDidGrantWorkspaceTrust: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable, workspaceState },
     window: { activeTextEditor: undefined, createTreeView: name => { registrations.push(name); return disposable; }, createWebviewPanel: () => { const view = { webview: { html: '', onDidReceiveMessage() {} }, onDidDispose() {}, dispose() {} }; webviews.push(view); return view; }, withProgress: (_options, task) => task(), showErrorMessage: message => errors.push(message), showWarningMessage: async () => '发送此模型的测试请求', showInformationMessage: message => infos.push(message) },
@@ -30,7 +51,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   const originalRunCLI = core.runCLI;
   core.runCLI = async (_binary, _root, command, input, options) => {
     cliCalls.push({ command, input, options });
-    if (command === 'status') return { settings: { model: { enabled: true, provider: 'openai-compatible', base_url: 'https://api.fixture/v1', model: 'returned-model-id', api_key_env: 'INTENTLENS_API_KEY' } }, usage: {} };
+    if (command === 'status') return status();
     if (command === 'test-model') return modelResult;
     if (command === 'explain-selection') {
       if (changeDiagnosticsDuringRequest) {
@@ -47,7 +68,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   Module._load = function (id, ...args) { return id === 'vscode' ? vscode : original.call(this, id, ...args); };
   try {
     delete require.cache[require.resolve(file)];
-    require(file).activate({ subscriptions: [], extensionPath: path.dirname(path.dirname(file)), workspaceState, secrets: { get: async () => 'fixture-api-key' } });
+    require(file).activate({ subscriptions: [], extensionPath: path.dirname(path.dirname(file)), workspaceState, secrets });
     for (const name of ['inspect', 'explainSelection', 'enableModel', 'testModel', 'pauseModel', 'hooksConfig', 'startRound', 'stopRound', 'resumeRound', 'cancelRound', 'callPath', 'refreshCallPath', 'refreshModelAnswer', 'openModelEvidence']) {
       assert.ok(commands.has(`intentlens.${name}`), `${name} command is registered`);
     }
@@ -75,10 +96,64 @@ test('extension registers testModel in manifest, activates it, and dispatches to
     assert.ok(registrations.some(x => x.language === 'go' && x.scheme === 'file'));
     vscode.workspace.isTrusted = true;
     vscode.workspace.workspaceFolders = [folder];
+    const assertNoModelCall = async error => {
+      const before = cliCalls.length;
+      await commands.get('intentlens.testModel')();
+      assert.match(errors.pop(), error);
+      assert.ok(cliCalls.splice(before).every(call => call.command === 'status'));
+    };
+    await t.test('a legacy key without binding never reaches the model CLI', async () => {
+      await assertNoModelCall(/未绑定.*重新保存 API Key/);
+    });
+    assert.equal(await save(baseURL, 'fixture-api-key'), true);
+    await t.test('changing the provider, Base URL, or key without rebinding blocks dispatch', async () => {
+      const savedModel = model;
+      try {
+        for (const change of [{ provider: 'openai' }, { base_url: 'https://new.fixture/v1' }]) {
+          model = { ...savedModel, ...change };
+          await assertNoModelCall(/不匹配.*重新保存 API Key/);
+        }
+        model = savedModel;
+        stored.set(secretName, 'key-written-without-binding');
+        await assertNoModelCall(/不匹配.*重新保存 API Key/);
+      } finally {
+        model = savedModel;
+        stored.set(secretName, 'fixture-api-key');
+      }
+    });
+    await t.test('model dispatch is blocked between the config commit and the secret write', async () => {
+      let writing, release;
+      const entered = new Promise(resolve => { writing = resolve; });
+      const resume = new Promise(resolve => { release = resolve; });
+      const originalStore = secrets.store;
+      secrets.store = async (name, value) => {
+        if (name === secretName) {
+          writing();
+          await resume;
+        }
+        await originalStore(name, value);
+      };
+      const newURL = 'https://new.fixture/v1';
+      const saving = save(newURL, 'new-fixture-key');
+      try {
+        await entered;
+        assert.equal(model.base_url, newURL);
+        assert.equal(stored.get(secretName), 'fixture-api-key');
+        await assertNoModelCall(/正在保存.*完成配置保存/);
+      } finally {
+        release();
+        await saving;
+        secrets.store = originalStore;
+      }
+      assert.equal(await save(baseURL, 'fixture-api-key'), true);
+    });
     await commands.get('intentlens.testModel')();
-    assert.deepEqual(cliCalls.map(call => call.command), ['status', 'test-model']);
-    assert.deepEqual(cliCalls[1].input, {});
-    assert.equal(cliCalls[1].options.env.INTENTLENS_API_KEY, 'fixture-api-key');
+    assert.deepEqual(cliCalls.map(call => call.command), ['status', 'status', 'test-model']);
+    const probe = cliCalls.at(-1);
+    assert.deepEqual(probe.input, {});
+    assert.equal(probe.options.env.INTENTLENS_API_KEY, 'fixture-api-key');
+    assert.equal(probe.options.args[0], '--editor-model-target');
+    assert.deepEqual(JSON.parse(probe.options.args[1]), { provider: 'openai-compatible', base_url: baseURL });
     assert.deepEqual(errors, []);
     assert.match(infos[0], /返回完整且符合固定格式/);
     modelResult = { tested: false, actual_tokens: 9, fallback: false, project_data_sent: false };

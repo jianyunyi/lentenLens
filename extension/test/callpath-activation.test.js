@@ -8,7 +8,7 @@ const path = require('node:path');
 
 function setup() {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-ui-oracle-'));
-  const commands = new Map(), providers = new Map(), errors = [], calls = [], opened = [], callbacks = {};
+  const commands = new Map(), providers = new Map(), errors = [], calls = [], opened = [], callbacks = {}, warnings = [], panels = [];
   const disposable = () => ({ dispose() {} });
   const uri = file => ({ scheme:'file', fsPath:file, toString:()=>`file://${file}` });
   const folders = ['A','B'].map(name => { const root=path.join(temporary,name); fs.mkdirSync(root); return {name,uri:uri(root)}; });
@@ -31,26 +31,57 @@ function setup() {
   const vscode = {
     workspace:{isTrusted:true,workspaceFolders:folders,textDocuments:documents,
       getWorkspaceFolder:value=>folders.find(f=>value.fsPath.startsWith(f.uri.fsPath+path.sep)),
-      getConfiguration:()=>({get:()=>''}),
+      getConfiguration:()=>({get:(key,fallback)=>fallback ?? ''}),
       openTextDocument:async value=>{opened.push(value.fsPath);return documents.find(d=>d.uri.fsPath===value.fsPath);},
       createFileSystemWatcher:glob=>({dispose(){},onDidCreate:fn=>{callbacks[glob+'create']=fn;return disposable();},onDidChange:fn=>{callbacks[glob+'change']=fn;return disposable();},onDidDelete:fn=>{callbacks[glob+'delete']=fn;return disposable();}}),
       onDidChangeTextDocument:fn=>{callbacks.text=fn;return disposable();},onDidGrantWorkspaceTrust:()=>disposable(),onDidSaveTextDocument:()=>disposable(),onDidChangeWorkspaceFolders:()=>disposable(),
     },
-    window:{activeTextEditor:editor(documents[0]),createTreeView:(id,options)=>{providers.set(id,options.treeDataProvider);return disposable();},showErrorMessage:message=>errors.push(message),showTextDocument:async doc=>{const e=editor(doc);vscode.window.activeTextEditor=e;return e;}},
+    window:{activeTextEditor:editor(documents[0]),createTreeView:(id,options)=>{providers.set(id,options.treeDataProvider);return disposable();},showErrorMessage:message=>errors.push(message),showTextDocument:async doc=>{const e=editor(doc);vscode.window.activeTextEditor=e;return e;},
+      showWarningMessage:async (...args)=>{warnings.push(args);},
+      createWebviewPanel:()=>{const panel={webview:{html:'',onDidReceiveMessage:()=>disposable()},onDidDispose:()=>disposable()};panels.push(panel);return panel;},
+    },
     commands:{registerCommand:(id,fn)=>{commands.set(id,fn);return disposable();},executeCommand:async()=>{}},
     languages:{registerCodeLensProvider:()=>disposable()},
     EventEmitter:class{event=()=>{};fire(){};dispose(){}},TreeItem:class{constructor(label,collapsibleState){this.label=label;this.collapsibleState=collapsibleState;}},TreeItemCollapsibleState:{None:0,Collapsed:1},
-    Uri:{file:uri},Position:class{constructor(line,character){this.line=line;this.character=character;}},Selection:class{constructor(start,end){this.start=start;this.end=end;}},Range:class{},TextEditorRevealType:{InCenter:0},
+    Uri:{file:uri},Position:class{constructor(line,character){this.line=line;this.character=character;}},Selection:class{constructor(start,end){this.start=start;this.end=end;}},Range:class{},TextEditorRevealType:{InCenter:0},ViewColumn:{Two:2},
   };
   const file=path.join(__dirname,'../src/extension.js');
   const core=require('../src/core');
   const original=Module._load;
   Module._load=function(id,...args){if(id==='vscode')return vscode;if(id==='./core'&&args[0]?.filename===file)return {...core,runCLI:async(binary,root,command,input)=>{calls.push({root,command,input});return respond(root,command,input);}};return original.call(this,id,...args);};
-  try{delete require.cache[require.resolve(file)];require(file).activate({subscriptions:[],extensionPath:path.dirname(path.dirname(file))});}finally{Module._load=original;}
+  try{
+    for(const modulePath of [file,'../src/restrictionView','../src/restrictionDetailPanel']) delete require.cache[require.resolve(modulePath)];
+    require(file).activate({subscriptions:[],extensionPath:path.dirname(path.dirname(file))});
+  }finally{Module._load=original;}
   const provider=providers.get('intentlens.callPath');
   function site(){const root=provider.getChildren().find(item=>item.kind==='function');return provider.getChildren(root)[0].command.arguments[0];}
-  return {vscode,commands,provider,errors,calls,opened,callbacks,documents,folders,graph,editor,site,setResponse:fn=>{respond=fn;},cleanup:()=>fs.rmSync(temporary,{recursive:true,force:true})};
+  return {vscode,commands,provider,restrictions:providers.get('intentlens.restrictions'),errors,calls,opened,callbacks,documents,folders,graph,editor,site,warnings,panels,setResponse:fn=>{respond=fn;},cleanup:()=>fs.rmSync(temporary,{recursive:true,force:true})};
 }
+
+test('call path aggregated response contract refreshes restriction tree and details',async()=>{
+  const h=setup();try{
+    // Shared with Go's TestCallPathAggregationJSONContract.
+    const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+    h.setResponse(()=>({...h.graph(0),aggregated:structuredClone(aggregated)}));
+    await h.commands.get('intentlens.callPath')();
+    assert.deepEqual(h.restrictions.aggregatedData,aggregated);
+    const roots=h.restrictions.getChildren();
+    assert.match(roots[0].label,/2类，共2个问题/);
+    const imports=roots.find(item=>item.category?.name==='Missing Imports');
+    assert.equal(h.restrictions.getChildren(imports)[0].label,aggregated.categories[0].items[0].message);
+    const undefinedCategory=roots.find(item=>item.category?.name==='Undefined Identifiers');
+    const diagnostic=h.restrictions.getChildren(undefinedCategory)[0];
+    assert.match(diagnostic.label,/type check: main\.go:8:14: undefined: Missing/);
+    assert.equal(diagnostic.command,undefined);
+    assert.match(h.warnings[0][0],/2 个解析限制（2 类）/);
+    await h.commands.get('intentlens.showRestrictionDetails')();
+    assert.equal(h.panels.length,1);
+    assert.match(h.panels[0].webview.html,/4 missing imports/);
+    assert.match(h.panels[0].webview.html,/missing\/d/);
+    assert.match(h.panels[0].webview.html,/main\.go:8/);
+    assert.deepEqual(h.errors,[]);
+  }finally{h.cleanup();}
+});
 
 test('call path icon action is usable; navigation retains original workspace and converts UTF-8 source columns',async()=>{
   const h=setup();try{

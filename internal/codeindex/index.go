@@ -135,25 +135,13 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 					pkgs = append(pkgs, pkg)
 				}
 				sort.Strings(pkgs)
-				if len(pkgs) <= 3 {
-					out.Issues = append(out.Issues, "type check: missing imports: "+strings.Join(pkgs, ", "))
-				} else {
-					out.Issues = append(out.Issues, fmt.Sprintf("type check: %d missing imports (e.g., %s)", len(pkgs), strings.Join(pkgs[:3], ", ")))
-				}
+				// Keep the full list in the format understood by the aggregator;
+				// it owns count/sample summaries for display.
+				out.Issues = append(out.Issues, "type check: missing imports: "+strings.Join(pkgs, ", "))
 			}
 		}
-		targets := map[types.Object]string{}
-		declarations := map[string][]string{}
-		for _, u := range units {
-			for _, d := range u.tree.Decls {
-				if f, ok := d.(*ast.FuncDecl); ok && f.Recv == nil {
-					declarations[f.Name.Name] = append(declarations[f.Name.Name], u.name+":"+f.Name.Name)
-					if obj := info.Defs[f.Name]; obj != nil {
-						targets[obj] = u.name + ":" + f.Name.Name
-					}
-				}
-			}
-		}
+		functions := map[*ast.FuncDecl]Function{}
+		idCounts := map[string]int{}
 		for _, u := range units {
 			for _, d := range u.tree.Decls {
 				f, ok := d.(*ast.FuncDecl)
@@ -172,8 +160,48 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 				}
 				start, end := set.PositionFor(f.Pos(), false), set.PositionFor(f.End(), false)
 				fn := Function{ID: u.name + ":" + name, Name: name, File: u.name, StartLine: start.Line, EndLine: end.Line, Source: u.source[start.Offset:end.Offset], Calls: []Call{}}
+				functions[f] = fn
+				idCounts[fn.ID]++
+			}
+		}
+		targets := map[types.Object]string{}
+		declarations := map[string][]string{}
+		for _, u := range units {
+			for _, d := range u.tree.Decls {
+				f, ok := d.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				fn := functions[f]
+				if idCounts[fn.ID] > 1 {
+					// Physical positions distinguish even same-line init declarations
+					// and stay deterministic across builds and //line directives.
+					pos := set.PositionFor(f.Pos(), false)
+					fn.ID = fmt.Sprintf("%s@%d:%d", fn.ID, pos.Line, pos.Column)
+					functions[f] = fn
+				}
+				if f.Recv == nil {
+					declarations[f.Name.Name] = append(declarations[f.Name.Name], fn.ID)
+					if obj := info.Defs[f.Name]; obj != nil {
+						targets[obj] = fn.ID
+					}
+				}
+			}
+		}
+		for _, u := range units {
+			for _, d := range u.tree.Decls {
+				f, ok := d.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				fn := functions[f]
 				if f.Body != nil {
 					ast.Inspect(f.Body, func(n ast.Node) bool {
+						// A literal has its own execution context. Do not attribute its
+						// body to this declaration, even for immediately invoked literals.
+						if _, ok := n.(*ast.FuncLit); ok {
+							return false
+						}
 						c, ok := n.(*ast.CallExpr)
 						if !ok {
 							return true

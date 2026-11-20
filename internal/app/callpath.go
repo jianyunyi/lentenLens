@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"intentlens/internal/aggregator"
 	"intentlens/internal/capture"
 	"intentlens/internal/codeindex"
 	"sort"
@@ -26,13 +27,14 @@ type PathCall struct {
 }
 
 type CallPath struct {
-	SelectedID string               `json:"selected_id"`
-	RootIDs    []string             `json:"root_ids"`
-	Functions  []codeindex.Function `json:"functions"`
-	Calls      []PathCall           `json:"calls"`
-	Coverage   codeindex.Coverage   `json:"coverage"`
-	Issues     []string             `json:"issues"`
-	Truncated  bool                 `json:"truncated"`
+	SelectedID string                       `json:"selected_id"`
+	RootIDs    []string                     `json:"root_ids"`
+	Functions  []codeindex.Function         `json:"functions"`
+	Calls      []PathCall                   `json:"calls"`
+	Coverage   codeindex.Coverage           `json:"coverage"`
+	Issues     []string                     `json:"issues"`
+	Truncated  bool                         `json:"truncated"`
+	Aggregated *aggregator.AggregatedResult `json:"aggregated,omitempty"`
 }
 
 // CallPath returns ancestors(selected) UNION descendants(selected) through
@@ -57,6 +59,9 @@ func (a *App) CallPath(file string, line int) (CallPath, error) {
 		return out, err
 	}
 	out.Coverage = idx.Coverage
+	// Reuse the index's bounded aggregation of parse/type-check restrictions.
+	// Call-path scope and traversal notices remain in Issues.
+	out.Aggregated = idx.Aggregated
 	out.Issues = append(out.Issues, idx.Issues...)
 	out.Issues = append(out.Issues, "仅展示同目录同包内可唯一解析的直接静态调用；源头是索引范围内的候选入口，不代表运行时入口或执行顺序。跨包、接口和动态调用可能未知；捕获完整不等于调用解析完整。")
 	byID := make(map[string]codeindex.Function, len(idx.Functions))

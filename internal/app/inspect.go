@@ -400,8 +400,9 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 	if !settings.Model.Enabled {
 		return explain.Document{}, errors.New("模型分析未启用")
 	}
-	if key == "" {
-		key = os.Getenv(settings.Model.APIKeyEnv)
+	key, e = a.modelAPIKey(settings.Model, key)
+	if e != nil {
+		return explain.Document{}, e
 	}
 	if strings.TrimSpace(key) == "" {
 		return explain.Document{}, fmt.Errorf("需要密钥环境变量 %s；请在启动编辑器或 hook 的环境中配置", settings.Model.APIKeyEnv)
