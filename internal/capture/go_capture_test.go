@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,5 +55,31 @@ func TestTakeGoReportsGoBudgetAndOversize(t *testing.T) {
 	}
 	if !seenLarge {
 		t.Fatalf("missing oversize reason: %+v", c.Omitted)
+	}
+}
+
+func TestReadCaptureFileRejectsReplacement(t *testing.T) {
+	dir := t.TempDir()
+	const name = "main.go"
+	write(t, dir, name, "package old\n")
+	info, err := os.Stat(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the original inode alive and give the replacement the same size and mtime.
+	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, "original.go")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, name, "package new\n")
+	if err := os.Chtimes(filepath.Join(dir, name), info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if data, err := readCaptureFile(root, name, info); err != errFileChanged || data != nil {
+		t.Fatalf("readCaptureFile = %q, %v, want no data and errFileChanged", data, err)
 	}
 }

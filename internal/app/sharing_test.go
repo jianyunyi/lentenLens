@@ -37,6 +37,36 @@ func seedExplanation(t *testing.T, a *App, root string) Explanation {
 	return e
 }
 
+func TestSharedPublicationIgnoresIncompleteStagingFile(t *testing.T) {
+	a, root := fixture(t)
+	source := seedExplanation(t, a, root)
+	draft, err := a.PrepareShare(context.Background(), source.ID, nil, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a publisher stopping midway through the temporary write.
+	if err := os.MkdirAll(filepath.Join(root, ".intent", "shared"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, ".intent/shared/"+shareTempPrefix+newID()+".tmp", `{"schema":`)
+	// The staging marker must also take precedence over a JSON suffix.
+	put(t, root, ".intent/shared/"+shareTempPrefix+newID()+".json", `{"schema":`)
+	if views, err := a.Shared(); err != nil || len(views) != 0 {
+		t.Fatalf("reader saw unpublished data: %#v, %v", views, err)
+	}
+
+	for i := 0; i < 2; i++ {
+		record, err := a.ConfirmShare(draft.ID, draft.Digest, true)
+		if err != nil || digest(record) != draft.Digest {
+			t.Fatalf("confirmation %d returned %#v, %v", i+1, record, err)
+		}
+		views, err := a.Shared()
+		if err != nil || len(views) != 1 || digest(views[0].SharedRecord) != draft.Digest {
+			t.Fatalf("reader after confirmation %d got %#v, %v", i+1, views, err)
+		}
+	}
+}
+
 func TestSharedPreviewUsesOnlyAllowedEvidenceAndRequiresConfirmation(t *testing.T) {
 	a, root := fixture(t)
 	source := seedExplanation(t, a, root)

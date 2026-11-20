@@ -70,10 +70,32 @@ func (a *App) Stop(session string) (Round, error) {
 	if session == "" || active.Session != session {
 		return Round{}, errors.New("会话与开始基线不匹配")
 	}
-	after, e := capture.Take(a.Root)
+	committed, e := a.committedRound(active)
+	if e == nil {
+		// A prior Stop published the round but did not remove the baseline.
+		return committed, a.removeActive()
+	}
+	if !errors.Is(e, os.ErrNotExist) {
+		return Round{}, e
+	}
+	after, policy, e := capture.TakeWithPolicy(a.Root)
 	if e != nil {
 		return Round{}, e
 	}
+	round, e := a.buildRound(active, after, policy)
+	if e != nil {
+		return Round{}, e
+	}
+	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
+		return Round{}, writeErr
+	}
+	if removeErr := a.removeActive(); removeErr != nil {
+		return Round{}, removeErr
+	}
+	return round, nil
+}
+
+func (a *App) buildRound(active Active, after capture.Snapshot, policy capture.Policy) (Round, error) {
 	notes := []string{"本轮工作区变化，来源未确认", "用户原话和 transcript 未采集；选择动机未记录"}
 	if after.PolicyHash != active.Snapshot.PolicyHash {
 		notes = append(notes, "本轮排除规则变化；新增允许范围可能没有可靠起始基线")
@@ -85,7 +107,7 @@ func (a *App) Stop(session string) (Round, error) {
 	}
 	// Apply the current policy to retained baseline too; ignored contents never enter a new round.
 	for p := range active.Snapshot.Files {
-		ok, err := capture.Allowed(a.Root, p)
+		ok, err := policy.Allowed(a.Root, p)
 		if err != nil {
 			return Round{}, err
 		}
@@ -93,12 +115,19 @@ func (a *App) Stop(session string) (Round, error) {
 			delete(active.Snapshot.Files, p)
 		}
 	}
-	round := Round{ID: active.ID, Session: session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}
-	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
-		return Round{}, writeErr
+	return Round{ID: active.ID, Session: active.Session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}, nil
+}
+
+func (a *App) committedRound(active Active) (Round, error) {
+	var round Round
+	if !validID(active.ID) {
+		return round, errors.New("无效轮次 ID")
 	}
-	if removeErr := os.Remove(filepath.Join(a.State, "active.json")); removeErr != nil {
-		return Round{}, removeErr
+	if err := a.read("round-"+active.ID+".json", &round); err != nil {
+		return Round{}, err
+	}
+	if round.ID != active.ID || round.Session != active.Session {
+		return Round{}, errors.New("已提交轮次与开始基线不匹配")
 	}
 	return round, nil
 }
@@ -109,7 +138,11 @@ func (a *App) Abort() error {
 		return e
 	}
 	defer unlock()
-	e = os.Remove(filepath.Join(a.State, "active.json"))
+	return a.removeActive()
+}
+
+func (a *App) removeActive() error {
+	e := os.Remove(filepath.Join(a.State, "active.json"))
 	if errors.Is(e, os.ErrNotExist) {
 		return nil
 	}

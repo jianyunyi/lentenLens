@@ -71,7 +71,31 @@ func (a *App) recoverState() error {
 	if isolateErr := a.isolateRecords(); isolateErr != nil {
 		return isolateErr
 	}
+	if err := a.recoverActiveRound(); err != nil {
+		return err
+	}
 	return a.recoverApply()
+}
+
+func (a *App) recoverActiveRound() error {
+	var active Active
+	if err := a.read("active.json", &active); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	// Leave malformed baseline metadata to the normal capture state checks.
+	if !validID(active.ID) {
+		return nil
+	}
+	if _, err := a.committedRound(active); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return a.removeActive()
 }
 
 func (a *App) isolateRecords() error {
