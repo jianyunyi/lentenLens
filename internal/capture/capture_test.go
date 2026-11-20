@@ -2,6 +2,7 @@ package capture
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,93 @@ func write(t *testing.T, root, name, data string) {
 	}
 	if err := os.WriteFile(p, []byte(data), 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type captureDirEntry struct {
+	fs.DirEntry
+	info func() (fs.FileInfo, error)
+}
+
+func (d captureDirEntry) Info() (fs.FileInfo, error) { return d.info() }
+
+func TestCaptureHandlesDisappearanceDuringWalk(t *testing.T) {
+	for _, goOnly := range []bool{false, true} {
+		mode := "general"
+		if goOnly {
+			mode = "go"
+		}
+		for _, scenario := range []string{"before_info", "before_open", "before_read_dir", "permission_denied"} {
+			t.Run(mode+"/"+scenario, func(t *testing.T) {
+				root := t.TempDir()
+				gone := "a.go"
+				if scenario == "before_read_dir" {
+					gone = "a-dir"
+					if err := os.Mkdir(filepath.Join(root, gone), 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					write(t, root, gone, "package p\n")
+				}
+				const keep = "package p\nfunc Keep() {}\n"
+				write(t, root, "z.go", keep)
+				walk := func(root string, visit fs.WalkDirFunc) error {
+					return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+						if err != nil || path != filepath.Join(root, gone) {
+							return visit(path, d, err)
+						}
+						remove := func() {
+							if err := os.Remove(path); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if scenario == "before_read_dir" {
+							remove()
+							return visit(path, d, nil)
+						}
+						entry := captureDirEntry{d, func() (fs.FileInfo, error) {
+							switch scenario {
+							case "permission_denied":
+								return nil, &fs.PathError{Op: "lstat", Path: path, Err: fs.ErrPermission}
+							case "before_info":
+								remove()
+								// Some DirEntry implementations cache the metadata.
+								return os.Lstat(path)
+							default:
+								info, err := d.Info()
+								remove()
+								return info, err
+							}
+						}}
+						return visit(path, entry, nil)
+					})
+				}
+
+				var snap Snapshot
+				var coverage Coverage
+				var err error
+				if goOnly {
+					snap, coverage, err = takeGo(root, walk)
+				} else {
+					snap, _, err = takeWithPolicy(root, walk)
+				}
+				if scenario == "permission_denied" {
+					if err == nil || err.Error() != `cannot inspect capture path "a.go"` {
+						t.Fatalf("permission error must fail the snapshot: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(snap.Files) != 1 || snap.Files["z.go"].Content != keep || !reflect.DeepEqual(snap.Omitted, []string{gone}) {
+					t.Fatalf("want only z.go captured and %s omitted, got %+v", gone, snap)
+				}
+				if goOnly && (coverage.Complete || coverage.OmittedCount != 1 || !reflect.DeepEqual(coverage.Omitted, []CoverageOmission{{File: gone, Reason: "file_changed"}})) {
+					t.Fatalf("disappearance must leave coverage incomplete: %+v", coverage)
+				}
+			})
+		}
 	}
 }
 
