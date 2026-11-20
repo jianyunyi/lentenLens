@@ -6,7 +6,7 @@ function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function wizard({ query = true, accept = true, key = 'fixture-api-key', selectedModel, previousKey, configureError } = {}) {
+function wizard({ query = true, accept = true, key = 'fixture-api-key', selectedModel, previousKey, configureError, onStore } = {}) {
   const baseURL = 'https://api.fixture/v1';
   const inputs = [], picks = [], warnings = [], calls = [], requests = [];
   const secrets = new Map();
@@ -36,12 +36,18 @@ function wizard({ query = true, accept = true, key = 'fixture-api-key', selected
   } };
   const secure = {
     get: async name => secrets.get(name),
-    store: async (name, value) => secrets.set(name, value),
+    store: async (name, value) => {
+      assert.equal(calls.at(-1)?.command, 'configure', 'configuration must be saved before storing a key');
+      secrets.set(name, value);
+      await onStore?.({ secrets, name, value, saved });
+    },
     delete: async name => secrets.delete(name),
   };
   const cli = async (_folder, command, request) => {
+    if (command === 'status') return { settings: structuredClone(saved.settings) };
     calls.push({ command, request });
     if (configureError) throw configureError;
+    saved.settings = structuredClone(request.settings);
     return { saved: true };
   };
   const fetchImpl = async (url, options) => {
@@ -50,7 +56,8 @@ function wizard({ query = true, accept = true, key = 'fixture-api-key', selected
   };
   const folder = { name: 'fixture', uri: { fsPath: '/fixture/project' } };
   const status = { settings: { model: { token_limit: 200000 } }, usage: { actual_tokens: 42, uncertain_tokens: 10 } };
-  return { vscode, secure, cli, fetchImpl, folder, status, baseURL, inputs, picks, warnings, calls, requests, secrets, secretName };
+  const saved = { settings: structuredClone(status.settings) };
+  return { vscode, secure, cli, fetchImpl, folder, status, baseURL, inputs, picks, warnings, calls, requests, secrets, secretName, saved };
 }
 
 test('OpenAI-compatible model discovery uses the selected /models endpoint and API key only in Authorization header', async () => {
@@ -98,6 +105,33 @@ test('provider-specific auth and pagination return actual Anthropic and Gemini I
   assert.equal(geminiRequests[1].url.searchParams.get('pageToken'), 'page-2');
   assert.ok(!geminiRequests[0].url.toString().includes('gemini-key'));
 });
+
+test('model pagination deduplicates before applying the limit and retains first occurrence order', async () => {
+  const firstPage = Array.from({ length: 4999 }, (_, i) => ({ id: `model-${i}`, displayName: 'first' }));
+  const overlap = [{ id: 'model-0', displayName: 'second' }, { id: 'last' }];
+  const fetchPages = extra => async url => new URL(url).searchParams.has('after')
+    ? jsonResponse({ data: [...overlap, ...extra] })
+    : jsonResponse({ data: firstPage, has_more: true, last_id: 'model-4998' });
+  const models = await listModels('openai', 'https://api.fixture/v1', 'key', fetchPages([]));
+  assert.deepEqual(models.map(model => model.id), [...firstPage.map(model => model.id), 'last']);
+  assert.equal(models[0].displayName, 'first');
+  await assert.rejects(listModels('openai', 'https://api.fixture/v1', 'key', fetchPages([{ id: 'overflow' }])), /模型数量超过安全上限/);
+});
+
+for (const { status, headers, error } of [
+  { status: 401, error: /HTTP 401/ },
+  { status: 200, headers: { 'content-length': String(1024 * 1024 + 1) }, error: /响应超过 1 MiB/ },
+]) {
+  test(`model discovery cancels the response body on early rejection (HTTP ${status})`, async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() { cancelled = true; throw new Error('fixture cancellation failed'); },
+    });
+    const fetchImpl = async () => new Response(body, { status, headers });
+    await assert.rejects(listModels('openai', 'https://api.fixture/v1', 'key', fetchImpl), error);
+    assert.equal(cancelled, true);
+  });
+}
 
 test('wizard queries first, lets the user select only a returned ID, and stores the key outside settings', async () => {
   const h = wizard();
@@ -154,7 +188,7 @@ test('query consent, API errors, empty results, forged selections, and final con
   assert.equal(declined.secrets.has(declined.secretName), false);
 });
 
-test('a previously saved key is not a substitute for the key entered in this wizard; failed save rolls back', async () => {
+test('a previously saved key cannot replace wizard input and a failed CLI save leaves the key alone', async () => {
   const noKey = wizard({ key: '', previousKey: 'old-key' });
   await assert.rejects(() => configureModel(noKey.vscode, noKey.folder, noKey.status, noKey.cli, noKey.secure, noKey.fetchImpl), /必须输入 API Key/);
   assert.equal(noKey.requests.length, 0);
@@ -163,7 +197,58 @@ test('a previously saved key is not a substitute for the key entered in this wiz
   const failedSave = wizard({ previousKey: 'old-key', configureError: new Error('fixture config write failed') });
   await assert.rejects(() => configureModel(failedSave.vscode, failedSave.folder, failedSave.status, failedSave.cli, failedSave.secure, failedSave.fetchImpl), /fixture config write failed/);
   assert.equal(failedSave.secrets.get(failedSave.secretName), 'old-key');
+  assert.equal(failedSave.calls.length, 1);
   assert.ok(!failedSave.warnings.some(item => item.text.includes('old-key')));
+});
+
+for (const concurrentChange of ['neither value', 'configuration', 'key']) {
+  test(`wizard guards rollback after a rejected key write when another writer changes ${concurrentChange}`, async () => {
+    const h = wizard({
+      previousKey: 'old-key',
+      onStore: ({ secrets, name, value, saved }) => {
+        if (value !== 'fixture-api-key') return;
+        if (concurrentChange === 'configuration') saved.settings.model.model = 'other-model';
+        if (concurrentChange !== 'neither value') secrets.set(name, 'other-key');
+        throw new Error('fixture key write failed');
+      },
+    });
+    // The UI status was fetched earlier. Rollback must restore the config
+    // present just before saving, including any edits made during the wizard.
+    h.saved.settings.model.token_limit = 123456;
+    const previous = structuredClone(h.saved.settings);
+    await assert.rejects(configureModel(h.vscode, h.folder, h.status, h.cli, h.secure, h.fetchImpl), /fixture key write failed/);
+    if (concurrentChange === 'configuration') {
+      assert.equal(h.saved.settings.model.model, 'other-model');
+      assert.equal(h.calls.length, 1);
+    } else {
+      assert.deepEqual(h.saved.settings, previous);
+      assert.equal(h.calls.length, 2);
+    }
+    assert.equal(h.secrets.get(h.secretName), concurrentChange === 'neither value' ? 'old-key' : 'other-key');
+  });
+}
+
+test('concurrent wizard saves wait for the preceding rollback before writing their key', async () => {
+  let entered, release;
+  const writing = new Promise(resolve => { entered = resolve; });
+  const resume = new Promise(resolve => { release = resolve; });
+  const h = wizard({ previousKey: 'old-key', onStore: async ({ value }) => {
+    if (value !== 'fixture-api-key') return;
+    entered();
+    await resume;
+    throw new Error('first save failed');
+  } });
+  const first = assert.rejects(configureModel(h.vscode, h.folder, h.status, h.cli, h.secure, h.fetchImpl), /first save failed/);
+  await writing;
+  const secondWizard = wizard({ key: 'second-key' });
+  const second = configureModel(secondWizard.vscode, h.folder, h.status, h.cli, h.secure, h.fetchImpl);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.calls.length, 1);
+  release();
+  await first;
+  assert.equal(await second, true);
+  assert.equal(h.secrets.get(h.secretName), 'second-key');
+  assert.equal(h.calls.length, 3);
 });
 
 test('secure storage is mandatory and base URLs reject credentials, queries, model endpoints and remote HTTP', async () => {
