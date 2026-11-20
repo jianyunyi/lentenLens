@@ -78,10 +78,24 @@ func (a *App) Stop(session string) (Round, error) {
 	if !errors.Is(e, os.ErrNotExist) {
 		return Round{}, e
 	}
-	after, e := capture.Take(a.Root)
+	after, policy, e := capture.TakeWithPolicy(a.Root)
 	if e != nil {
 		return Round{}, e
 	}
+	round, e := a.buildRound(active, after, policy)
+	if e != nil {
+		return Round{}, e
+	}
+	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
+		return Round{}, writeErr
+	}
+	if removeErr := a.removeActive(); removeErr != nil {
+		return Round{}, removeErr
+	}
+	return round, nil
+}
+
+func (a *App) buildRound(active Active, after capture.Snapshot, policy capture.Policy) (Round, error) {
 	notes := []string{"本轮工作区变化，来源未确认", "用户原话和 transcript 未采集；选择动机未记录"}
 	if after.PolicyHash != active.Snapshot.PolicyHash {
 		notes = append(notes, "本轮排除规则变化；新增允许范围可能没有可靠起始基线")
@@ -93,7 +107,7 @@ func (a *App) Stop(session string) (Round, error) {
 	}
 	// Apply the current policy to retained baseline too; ignored contents never enter a new round.
 	for p := range active.Snapshot.Files {
-		ok, err := capture.Allowed(a.Root, p)
+		ok, err := policy.Allowed(a.Root, p)
 		if err != nil {
 			return Round{}, err
 		}
@@ -101,14 +115,7 @@ func (a *App) Stop(session string) (Round, error) {
 			delete(active.Snapshot.Files, p)
 		}
 	}
-	round := Round{ID: active.ID, Session: session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}
-	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
-		return Round{}, writeErr
-	}
-	if removeErr := a.removeActive(); removeErr != nil {
-		return Round{}, removeErr
-	}
-	return round, nil
+	return Round{ID: active.ID, Session: active.Session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}, nil
 }
 
 func (a *App) committedRound(active Active) (Round, error) {

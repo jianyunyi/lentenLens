@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"intentlens/internal/capture"
 )
 
 func TestCommittedRoundWithLeftoverBaseline(t *testing.T) {
@@ -141,5 +143,31 @@ func TestCaptureStateRejectsBlankMetadata(t *testing.T) {
 	}
 	if err := a.AbortCapture("session", "round", true); err == nil {
 		t.Fatal("blank session abort accepted")
+	}
+}
+
+func TestBuildRoundUsesPolicyFromAfterCapture(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "tracked.go", "package p\nvar value = 1\n")
+	put(t, root, "ignored.go", "package p\n")
+	active, err := a.Start("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	put(t, root, "tracked.go", "package p\nvar value = 2\n")
+	put(t, root, ".intentignore", "ignored.go\n")
+	after, policy, err := capture.TakeWithPolicy(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reverse the rules between Stop's capture and its baseline filtering.
+	put(t, root, ".intentignore", "tracked.go\n")
+	round, err := a.buildRound(active, after, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(round.Changes) != 1 || round.Changes[0].Path != "tracked.go" || round.Changes[0].Kind != "modified" {
+		t.Fatalf("changes = %+v, want only tracked.go modified", round.Changes)
 	}
 }

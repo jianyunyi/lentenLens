@@ -55,22 +55,28 @@ func NewFile(content string) File {
 	return File{Content: content, Hash: fmt.Sprintf("%x", sha256.Sum256([]byte(content)))}
 }
 func Take(root string) (Snapshot, error) {
+	snapshot, _, err := TakeWithPolicy(root)
+	return snapshot, err
+}
+
+// TakeWithPolicy returns the snapshot and the policy used to capture it.
+func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, Policy{}, err
 	}
 	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
-		return Snapshot{}, fmt.Errorf("capture root must not traverse links")
+		return Snapshot{}, Policy{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, Policy{}, err
 	}
 	s := Snapshot{Files: map[string]File{}, Omitted: []string{}, PolicyHash: policy.Hash()}
 	total := 0
 	confined, err := os.OpenRoot(root)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, Policy{}, err
 	}
 	defer confined.Close()
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
@@ -117,14 +123,13 @@ func Take(root string) (Snapshot, error) {
 			s.Omitted = append(s.Omitted, rel)
 			return nil
 		}
-		f, e := confined.Open(filepath.FromSlash(rel))
-		if e != nil {
-			return fmt.Errorf("cannot read capture path %q", rel)
+		data, e := readCaptureFile(confined, rel, info)
+		if e == errFileChanged {
+			s.Omitted = append(s.Omitted, rel)
+			return nil
 		}
-		data, e := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
-		closeErr := f.Close()
-		if e != nil || closeErr != nil {
-			return fmt.Errorf("cannot read capture path %q: %w", rel, errors.Join(e, closeErr))
+		if e != nil {
+			return e
 		}
 		if len(data) > MaxFileBytes || len(data) > MaxSnapshotBytes-total || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 			s.Omitted = append(s.Omitted, rel)
@@ -135,10 +140,10 @@ func Take(root string) (Snapshot, error) {
 		return nil
 	})
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, Policy{}, err
 	}
 	sort.Strings(s.Omitted)
-	return s, nil
+	return s, policy, nil
 }
 
 // TakeGo captures only Go source for indexing. Non-Go files never consume the
@@ -229,14 +234,14 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			addCoverageOmission(&c, rel, "unsafe_path")
 			return nil
 		}
-		f, e := confined.Open(filepath.FromSlash(rel))
-		if e != nil {
-			return fmt.Errorf("cannot read capture path %q", rel)
+		data, e := readCaptureFile(confined, rel, info)
+		if e == errFileChanged {
+			s.Omitted = append(s.Omitted, rel)
+			addCoverageOmission(&c, rel, "file_changed")
+			return nil
 		}
-		data, e := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
-		closeErr := f.Close()
-		if e != nil || closeErr != nil {
-			return fmt.Errorf("cannot read capture path %q: %w", rel, errors.Join(e, closeErr))
+		if e != nil {
+			return e
 		}
 		if len(data) > MaxFileBytes {
 			addCoverageOmission(&c, rel, "file_too_large")
@@ -261,6 +266,49 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 	c.Complete = c.OmittedCount == 0 && c.ExcludedCount == 0
 	sort.Strings(s.Omitted)
 	return s, c, nil
+}
+
+var errFileChanged = errors.New("file changed during capture")
+
+func readCaptureFile(root *os.Root, relative string, walked fs.FileInfo) (data []byte, err error) {
+	f, err := root.Open(filepath.FromSlash(relative))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read capture path %q", relative)
+	}
+	defer func() {
+		closeErr := f.Close()
+		if err == errFileChanged && closeErr == nil {
+			return
+		}
+		if combined := errors.Join(err, closeErr); combined != nil {
+			data = nil
+			err = fmt.Errorf("cannot read capture path %q: %w", relative, combined)
+		}
+	}()
+
+	before, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() || !os.SameFile(walked, before) || !sameFileVersion(walked, before) {
+		return nil, errFileChanged
+	}
+	data, err = io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	after, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !sameFileVersion(before, after) {
+		return nil, errFileChanged
+	}
+	return data, nil
+}
+
+func sameFileVersion(a, b fs.FileInfo) bool {
+	return a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
 }
 
 func addCoverageOmission(c *Coverage, file, reason string) {
@@ -319,6 +367,11 @@ func Allowed(root, relative string) (bool, error) {
 	if e != nil {
 		return false, e
 	}
+	return p.Allowed(root, relative)
+}
+
+// Allowed checks the loaded policy and the current path safety.
+func (p Policy) Allowed(root, relative string) (bool, error) {
 	if !filepath.IsLocal(relative) || !p.Allows(relative) {
 		return false, nil
 	}
