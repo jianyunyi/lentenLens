@@ -88,7 +88,11 @@ func TestProviderFailureBoundaries(t *testing.T) {
 				if mode == "canceled" {
 					wantCalls = 0
 				}
-				if err == nil || usage.UncertainTokens == 0 || transportCalls != wantCalls || (mode == "timeout" && !timeoutObserved) {
+				wantActual, wantUncertain := 0, true
+				if mode == "truncated" || mode == "empty" {
+					wantActual, wantUncertain = 2, false
+				}
+				if err == nil || usage.ActualTokens != wantActual || (usage.UncertainTokens > 0) != wantUncertain || transportCalls != wantCalls || (mode == "timeout" && !timeoutObserved) {
 					t.Fatalf("boundary bypass: err=%v usage=%+v transportCalls=%d want=%d timeoutObserved=%v", err, usage, transportCalls, wantCalls, timeoutObserved)
 				}
 			})

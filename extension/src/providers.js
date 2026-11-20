@@ -1,10 +1,12 @@
 'use strict';
 const crypto = require('node:crypto');
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const SECURE_API_KEY_ENV = 'INTENTLENS_API_KEY';
 const MAX_MODEL_RESPONSE_BYTES = 1024 * 1024;
 const MAX_MODEL_PAGES = 50;
 const MAX_MODELS = 5000;
+const pendingModelSaves = new Map();
 const presets = [
   { label: 'OpenAI', provider: 'openai', base_url: 'https://api.openai.com/v1' },
   { label: 'Anthropic / Claude', provider: 'anthropic', base_url: 'https://api.anthropic.com/v1' },
@@ -40,9 +42,15 @@ function modelListHeaders(provider, apiKey) {
   if (provider === 'openai' || provider === 'openai-compatible') return { authorization: `Bearer ${apiKey}`, accept: 'application/json' };
   throw new Error('不支持该模型 provider 的模型列表协议');
 }
+async function cancelResponseBody(response) {
+  try { await response?.body?.cancel(); } catch { /* Preserve the original request error. */ }
+}
 async function responseJSON(response) {
   const declaredSize = Number(response.headers?.get?.('content-length') || 0);
-  if (declaredSize > MAX_MODEL_RESPONSE_BYTES) throw new Error('模型列表响应超过 1 MiB');
+  if (declaredSize > MAX_MODEL_RESPONSE_BYTES) {
+    await cancelResponseBody(response);
+    throw new Error('模型列表响应超过 1 MiB');
+  }
   let raw;
   if (response.body?.getReader) {
     const reader = response.body.getReader();
@@ -65,12 +73,11 @@ async function responseJSON(response) {
   }
   try { return JSON.parse(raw); } catch { throw new Error('模型列表响应不是有效 JSON'); }
 }
-function unpackModels(provider, payload) {
+function* unpackModels(provider, payload) {
   let entries;
   if (provider === 'gemini') entries = payload?.models;
   else entries = payload?.data;
   if (!Array.isArray(entries)) throw new Error('模型列表响应格式不受支持');
-  const models = [];
   for (const entry of entries) {
     let id;
     if (provider === 'gemini') {
@@ -83,10 +90,8 @@ function unpackModels(provider, payload) {
       id = typeof entry?.id === 'string' ? entry.id.trim() : '';
       if (!id || id.length > 256 || /[\r\n\0]/.test(id)) continue;
     }
-    if (id && !models.some(model => model.id === id)) models.push({ id, displayName: typeof entry.displayName === 'string' ? entry.displayName : '' });
-    if (models.length > MAX_MODELS) throw new Error('模型数量超过安全上限，未展示不完整列表');
+    yield { id, displayName: typeof entry.displayName === 'string' ? entry.displayName : '' };
   }
-  return models;
 }
 function nextPage(provider, payload) {
   if (provider === 'gemini') return typeof payload?.nextPageToken === 'string' && payload.nextPageToken ? ['pageToken', payload.nextPageToken] : undefined;
@@ -103,7 +108,7 @@ async function listModels(provider, baseURL, apiKey, fetchImpl = globalThis.fetc
   if (typeof apiKey !== 'string' || !apiKey.trim()) throw new Error('请输入 API Key 后才能查询模型列表');
   const endpoint = `${baseURL.trim().replace(/\/+$/, '')}/models`;
   const headers = modelListHeaders(provider, apiKey.trim());
-  const models = [];
+  const models = new Map();
   const seenCursors = new Set();
   let cursor;
   for (let page = 0; page < MAX_MODEL_PAGES; page++) {
@@ -118,18 +123,58 @@ async function listModels(provider, baseURL, apiKey, fetchImpl = globalThis.fetc
     } catch {
       throw new Error('模型列表请求失败；未改用其他 provider 或地址');
     }
-    if (!response?.ok) throw new Error(`GET /models 失败（HTTP ${Number(response?.status) || '未知'}）；未改用其他 provider 或地址`);
+    if (!response?.ok) {
+      await cancelResponseBody(response);
+      throw new Error(`GET /models 失败（HTTP ${Number(response?.status) || '未知'}）；未改用其他 provider 或地址`);
+    }
     const payload = await responseJSON(response);
-    models.push(...unpackModels(provider, payload));
-    if (models.length > MAX_MODELS) throw new Error('模型数量超过安全上限，未展示不完整列表');
+    for (const model of unpackModels(provider, payload)) {
+      if (models.has(model.id)) continue;
+      models.set(model.id, model);
+      if (models.size > MAX_MODELS) throw new Error('模型数量超过安全上限，未展示不完整列表');
+    }
     const following = nextPage(provider, payload);
-    if (!following) return models;
+    if (!following) return [...models.values()];
     const cursorKey = `${following[0]}:${following[1]}`;
     if (seenCursors.has(cursorKey)) throw new Error('模型列表分页游标重复，未展示不完整列表');
     seenCursors.add(cursorKey);
     cursor = following;
   }
   throw new Error('模型列表页数超过安全上限，未展示不完整列表');
+}
+async function saveModel(folder, cli, secrets, configuration, apiKey) {
+  const secretName = workspaceSecretKey(folder.uri.fsPath);
+  // Serialize saves in this extension host. Other hosts and CLI writers can still
+  // race a rollback because neither storage API offers atomic compare-and-set.
+  const save = (pendingModelSaves.get(secretName) || Promise.resolve()).catch(() => {}).then(async () => {
+    const { settings: previousSettings } = await cli(folder, 'status');
+    const previousKey = await secrets.get(secretName);
+    const settings = { ...previousSettings, model: configuration };
+    // If configure commits but its response is lost, or the host stops before
+    // storing the key, the new configuration can still be paired with the old key.
+    await cli(folder, 'configure', { settings, consent: true });
+    try {
+      await secrets.store(secretName, apiKey);
+    } catch (error) {
+      try {
+        const { settings: currentSettings } = await cli(folder, 'status');
+        if (isDeepStrictEqual(currentSettings, settings)) {
+          await cli(folder, 'configure', { settings: previousSettings, consent: true });
+          if (previousKey !== apiKey && await secrets.get(secretName) === apiKey) {
+            if (previousKey === undefined) await secrets.delete(secretName);
+            else await secrets.store(secretName, previousKey);
+          }
+        }
+      } catch { /* Never expose credential recovery details in UI or logs. */ }
+      throw error;
+    }
+  });
+  pendingModelSaves.set(secretName, save);
+  try {
+    await save;
+  } finally {
+    if (pendingModelSaves.get(secretName) === save) pendingModelSaves.delete(secretName);
+  }
 }
 async function configureModel(vscode, folder, status, cli, secrets, fetchImpl = globalThis.fetch) {
   if (!secrets || typeof secrets.get !== 'function' || typeof secrets.store !== 'function') throw new Error('当前编辑器不支持安全密钥存储，未保存配置');
@@ -181,15 +226,7 @@ async function configureModel(vscode, folder, status, cli, secrets, fetchImpl = 
   }[selectedMode.value];
   const answer = await vscode.window.showWarningMessage(`启用 ${folder.name} 的模型分析？接收地址：${configuration.base_url}；协议：${configuration.provider}；API 返回的模型 ID：${configuration.model}。复核策略：${selectedMode.label}。${modeDetails} 获准代码、轮次前后文本、问题会发送到该服务；练习反馈还发送答案与说明。Hook 可自动生成轮次简述。项目累计上限 ${limit} tokens，不是费用上限；当前实际 ${status.usage?.actual_tokens || 0}、未决 ${status.usage?.uncertain_tokens || 0}。Key 仅保存到 VS Code SecretStorage，不进入设置文件或 CLI 参数。`, { modal: true }, '同意并启用');
   if (answer !== '同意并启用') return false;
-  const secretName = workspaceSecretKey(folder.uri.fsPath);
-  const oldSecret = await secrets.get(secretName);
-  await secrets.store(secretName, apiKey.trim());
-  try {
-    await cli(folder, 'configure', { settings: { ...status.settings, model: configuration }, consent: true });
-  } catch (error) {
-    try { if (oldSecret === undefined) await secrets.delete(secretName); else await secrets.store(secretName, oldSecret); } catch { /* Never expose credential recovery details in UI or logs. */ }
-    throw error;
-  }
+  await saveModel(folder, cli, secrets, configuration, apiKey.trim());
   vscode.window.showInformationMessage('IntentLens：已按所选 provider 的实际模型列表配置并安全保存；尚未发送模型生成请求。');
   return true;
 }

@@ -1,4 +1,4 @@
-﻿// Package codeindex creates a conservative static Go call index without builds.
+// Package codeindex creates a conservative static Go call index without builds.
 package codeindex
 
 import (
@@ -219,7 +219,7 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 		return a.StartLine < b.StartLine
 	})
 	sort.Strings(out.Issues)
-	
+
 	// Aggregate restrictions with timeout protection (Requirements 10.1, 10.2, 10.3)
 	if len(out.Issues) > 0 {
 		aggregated, err := aggregator.AggregateWithTimeout(out.Issues, 200*time.Millisecond)
@@ -237,7 +237,7 @@ func BuildDetailed(files map[string]string) (Index, map[string]string) {
 			out.Aggregated = &aggregated
 		}
 	}
-	
+
 	return out, omitted
 }
 

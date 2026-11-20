@@ -15,6 +15,57 @@ type failOnRead struct{}
 
 func (failOnRead) Read([]byte) (int, error) { return 0, errors.New("stdin was read") }
 
+func TestCLIRejectsPositionalArgs(t *testing.T) {
+	var out bytes.Buffer
+	code := run([]string{"integration-info", "unexpected", "--root", t.TempDir()}, failOnRead{}, &out)
+	if code != 1 || !strings.Contains(out.String(), "unexpected") {
+		t.Fatalf("exit = %d, output = %s", code, &out)
+	}
+	var failure map[string]string
+	if err := json.Unmarshal(out.Bytes(), &failure); err != nil || failure["error"] == "" {
+		t.Fatalf("expected JSON error, got %s", &out)
+	}
+}
+
+func TestCLIRejectsInvalidRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, stdin string
+	}{
+		{"empty", ""},
+		{"null", "null"},
+		{"second object", "{} {}"},
+		{"trailing junk", "{} junk"},
+		{"over limit whitespace", "{}" + strings.Repeat(" ", 32767)},
+		{"junk past limit", "{}" + strings.Repeat(" ", 32766) + "x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			code := run([]string{"start", "--root", t.TempDir(), "--state", t.TempDir()}, strings.NewReader(tc.stdin), &out)
+			if code != 1 || !strings.Contains(out.String(), "需要有效的 JSON 输入") {
+				t.Fatalf("exit = %d, output = %s", code, &out)
+			}
+		})
+	}
+}
+
+func TestDecodeRequestAtSizeLimit(t *testing.T) {
+	for command, limit := range map[string]int{"start": 32768, "analyze-round": 32768, "explain-selection": 128 * 1024} {
+		t.Run(command, func(t *testing.T) {
+			const payload = `{"round_id":"abc"}`
+			stdin := payload + strings.Repeat(" ", limit-len(payload))
+			var round string
+			request, err := decodeRequest(command, strings.NewReader(stdin), &round)
+			if err != nil || request.RoundID != "abc" {
+				t.Fatalf("request round ID = %q, error = %v", request.RoundID, err)
+			}
+			round = ""
+			if _, err := decodeRequest(command, strings.NewReader(stdin+" "), &round); err == nil {
+				t.Fatal("accepted request one byte over the limit")
+			}
+		})
+	}
+}
+
 func TestCLIStartStopJSON(t *testing.T) {
 	root, state := t.TempDir(), t.TempDir()
 	var out bytes.Buffer

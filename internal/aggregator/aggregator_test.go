@@ -1,9 +1,76 @@
 package aggregator
 
 import (
+	"context"
+	"errors"
+	"math"
+	"strconv"
 	"testing"
+	"testing/synctest"
 	"time"
 )
+
+func TestTimeoutCancelsWorkerAndIsolatesIssues(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		issues := []string{"original"}
+		reused := make(chan struct{})
+		stopped := make(chan string, 1)
+		_, err := aggregateWithTimeout(issues, time.Second, func(ctx context.Context, snapshot []string) (AggregatedResult, error) {
+			<-ctx.Done()
+			<-reused
+			stopped <- snapshot[0]
+			return AggregateContext(ctx, snapshot)
+		})
+		issues[0] = "reused"
+		close(reused)
+		if err == nil || err.Error() != "aggregation timeout after 1000ms" {
+			t.Errorf("unexpected timeout error: %v", err)
+		}
+		if got := <-stopped; got != "original" {
+			t.Errorf("worker read caller's reused slice: %q", got)
+		}
+	})
+}
+
+func TestAggregateContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := AggregateContext(ctx, []string{"undefined: x"})
+	if !errors.Is(err, context.Canceled) || !result.Timestamp.IsZero() {
+		t.Fatalf("canceled aggregation returned %+v, %v", result, err)
+	}
+}
+
+func TestUnprefixedUndefinedDiagnostics(t *testing.T) {
+	result := Aggregate([]string{"main.go:8: undefined: x", "main.go:9: x not declared"})
+	if got := result.Summary.CategoryBreakdown["Undefined Identifiers"]; got != 2 {
+		t.Fatalf("undefined diagnostic count = %d, want 2", got)
+	}
+	for _, item := range result.Categories[0].Items {
+		r := item.(Restriction)
+		if r.Type != "type_check" || r.Severity != "error" {
+			t.Errorf("unexpected diagnostic: %+v", r)
+		}
+	}
+}
+
+func TestDiagnosticLineRange(t *testing.T) {
+	maxLine := strconv.Itoa(math.MaxInt)
+	for _, tc := range []struct {
+		location string
+		want     int
+	}{
+		{maxLine + ":1: diagnostic", math.MaxInt},
+		{maxLine + "0:1: diagnostic", 0},
+		{maxLine + "0", 0},
+		{"-1: diagnostic", 0},
+	} {
+		_, line, _ := parseIssueString("main.go:" + tc.location)
+		if line != tc.want {
+			t.Errorf("%q: line = %d, want %d", tc.location, line, tc.want)
+		}
+	}
+}
 
 // Test parseIssueString with various input formats
 func TestParseIssueString(t *testing.T) {
@@ -458,10 +525,10 @@ func TestSeverityRank(t *testing.T) {
 // Test groupByCategory
 func TestGroupByCategory(t *testing.T) {
 	tests := []struct {
-		name             string
-		restrictions     []Restriction
-		wantGroupCount   int
-		wantFirstGroup   string // Should be highest severity
+		name              string
+		restrictions      []Restriction
+		wantGroupCount    int
+		wantFirstGroup    string // Should be highest severity
 		wantCategoryCount map[string]int
 	}{
 		{
@@ -493,10 +560,10 @@ func TestGroupByCategory(t *testing.T) {
 			},
 		},
 		{
-			name:             "empty input",
-			restrictions:     []Restriction{},
-			wantGroupCount:   0,
-			wantFirstGroup:   "",
+			name:              "empty input",
+			restrictions:      []Restriction{},
+			wantGroupCount:    0,
+			wantFirstGroup:    "",
 			wantCategoryCount: map[string]int{},
 		},
 		{
@@ -524,7 +591,7 @@ func TestGroupByCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			groups := groupByCategory(tt.restrictions)
+			groups := groupByCategory(context.Background(), tt.restrictions)
 
 			// Check group count
 			if len(groups) != tt.wantGroupCount {
@@ -696,7 +763,7 @@ func TestExtractMissingPackages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotPkgs := extractMissingPackages(tt.restrictions)
+			gotPkgs := extractMissingPackages(context.Background(), tt.restrictions)
 
 			if len(gotPkgs) != len(tt.wantPkgs) {
 				t.Errorf("extractMissingPackages() length = %v, want %v", len(gotPkgs), len(tt.wantPkgs))
@@ -780,7 +847,7 @@ func TestSummarizeMissingImports(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			summary := summarizeMissingImports(tt.restrictions)
+			summary := summarizeMissingImports(context.Background(), tt.restrictions)
 
 			// Check type
 			if summary.Type != "summary" {
@@ -982,7 +1049,7 @@ func TestParseRestrictions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			restrictions := parseRestrictions(tt.issues)
+			restrictions := parseRestrictions(context.Background(), tt.issues)
 
 			if len(restrictions) != tt.wantCount {
 				t.Errorf("parseRestrictions() count = %v, want %v", len(restrictions), tt.wantCount)
@@ -1029,8 +1096,8 @@ func TestCalculateSummary(t *testing.T) {
 				{Name: "Missing Imports", Count: 3},
 				{Name: "Ambiguous Calls", Count: 2},
 			},
-			wantCategories:   3,
-			wantRestrictions: 10,
+			wantCategories:    3,
+			wantRestrictions:  10,
 			wantBreakdownKeys: []string{"Parse Errors", "Missing Imports", "Ambiguous Calls"},
 		},
 		{

@@ -77,7 +77,7 @@ func callLimit(ctx context.Context, cfg Config, key, system, prompt string, outp
 func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, outputLimit int, mode string) (string, int, error) {
 	cfg, err := cfg.Resolved()
 	if err != nil {
-		return "", 0, err
+		return "", -1, err
 	}
 	endpoint := cfg.BaseURL
 	var payload map[string]any
@@ -109,11 +109,11 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 	} // Non-serializable test seam.
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "", 0, errors.New("模型请求无法编码为 JSON")
+		return "", -1, errors.New("模型请求无法编码为 JSON")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
-		return "", 0, errors.New("模型请求地址无效")
+		return "", -1, errors.New("模型请求地址无效")
 	}
 	req.Header.Set("content-type", "application/json")
 	switch cfg.Provider {
@@ -131,15 +131,15 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return "", 0, errors.New("模型请求失败，结果及计费未确认")
+		return "", -1, errors.New("模型请求失败，结果及计费未确认")
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return "", 0, fmt.Errorf("模型请求失败 HTTP %d；未记录响应正文", res.StatusCode)
+		return "", -1, fmt.Errorf("模型请求失败 HTTP %d；未记录响应正文", res.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 1024*1024+1))
 	if err != nil || len(raw) > 1024*1024 {
-		return "", 0, errors.New("模型响应读取失败或超过 1 MiB")
+		return "", -1, errors.New("模型响应读取失败或超过 1 MiB")
 	}
 	return decodeResponse(cfg.Provider, raw)
 }
@@ -184,78 +184,90 @@ func decodeResponse(provider string, raw []byte) (string, int, error) {
 		} `json:"usageMetadata"`
 	}
 	if json.Unmarshal(raw, &result) != nil {
-		return "", 0, errors.New("模型响应无法解析")
+		return "", -1, errors.New("模型响应无法解析")
 	}
-	var out strings.Builder
+	// A negative token count means the response did not provide valid, exact usage.
+	// Keep valid usage available even when a later completeness or content check fails.
 	tokens := -1
 	switch provider {
 	case "anthropic":
+		if u := result.Usage; u != nil && u.Input != nil && u.Output != nil {
+			total, valid := 0, true
+			for _, n := range []int{*u.Input, *u.Output, u.CacheRead, u.CacheCreate} {
+				if n < 0 || n > math.MaxInt-total {
+					valid = false
+					break
+				}
+				total += n
+			}
+			if valid {
+				tokens = total
+			}
+		}
+	case "openai", "openai-compatible":
+		if result.Usage != nil && result.Usage.Total != nil && *result.Usage.Total >= 0 {
+			tokens = *result.Usage.Total
+		}
+	case "gemini":
+		if result.Metadata != nil && result.Metadata.Total != nil && *result.Metadata.Total >= 0 {
+			tokens = *result.Metadata.Total
+		}
+	}
+	fail := func(err error) (string, int, error) { return "", tokens, err }
+	var out strings.Builder
+	switch provider {
+	case "anthropic":
 		if result.StopReason != "end_turn" && result.StopReason != "stop_sequence" {
-			return "", 0, incompleteFinishError(result.StopReason)
+			return fail(incompleteFinishError(result.StopReason))
 		}
 		for _, c := range result.Content {
 			if c.Type == "text" || (c.Type == "" && c.Text != nil) {
 				if c.Text == nil {
-					return "", 0, errors.New("提供方 Anthropic 返回的文本块缺少文本内容")
+					return fail(errors.New("提供方 Anthropic 返回的文本块缺少文本内容"))
 				}
 				out.WriteString(*c.Text)
 			} else if c.Text != nil && c.Type != "thinking" && c.Type != "redacted_thinking" {
-				return "", 0, errors.New("提供方 Anthropic 响应包含无法完整显示的文本块")
-			}
-		}
-		if u := result.Usage; u != nil && u.Input != nil && u.Output != nil {
-			tokens = 0
-			for _, n := range []int{*u.Input, *u.Output, u.CacheRead, u.CacheCreate} {
-				if n < 0 || n > math.MaxInt-tokens {
-					return "", 0, errors.New("模型用量无效")
-				}
-				tokens += n
+				return fail(errors.New("提供方 Anthropic 响应包含无法完整显示的文本块"))
 			}
 		}
 	case "openai", "openai-compatible":
 		if len(result.Choices) != 1 {
-			return "", 0, errors.New("模型返回的候选数不是恰好一条，无法验证单条完整答案")
+			return fail(errors.New("模型返回的候选数不是恰好一条，无法验证单条完整答案"))
 		}
 		if result.Choices[0].Finish != "stop" {
-			return "", 0, incompleteFinishError(result.Choices[0].Finish)
+			return fail(incompleteFinishError(result.Choices[0].Finish))
 		}
 		if result.Choices[0].Message.Refusal != "" {
-			return "", 0, errors.New("模型拒绝返回固定探针文本")
+			return fail(errors.New("模型拒绝返回固定探针文本"))
 		}
 		text, err := decodeOpenAITextContent(result.Choices[0].Message.Content)
 		if err != nil {
-			return "", 0, err
+			return fail(err)
 		}
 		out.WriteString(text)
-		if result.Usage != nil && result.Usage.Total != nil {
-			tokens = *result.Usage.Total
-		}
 	case "gemini":
 		if len(result.Candidates) != 1 || result.Candidates[0].Finish != "STOP" {
 			if len(result.Candidates) != 1 {
-				return "", 0, errors.New("提供方 Gemini 返回的候选数不是恰好一条，无法验证单条完整答案")
+				return fail(errors.New("提供方 Gemini 返回的候选数不是恰好一条，无法验证单条完整答案"))
 			}
-			return "", 0, incompleteFinishError(result.Candidates[0].Finish)
+			return fail(incompleteFinishError(result.Candidates[0].Finish))
 		}
 		for _, p := range result.Candidates[0].Content.Parts {
 			if p.Thought {
 				continue
 			}
 			if p.Text == nil {
-				return "", 0, errors.New("提供方 Gemini 响应包含无法完整显示的非文本部分")
+				return fail(errors.New("提供方 Gemini 响应包含无法完整显示的非文本部分"))
 			}
 			out.WriteString(*p.Text)
 		}
-		if result.Metadata != nil && result.Metadata.Total != nil {
-			tokens = *result.Metadata.Total
-		}
 	}
 	if tokens < 0 {
-		return "", 0, errors.New("模型未返回有效用量；保留未决预算占用")
+		return fail(errors.New("模型未返回有效用量；保留未决预算占用"))
 	}
 	text := strings.TrimSpace(out.String())
 	if text == "" {
-		return "", 0, errors.New("模型未返回文本答案")
+		return fail(errors.New("模型未返回文本答案"))
 	}
 	// Some compatible services wrap otherwise valid JSON in a fenced block.
 	if strings.HasPrefix(text, "```json\n") && strings.HasSuffix(text, "\n```") {

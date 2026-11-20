@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,50 @@ func TestReviewFailureDoesNotPublishVerifiedClaims(t *testing.T) {
 	}
 	if doc.Claims[0].Status != "uncertain" || usage.UncertainTokens == 0 {
 		t.Fatalf("failure presented as verified: %+v %+v", doc, usage)
+	}
+}
+
+func TestRunAccountsKnownUsageOnIncompleteResponse(t *testing.T) {
+	server := newInMemoryRoundTripper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"finish_reason": "length", "message": map[string]string{"content": `{"claims":[]}`}}},
+			"usage":   map[string]int{"total_tokens": 17},
+		})
+	}))
+	_, usage, err := Run(context.Background(), Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid", HTTPTransport: server, Model: "fixture", TokenLimit: 1000000}, Usage{}, "key", "explain", []Evidence{{ID: "e1", Source: "return 0"}})
+	if err == nil || usage.ActualTokens != 17 || usage.UncertainTokens != 0 {
+		t.Fatalf("known failed-response usage was not charged exactly: usage=%+v err=%v", usage, err)
+	}
+}
+
+func TestReviewRequestEstimateCanSkipSecondCall(t *testing.T) {
+	question := "explain"
+	evidence := []Evidence{{ID: "e1", File: "main.go", StartLine: 1, EndLine: 2, Source: "return 1"}}
+	reserve := ReservationForMode(ModeLight, question, evidence)
+	calls := 0
+	server := newInMemoryRoundTripper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"content": `{"claims":[{"id":"c1","text":"returns one","kind":"behavior","evidence_ids":["e1"]}]}`}}},
+			"usage":   map[string]int{"total_tokens": reserve - 1},
+		})
+	}))
+	tokenLimit := reserve
+	doc, usage, err := Run(context.Background(), Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid", HTTPTransport: server, Model: "fixture", TokenLimit: tokenLimit, VerificationMode: ModeLight}, Usage{}, "key", question, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, _ := profileForRun(ModeLight, question, evidence, false)
+	reviewPayload, _ := json.Marshal(map[string]any{"claims": doc.Claims, "evidence": citedEvidence(doc.Claims, evidence)})
+	reviewEstimate := estimateTokens(len(reviewPayload)+len(profile.reviewPrompt), profile.reviewLimit)
+	if reviewEstimate <= usage.Remaining(tokenLimit) {
+		t.Fatalf("fixture did not exceed remaining budget: estimate=%d remaining=%d", reviewEstimate, usage.Remaining(tokenLimit))
+	}
+	if calls != 1 || len(doc.Claims) != 1 || doc.Claims[0].Status != "uncertain" || usage.ActualTokens != reserve-1 || usage.UncertainTokens != 0 {
+		t.Fatalf("review was not skipped at actual-request admission: calls=%d doc=%+v usage=%+v", calls, doc, usage)
+	}
+	if !strings.Contains(strings.Join(doc.Unknowns, " "), "剩余预算不足以检查证据") {
+		t.Fatalf("skip reason missing: %+v", doc.Unknowns)
 	}
 }
 

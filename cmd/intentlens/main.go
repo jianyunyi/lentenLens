@@ -65,6 +65,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	if e := flags.Parse(args[1:]); e != nil {
 		return fail(out, e)
 	}
+	if flags.NArg() != 0 {
+		return fail(out, fmt.Errorf("不支持的位置参数：%q", flags.Arg(0)))
+	}
 	if command == "integration-info" {
 		return emit(out, integrationInfo())
 	}
@@ -77,11 +80,11 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		}
 		return 0
 	}
-	a, e := openApp(*root, *state)
+	request, e := decodeRequest(command, in, roundID)
 	if e != nil {
 		return fail(out, e)
 	}
-	request, e := decodeRequest(command, in, roundID)
+	a, e := openApp(*root, *state)
 	if e != nil {
 		return fail(out, e)
 	}
@@ -214,20 +217,33 @@ func decodeRequest(command string, in io.Reader, roundID *string) (input, error)
 		if command == "explain-selection" {
 			limit = 128 * 1024
 		}
-		if err := json.NewDecoder(io.LimitReader(withoutBOM(in), limit)).Decode(&request); err != nil {
-			return input{}, errors.New("需要有效的 JSON 输入")
-		}
+		return decodeJSONRequest(in, limit)
 	case "analyze-round":
 		// VS Code's runCLI sends the round id as JSON. Background hook
 		// workers pass --round explicitly and must not consume stdin.
 		if strings.TrimSpace(*roundID) == "" {
-			if err := json.NewDecoder(io.LimitReader(withoutBOM(in), 32768)).Decode(&request); err != nil {
-				return input{}, errors.New("需要有效的 JSON 输入")
+			var err error
+			request, err = decodeJSONRequest(in, 32768)
+			if err != nil {
+				return input{}, err
 			}
 			*roundID = request.RoundID
 		}
 	}
 	return request, nil
+}
+
+func decodeJSONRequest(in io.Reader, limit int64) (input, error) {
+	// Read one extra byte to distinguish real EOF from the size limit.
+	reader := &io.LimitedReader{R: withoutBOM(in), N: limit + 1}
+	decoder := json.NewDecoder(reader)
+	var request *input
+	var extra json.RawMessage
+	if err := decoder.Decode(&request); err != nil || request == nil ||
+		decoder.Decode(&extra) != io.EOF || reader.N == 0 {
+		return input{}, errors.New("需要有效的 JSON 输入")
+	}
+	return *request, nil
 }
 
 func emit(out io.Writer, v any) int {

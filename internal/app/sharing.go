@@ -233,25 +233,49 @@ func (a *App) sharedDir(create bool) (*os.Root, error) {
 		return nil, err
 	}
 	defer root.Close()
-	for _, p := range []string{".intent", ".intent/shared"} {
-		info, e := root.Lstat(p)
-		if errors.Is(e, os.ErrNotExist) && create {
-			if e = root.Mkdir(p, 0o700); e != nil && !errors.Is(e, os.ErrExist) {
-				return nil, e
-			}
-			info, e = root.Lstat(p)
-		}
-		if e != nil {
-			return nil, e
-		}
-		if !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
-			return nil, errors.New("共享目录不能是链接或普通文件")
-		}
+	intent, err := openSharedDir(root, ".intent", create)
+	if err != nil {
+		return nil, err
 	}
-	return root.OpenRoot(".intent/shared")
+	defer intent.Close()
+	return openSharedDir(intent, "shared", create)
+}
+
+func openSharedDir(root *os.Root, name string, create bool) (*os.Root, error) {
+	info, err := root.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) && create {
+		if err = root.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		info, err = root.Lstat(name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return nil, errors.New("共享目录不能是链接或普通文件")
+	}
+	dir, err := root.OpenRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	openedInfo, err := dir.Stat(".")
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	if !os.SameFile(info, openedInfo) {
+		dir.Close()
+		return nil, errors.New("共享目录路径在读取期间发生变化")
+	}
+	return dir, nil
 }
 
 func readShared(dir *os.Root, name string) (SharedRecord, error) {
+	return readSharedRecord(dir, name, dir.Open)
+}
+
+func readSharedRecord(dir *os.Root, name string, open func(string) (*os.File, error)) (SharedRecord, error) {
 	var record SharedRecord
 	info, err := dir.Lstat(name)
 	if err != nil {
@@ -260,18 +284,37 @@ func readShared(dir *os.Root, name string) (SharedRecord, error) {
 	if !info.Mode().IsRegular() || info.Size() > maxShareBytes {
 		return record, errors.New("共享记录必须是小于 1 MiB 的普通文件")
 	}
-	f, err := dir.Open(name)
+	f, err := open(name)
 	if err != nil {
 		return record, err
 	}
 	defer f.Close()
-	decoder := json.NewDecoder(io.LimitReader(f, maxShareBytes+1))
+	openedInfo, err := f.Stat()
+	if err != nil {
+		return record, err
+	}
+	if !os.SameFile(info, openedInfo) {
+		return record, errors.New("共享记录路径在读取期间发生变化")
+	}
+	if !openedInfo.Mode().IsRegular() || openedInfo.Size() > maxShareBytes {
+		return record, errors.New("共享记录必须是小于 1 MiB 的普通文件")
+	}
+	limited := &io.LimitedReader{R: f, N: maxShareBytes + 1}
+	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&record); err != nil {
+	err = decoder.Decode(&record)
+	if limited.N == 0 {
+		return record, errors.New("共享记录超过 1 MiB")
+	}
+	if err != nil {
 		return record, errors.New("共享记录格式无效")
 	}
 	var extra any
-	if decoder.Decode(&extra) != io.EOF {
+	err = decoder.Decode(&extra)
+	if limited.N == 0 {
+		return record, errors.New("共享记录超过 1 MiB")
+	}
+	if err != io.EOF {
 		return record, errors.New("共享记录包含额外内容")
 	}
 	if record.ID+".json" != name {

@@ -104,6 +104,46 @@ test('CLI bridge waits for child close after abort error before temp-directory c
   assert.equal(heldFd, undefined);
   assert.doesNotThrow(() => fs.rmSync(root, { recursive: true, force: false }));
 });
+function stalledCLI() {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const signals = [];
+  child.kill = signal => { signals.push(signal || 'SIGTERM'); return false; };
+  return { child, signals, spawnProcess: () => child };
+}
+
+for (const failure of ['timeout', 'output limit', 'stdin error']) {
+  test(`CLI bridge forces termination and rejects without close after ${failure}`, { timeout: 4000 }, async () => {
+    const { child, signals, spawnProcess } = stalledCLI();
+    const stdinError = new Error('fixture broken pipe');
+    const request = core.runCLI(process.execPath, '.', 'inspect', {}, {
+      timeout: failure === 'timeout' ? 10 : 10000,
+      spawnProcess,
+    });
+    if (failure === 'output limit') child.stdout.emit('data', 'x'.repeat(32 * 1024 * 1024 + 1));
+    if (failure === 'stdin error') child.stdin.emit('error', stdinError);
+    const expected = { timeout: /timed out/, 'output limit': /exceeds 32 MiB/, 'stdin error': stdinError };
+    await assert.rejects(request, expected[failure]);
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+    assert.ok(child.stdout.destroyed && child.stderr.destroyed);
+  });
+}
+
+test('CLI bridge waits for close after stdin fails', async () => {
+  const { child, signals, spawnProcess } = stalledCLI();
+  let settled = false;
+  const request = core.runCLI(process.execPath, '.', 'inspect', {}, { spawnProcess });
+  const rejection = assert.rejects(request, /fixture broken pipe/).then(() => { settled = true; });
+  child.stdin.emit('error', new Error('fixture broken pipe'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  child.emit('close', null);
+  await rejection;
+  assert.deepEqual(signals, ['SIGTERM']);
+});
+
 test('rendering escapes hostile source and claims and separates historical source', () => {
   assert.ok(core, 'core module implemented');
   const hostile = '<img src=x onerror="alert(1)">';
