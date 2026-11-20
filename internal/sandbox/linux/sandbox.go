@@ -4,12 +4,9 @@
 package linux
 
 import (
-	"bufio"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -18,13 +15,13 @@ import (
 	"intentlens/internal/sandbox"
 )
 
-// Sandbox implements sandbox.Sandbox for Linux using seccomp + cgroup v2.
+// Sandbox implements sandbox.Sandbox for Linux without process isolation.
 type Sandbox struct {
 	cfg        sandbox.Config
 	cgroupPath string
 }
 
-// Run executes the tool in a sandboxed Linux environment with seccomp and cgroup.
+// Run executes the tool with a timeout and filtered environment, without isolation.
 func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*sandbox.Result, error) {
 	result := &sandbox.Result{
 		StartTime: time.Now(),
@@ -81,7 +78,7 @@ func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir s
 	return result, nil
 }
 
-// Cleanup removes cgroup and seccomp resources.
+// Cleanup removes the cgroup directory if one has been recorded.
 func (s *Sandbox) Cleanup() error {
 	// TODO: Remove cgroup directory
 	if s.cgroupPath != "" {
@@ -132,13 +129,13 @@ func hasCgroupV2() bool {
 
 // hasSeccomp checks if seccomp is available.
 func hasSeccomp() bool {
-	// Try to use prctl to check seccomp support
-	// syscall.Prctl(PR_GET_SECCOMP, 0, 0, 0, 0) should return non-error
-	_, _, err := syscall.RawSyscall(syscall.SYS_PRCTL, 33, 0, 0, 0, 0) // PR_GET_SECCOMP = 33
-	return err == 0
+	// Query the current seccomp mode; a successful query indicates support.
+	// prctl takes five arguments; the final zero pads RawSyscall6's sixth slot.
+	_, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, syscall.PR_GET_SECCOMP, 0, 0, 0, 0, 0)
+	return errno == 0
 }
 
-// setupCgroup sets up cgroup v2 resource limits for the process.
+// setupCgroup is a placeholder for cgroup v2 resource limits; it currently does nothing.
 func (s *Sandbox) setupCgroup(pid int) error {
 	// TODO: Create cgroup for the process
 	// TODO: Set memory limit
@@ -181,7 +178,7 @@ func (s *Sandbox) filteredEnvironment() []string {
 	return filtered
 }
 
-// seccompFilter generates a seccomp filter for safe Go execution.
+// seccompFilter is a placeholder; it currently returns no filter and is not applied.
 func (s *Sandbox) seccompFilter() []byte {
 	// TODO: Generate seccomp-bpf bytecode
 	// This should:
