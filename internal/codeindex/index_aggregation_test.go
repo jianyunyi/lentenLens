@@ -2,9 +2,43 @@ package codeindex
 
 import (
 	"encoding/json"
+	"fmt"
+	"intentlens/internal/aggregator"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestMissingImportsUseAggregatorFormat(t *testing.T) {
+	for _, count := range []int{1, 3, 4, 5} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			var source strings.Builder
+			source.WriteString("package p\n")
+			packages := make([]string, count)
+			for i := range packages {
+				packages[i] = fmt.Sprintf("missing/pkg%d", i)
+				fmt.Fprintf(&source, "import _ %q\n", packages[i])
+			}
+			source.WriteString("func F(){}\n")
+			idx := Build(map[string]string{"main.go": source.String()})
+			wantIssue := "type check: missing imports: " + strings.Join(packages, ", ")
+			if !reflect.DeepEqual(idx.Issues, []string{wantIssue}) {
+				t.Fatalf("unexpected missing-import diagnostic: %v", idx.Issues)
+			}
+			if idx.Aggregated == nil || len(idx.Aggregated.Categories) != 1 {
+				t.Fatalf("missing aggregation: %+v", idx.Aggregated)
+			}
+			group := idx.Aggregated.Categories[0]
+			if group.Name != "Missing Imports" || len(group.Items) != 1 {
+				t.Fatalf("incorrect import classification: %+v", group)
+			}
+			summary, ok := group.Items[0].(aggregator.ItemSummary)
+			if !ok || summary.Count != count || !reflect.DeepEqual(summary.FullList, packages) {
+				t.Fatalf("import summary lost packages: %+v", group.Items)
+			}
+		})
+	}
+}
 
 // TestIndexWithAggregation verifies that the aggregator is properly integrated
 // and produces both issues and aggregated output.

@@ -1,0 +1,41 @@
+{
+  "aggregated": {
+    "summary": {
+      "totalCategories": 2,
+      "totalRestrictions": 2,
+      "categoryBreakdown": { "Missing Imports": 1, "Undefined Identifiers": 1 }
+    },
+    "categories": [
+      {
+        "name": "Missing Imports",
+        "icon": "⚠️",
+        "count": 1,
+        "items": [
+          {
+            "type": "summary",
+            "count": 4,
+            "sampleItems": ["missing/a", "missing/b", "missing/c"],
+            "fullList": ["missing/a", "missing/b", "missing/c", "missing/d"],
+            "message": "4 missing imports (e.g., missing/a, missing/b, missing/c)"
+          }
+        ]
+      },
+      {
+        "name": "Undefined Identifiers",
+        "icon": "⚠️",
+        "count": 1,
+        "items": [
+          {
+            "type": "type_check",
+            "category": "Undefined Identifiers",
+            "message": "type check: main.go:8:14: undefined: Missing",
+            "filePath": "",
+            "lineNumber": 0,
+            "severity": "error"
+          }
+        ]
+      }
+    ],
+    "timestamp": "2026-11-20T00:00:00Z"
+  }
+}

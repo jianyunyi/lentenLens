@@ -1,10 +1,84 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestCallPathAggregationJSONContract(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "main.go", `package p
+import (
+    _ "missing/a"
+    _ "missing/b"
+    _ "missing/c"
+    _ "missing/d"
+)
+func Root(){ Missing() }
+`)
+	got, err := a.CallPath("main.go", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.ReadFile("testdata/callpath-aggregation.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This same fixture drives the extension's call-path activation test.
+	// Decode untyped JSON so wrong field names cannot pass via Go struct tags.
+	var actualJSON, expectedJSON map[string]interface{}
+	if err := json.Unmarshal(wire, &actualJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(expected, &expectedJSON); err != nil {
+		t.Fatal(err)
+	}
+	aggregated, ok := actualJSON["aggregated"].(map[string]interface{})
+	if !ok {
+		t.Fatal("CallPath JSON must contain an aggregated object")
+	}
+	stamp, ok := aggregated["timestamp"].(string)
+	if parsed, err := time.Parse(time.RFC3339Nano, stamp); !ok || err != nil || parsed.IsZero() {
+		t.Fatalf("invalid aggregation timestamp: %v", aggregated["timestamp"])
+	}
+	delete(aggregated, "timestamp")
+	want := expectedJSON["aggregated"].(map[string]interface{})
+	delete(want, "timestamp")
+	if !reflect.DeepEqual(aggregated, want) {
+		t.Fatalf("aggregation contract mismatch:\n got: %v\nwant: %v", aggregated, want)
+	}
+}
+
+func TestCallPathKeepsInitDeclarationsSeparate(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "main.go", "package p\nfunc init(){ First() }\nfunc init(){ Second() }\nfunc First(){}\nfunc Second(){}\n")
+	var selected []string
+	for _, tc := range []struct {
+		line int
+		call string
+	}{{2, "First"}, {3, "Second"}} {
+		got, err := a.CallPath("main.go", tc.line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected = append(selected, got.SelectedID)
+		if len(got.Functions) != 2 || len(got.Calls) != 1 || got.Calls[0].Name != tc.call || got.Calls[0].CallerID != got.SelectedID {
+			t.Fatalf("init at line %d has merged or overwritten evidence: %+v", tc.line, got)
+		}
+	}
+	if selected[0] == selected[1] {
+		t.Fatalf("init IDs collide: %v", selected)
+	}
+}
 
 func TestCallPathIncludesAncestorsDescendantsAndBoundaryCalls(t *testing.T) {
 	a, root := fixture(t)
