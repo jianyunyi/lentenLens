@@ -14,6 +14,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   let diagnosticsReads = 0;
   let diagnosticItems = [];
   let changeDiagnosticsDuringRequest = false;
+  let changeModelAfterTestConfirmation = false;
   let modelResult = { tested: true, actual_tokens: 9, fallback: false, project_data_sent: false };
   const disposable = { dispose() {} };
   const state = new Map();
@@ -41,7 +42,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
   }, secrets, async () => new Response(JSON.stringify({ data: [{ id: 'returned-model-id' }] })));
   const vscode = {
     workspace: { isTrusted: false, workspaceFolders: [], getWorkspaceFolder: uri => uri?.fsPath?.startsWith(folder.uri.fsPath) ? folder : undefined, getConfiguration: () => ({ get: () => '' }), createFileSystemWatcher: () => ({ ...disposable, onDidCreate: () => disposable, onDidChange: () => disposable, onDidDelete: () => disposable }), onDidChangeTextDocument: () => ({ dispose() {} }), onDidGrantWorkspaceTrust: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable, workspaceState },
-    window: { activeTextEditor: undefined, createTreeView: name => { registrations.push(name); return disposable; }, createWebviewPanel: () => { const view = { webview: { html: '', onDidReceiveMessage() {} }, onDidDispose() {}, dispose() {} }; webviews.push(view); return view; }, withProgress: (_options, task) => task(), showErrorMessage: message => errors.push(message), showWarningMessage: async () => '发送此模型的测试请求', showInformationMessage: message => infos.push(message) },
+    window: { activeTextEditor: undefined, createTreeView: name => { registrations.push(name); return disposable; }, createWebviewPanel: () => { const view = { webview: { html: '', onDidReceiveMessage() {} }, onDidDispose() {}, dispose() {} }; webviews.push(view); return view; }, withProgress: (_options, task) => task(), showErrorMessage: message => errors.push(message), showWarningMessage: async () => { if (changeModelAfterTestConfirmation) model = { ...model, model: 'changed-after-confirmation' }; return '发送此模型的测试请求'; }, showInformationMessage: message => infos.push(message) },
     commands: { registerCommand: (name, fn) => { commands.set(name, fn); return disposable; } },
     languages: { registerCodeLensProvider: selector => { registrations.push(selector); return disposable; }, getDiagnostics: uri => { diagnosticsReads++; assert.equal(uri.fsPath, '/fixture/project/example.ts'); return diagnosticItems; } },
     EventEmitter: class { event = () => {}; fire() {} dispose() {} },
@@ -147,14 +148,23 @@ test('extension registers testModel in manifest, activates it, and dispatches to
       }
       assert.equal(await save(baseURL, 'fixture-api-key'), true);
     });
+    await t.test('changing the model ID after confirmation blocks the probe', async () => {
+      const savedModel = model;
+      const before = cliCalls.length;
+      changeModelAfterTestConfirmation = true;
+      try { await commands.get('intentlens.testModel')(); }
+      finally { changeModelAfterTestConfirmation = false; model = savedModel; }
+      assert.match(errors.pop(), /模型服务配置已变化.*重新运行连接测试/);
+      assert.ok(cliCalls.slice(before).every(call => call.command !== 'test-model'), 'a changed model ID never reaches the probe');
+    });
     await commands.get('intentlens.testModel')();
-    assert.deepEqual(cliCalls.map(call => call.command), ['status', 'status', 'test-model']);
+    assert.deepEqual(cliCalls.map(call => call.command), ['status', 'status', 'status', 'status', 'test-model']);
     const probe = cliCalls.at(-1);
     assert.deepEqual(probe.input, {});
     assert.equal(probe.options.env.INTENTLENS_EDITOR_API_KEY, 'fixture-api-key');
     assert.equal(probe.options.env.INTENTLENS_API_KEY, process.env.INTENTLENS_API_KEY);
     assert.equal(probe.options.args[0], '--editor-model-target');
-    assert.deepEqual(JSON.parse(probe.options.args[1]), { provider: 'openai-compatible', base_url: baseURL });
+    assert.deepEqual(JSON.parse(probe.options.args[1]), { provider: 'openai-compatible', base_url: baseURL, model: 'returned-model-id' });
     assert.deepEqual(errors, []);
     assert.match(infos[0], /返回完整且符合固定格式/);
     modelResult = { tested: false, actual_tokens: 9, fallback: false, project_data_sent: false };

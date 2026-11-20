@@ -18,15 +18,21 @@ const EditorAPIKeyEnv = "INTENTLENS_EDITOR_API_KEY"
 type EditorModelTarget struct {
 	Provider string `json:"provider"`
 	BaseURL  string `json:"base_url"`
+	Model    string `json:"model,omitempty"`
 }
 
 func (a *App) modelAPIKey(cfg explain.Config, key string) (string, error) {
+	return a.modelAPIKeyForTarget(cfg, key, false)
+}
+
+func (a *App) modelAPIKeyForTarget(cfg explain.Config, key string, requireModel bool) (string, error) {
 	editorKey, editorCredential := os.LookupEnv(EditorAPIKeyEnv)
 	if editorCredential && a.EditorModelTarget == nil {
 		return "", errors.New("VS Code 模型密钥绑定无效，请重新保存 API Key")
 	}
 	if target := a.EditorModelTarget; target != nil {
-		if cfg.Provider != target.Provider || cfg.BaseURL != target.BaseURL || cfg.APIKeyEnv != "INTENTLENS_API_KEY" {
+		modelMismatch := (requireModel || target.Model != "") && cfg.Model != target.Model
+		if cfg.Provider != target.Provider || cfg.BaseURL != target.BaseURL || modelMismatch || cfg.APIKeyEnv != "INTENTLENS_API_KEY" {
 			return "", errors.New("模型服务配置已变化，请先完成配置保存并重新确认 API Key")
 		}
 	}
@@ -66,7 +72,7 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	key, err := a.modelAPIKey(cfg, "")
+	key, err := a.modelAPIKeyForTarget(cfg, "", true)
 	if err != nil {
 		return 0, err
 	}

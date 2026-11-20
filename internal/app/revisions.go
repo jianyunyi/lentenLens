@@ -136,6 +136,7 @@ func (a *App) Revise(ctx context.Context, id, key string) (Explanation, error) {
 		return Explanation{}, err
 	}
 	evidence := parent.Evidence
+	functionID := parent.FunctionID
 	if strings.HasPrefix(parent.FunctionID, "round:") {
 		if a.freshness(evidence) != "已引用证据未变" {
 			return Explanation{}, errors.New("轮次依据已变化；请从当前代码生成解释")
@@ -145,18 +146,14 @@ func (a *App) Revise(ctx context.Context, id, key string) (Explanation, error) {
 		if indexErr != nil {
 			return Explanation{}, indexErr
 		}
-		found := false
-		for _, f := range idx.Functions {
-			if f.ID != parent.FunctionID {
-				continue
-			}
-			info, e := a.Inspect(f.File, f.StartLine)
-			if e != nil {
-				return Explanation{}, e
+		function, found := findFunctionByHistoricalID(idx.Functions, parent)
+		if found {
+			info, inspectErr := a.Inspect(function.File, function.StartLine)
+			if inspectErr != nil {
+				return Explanation{}, inspectErr
 			}
 			evidence = info.Evidence
-			found = true
-			break
+			functionID = function.ID
 		}
 		if !found {
 			return Explanation{}, errors.New("原函数无法定位；请从当前代码重新生成")
@@ -167,7 +164,7 @@ func (a *App) Revise(ctx context.Context, id, key string) (Explanation, error) {
 	if err != nil {
 		return Explanation{}, err
 	}
-	revision := Explanation{ID: newID(), File: parent.File, FunctionID: parent.FunctionID, Created: time.Now().UTC().Format(time.RFC3339Nano), Supersedes: parent.ID, Document: doc, Evidence: evidence, Freshness: a.freshness(evidence)}
+	revision := Explanation{ID: newID(), File: parent.File, FunctionID: functionID, Created: time.Now().UTC().Format(time.RFC3339Nano), Supersedes: parent.ID, Document: doc, Evidence: evidence, Freshness: a.freshness(evidence)}
 	return revision, a.write("explanation-"+revision.ID+".json", revision)
 }
 

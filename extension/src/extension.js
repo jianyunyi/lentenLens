@@ -76,14 +76,15 @@ function activate(context) {
     const version = policyVersions.get(folder.uri.fsPath) || 0;
     const runOptions = { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal };
     if (modelCommands.has(command)) {
-      const { key, target } = await modelCredentialForCall(folder, cli, context.secrets);
+      const { key, target, model } = await modelCredentialForCall(folder, cli, context.secrets);
       assertModelSaveIdle(folder);
-      if (options.confirmedTarget && (target.provider !== options.confirmedTarget.provider || target.base_url !== options.confirmedTarget.base_url)) {
-        throw new Error('模型服务地址或协议已变化，请确认配置保存后重新运行连接测试。');
+      if (options.confirmedTarget && (target.provider !== options.confirmedTarget.provider || target.base_url !== options.confirmedTarget.base_url || model.model !== options.confirmedTarget.model)) {
+        throw new Error('模型服务配置已变化，请确认配置保存后重新运行连接测试。');
       }
       runOptions.env = { ...process.env, [EDITOR_API_KEY_ENV]: key };
       // The CLI checks the target again against the exact settings used for the request.
-      runOptions.args = ['--editor-model-target', JSON.stringify(target)];
+      const editorTarget = command === 'test-model' ? { ...target, model: model.model } : target;
+      runOptions.args = ['--editor-model-target', JSON.stringify(editorTarget)];
     }
     const result = await runCLI(binary, folder.uri.fsPath, command, input, runOptions);
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
@@ -763,7 +764,7 @@ function activate(context) {
       `将仅向以下明确配置的地址发送固定连接探针，不包含项目代码、文件路径或用户问题：\nProvider：${model.provider}\nBase URL：${model.base_url}\nAPI 返回的模型 ID：${model.model}\n\n该请求可能消耗少量 token 或产生费用。不会自动改用其他 endpoint、provider 或 model。`,
       { modal: true }, '发送此模型的测试请求');
     if (answer !== '发送此模型的测试请求') return;
-    const result = await cli(folder, 'test-model', {}, { confirmedTarget: target });
+    const result = await cli(folder, 'test-model', {}, { confirmedTarget: { ...target, model: model.model } });
     if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
     vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
   });
