@@ -16,6 +16,7 @@ import (
 )
 
 const maxShareBytes = 1 << 20
+const shareTempPrefix = ".intentlens-share-"
 
 type SharedRecord struct {
 	Schema     int                `json:"schema"`
@@ -177,32 +178,53 @@ func (a *App) ConfirmShare(id, previewDigest string, confirmed bool) (SharedReco
 		return SharedRecord{}, err
 	}
 	defer dir.Close()
-	name := id + ".json"
-	f, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			existing, e := readShared(dir, name)
-			if e == nil && digest(existing) == draft.Digest {
-				return existing, nil
-			}
-		}
-		return SharedRecord{}, errors.New("共享目标已存在或不可写；未覆盖已有文件")
+	if err := publishShared(dir, id+".json", data, draft.Digest); err != nil {
+		return SharedRecord{}, err
 	}
+	return draft.Record, nil
+}
+
+func publishShared(dir *os.Root, name string, data []byte, previewDigest string) error {
+	temp := shareTempPrefix + newID() + ".tmp"
+	f, err := dir.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if temp != "" {
+			_ = dir.Remove(temp)
+		}
+	}()
 	_, err = f.Write(data)
 	if err == nil {
 		err = f.Sync()
 	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
+	if err = errors.Join(err, f.Close()); err != nil {
+		return err
 	}
-	if err != nil {
-		if removeErr := dir.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return SharedRecord{}, errors.Join(err, removeErr)
+	if err = dir.Link(temp, name); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return err
 		}
-		return SharedRecord{}, err
+		existing, readErr := readShared(dir, name)
+		if readErr != nil {
+			return fmt.Errorf("已有共享记录无法读取：%w", readErr)
+		}
+		if digest(existing) != previewDigest {
+			return errors.New("已有共享记录的摘要与预览不匹配")
+		}
 	}
-	return draft.Record, nil
+	removeErr := dir.Remove(temp)
+	if removeErr == nil {
+		temp = ""
+	}
+	d, err := dir.Open(".")
+	if err != nil {
+		return errors.Join(removeErr, err)
+	}
+	// Sync even on an idempotent retry: the previous publisher may have
+	// stopped after linking the complete file but before syncing the directory.
+	return errors.Join(removeErr, syncDir(d), d.Close())
 }
 
 func (a *App) sharedDir(create bool) (*os.Root, error) {
@@ -337,7 +359,7 @@ func (a *App) Shared() ([]SharedView, error) {
 		return nil, err
 	}
 	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
+		if strings.HasPrefix(entry.Name(), shareTempPrefix) || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		record, e := readShared(dir, entry.Name())
