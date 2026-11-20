@@ -33,6 +33,8 @@ func recordTarget(name string) any {
 	switch {
 	case strings.HasPrefix(name, "round-"):
 		return &Round{}
+	case strings.HasPrefix(name, "capture-ref-"):
+		return new(string)
 	case strings.HasPrefix(name, "explanation-"):
 		return &Explanation{}
 	case strings.HasPrefix(name, "correction-"):
@@ -89,13 +91,13 @@ func (a *App) recoverActiveRound() error {
 	if !validID(active.ID) {
 		return nil
 	}
-	if _, err := a.committedRound(active); err != nil {
+	if _, err := a.committedRound(active.Session, active.ID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	return a.removeActive()
+	return a.finishRound(active)
 }
 
 func (a *App) isolateRecords() error {

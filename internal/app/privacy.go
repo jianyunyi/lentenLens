@@ -59,30 +59,8 @@ func (a *App) scrubExcluded() error {
 			if readErr := a.read(name, &r); readErr != nil {
 				return readErr
 			}
-			changed := false
-			kept := []capture.Change{}
-			for _, c := range r.Changes {
-				if policy.Allows(c.Path) {
-					kept = append(kept, c)
-				} else {
-					changed = true
-				}
-			}
-			r.Changes = kept
-			omissions := []string{}
-			for _, p := range r.Omitted {
-				if policy.Allows(p) {
-					omissions = append(omissions, p)
-				} else {
-					changed = true
-				}
-			}
-			r.Omitted = omissions
-			if changed {
-				r.Analysis = nil
-				if writeErr := a.write(name, r); writeErr != nil {
-					return writeErr
-				}
+			if err := a.scrubRound(name, &r, policy); err != nil {
+				return err
 			}
 		case strings.HasPrefix(name, "explanation-") && strings.HasSuffix(name, ".json"):
 			var saved Explanation
@@ -127,6 +105,35 @@ func (a *App) scrubExcluded() error {
 		}
 	}
 	return a.scrubExercises()
+}
+
+// Stop holds the capture lock already, so only scrub the round it will return.
+func (a *App) scrubCommittedRound(round *Round) error {
+	policy, err := capture.LoadPolicy(a.Root)
+	if err != nil {
+		return err
+	}
+	return a.scrubRound("round-"+round.ID+".json", round, policy)
+}
+
+func (a *App) scrubRound(name string, round *Round, policy capture.Policy) error {
+	changes := []capture.Change{}
+	for _, c := range round.Changes {
+		if policy.Allows(c.Path) {
+			changes = append(changes, c)
+		}
+	}
+	omitted := []string{}
+	for _, p := range round.Omitted {
+		if policy.Allows(p) {
+			omitted = append(omitted, p)
+		}
+	}
+	if len(changes) == len(round.Changes) && len(omitted) == len(round.Omitted) {
+		return nil
+	}
+	round.Changes, round.Omitted, round.Analysis = changes, omitted, nil
+	return a.write(name, round)
 }
 
 func (a *App) Diagnostics() ([]map[string]string, error) {

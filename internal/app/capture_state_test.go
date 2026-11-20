@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,10 @@ func TestCommittedRoundWithLeftoverBaseline(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Recreate the disk state just after publication and before cleanup.
+			// Recreate an older version's disk state after publication but before cleanup.
+			if err := os.Remove(filepath.Join(a.State, captureRefName(active.Session))); err != nil {
+				t.Fatal(err)
+			}
 			if err := a.write("active.json", active); err != nil {
 				t.Fatal(err)
 			}
@@ -46,18 +50,64 @@ func TestCommittedRoundWithLeftoverBaseline(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := a.Stop(active.Session); err == nil {
-					t.Fatal("reopened app still accepts Stop for the old baseline")
-				}
 			}
 			if _, err := os.Stat(filepath.Join(a.State, "active.json")); !os.IsNotExist(err) {
 				t.Fatalf("active baseline remains: %v", err)
+			}
+			if got, err := a.Stop(active.Session); err != nil || digest(got) != digest(committed) {
+				t.Fatalf("Stop after cleanup returned %#v, %v, want the committed round", got, err)
 			}
 			after, err := os.ReadFile(path)
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatalf("committed round changed: %v", err)
 			}
 		})
+	}
+}
+
+func TestStopRetryWithReusedSession(t *testing.T) {
+	a, root := fixture(t)
+	const session = "reused"
+	var first, latest Round
+	for _, value := range []string{"1", "2"} {
+		active, err := a.Start(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(t, root, "main.go", "package p\nvar value = "+value+"\n")
+		round, err := a.Stop(session)
+		if err != nil || round.ID != active.ID {
+			t.Fatalf("Stop returned round %q, %v, want %q", round.ID, err, active.ID)
+		}
+		first, latest = latest, round
+	}
+	if first.ID == latest.ID {
+		t.Fatal("the reused session did not get a new round ID")
+	}
+	if got, err := a.Stop(session); err != nil || digest(got) != digest(latest) {
+		t.Fatalf("retry returned round %q, %v, want %q", got.ID, err, latest.ID)
+	}
+	// A previously completed session cannot stand in for a different session.
+	if _, err := a.Stop("never-started"); err == nil {
+		t.Fatal("Stop accepted a session with no baseline or history")
+	}
+	// Preexisting history can be recovered even if the older version already
+	// removed the baseline and never wrote a reference.
+	if err := os.Remove(filepath.Join(a.State, captureRefName(session))); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.Stop(session); err != nil || digest(got) != digest(latest) {
+		t.Fatalf("legacy retry returned round %q, %v, want %q", got.ID, err, latest.ID)
+	}
+	active, err := a.Start(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.AbortCapture(session, active.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Stop(session); err == nil {
+		t.Fatal("Stop returned an older round after the session's latest round was canceled")
 	}
 }
 
@@ -169,5 +219,50 @@ func TestBuildRoundUsesPolicyFromAfterCapture(t *testing.T) {
 	}
 	if len(round.Changes) != 1 || round.Changes[0].Path != "tracked.go" || round.Changes[0].Kind != "modified" {
 		t.Fatalf("changes = %+v, want only tracked.go modified", round.Changes)
+	}
+}
+
+func TestFirstStopExcludesRevokedPaths(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "revoked.go", "package p\n")
+	put(t, root, "kept.go", "package p\n")
+	put(t, root, "revoked.bin", "\x00")
+	put(t, root, "before.bin", "\x00")
+	active, err := a.Start("session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := active.Snapshot.Files["revoked.go"]; !ok || !slices.Contains(active.Snapshot.Omitted, "revoked.bin") {
+		t.Fatalf("baseline did not capture expected paths: %+v", active.Snapshot)
+	}
+
+	put(t, root, ".intentignore", "revoked.go\nrevoked.bin\n")
+	put(t, root, "kept.go", "package p\nvar kept = true\n")
+	if err := os.Remove(filepath.Join(root, "before.bin")); err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, "after.bin", "\x00")
+	round, err := a.Stop(active.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(round.Changes) != 1 || round.Changes[0].Path != "kept.go" {
+		t.Fatalf("changes = %+v, want only kept.go", round.Changes)
+	}
+	if want := []string{"before.bin", "after.bin"}; !slices.Equal(round.Omitted, want) {
+		t.Fatalf("omissions = %q, want %q", round.Omitted, want)
+	}
+	response, err := json.Marshal(round)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(a.State, "round-"+round.ID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"revoked.go", "revoked.bin"} {
+		if bytes.Contains(response, []byte(path)) || bytes.Contains(saved, []byte(path)) {
+			t.Errorf("excluded path %q appears in the first Stop response or stored round", path)
+		}
 	}
 }
