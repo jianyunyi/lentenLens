@@ -3,6 +3,22 @@ const vscode = require('vscode');
 const { runCLI } = require('./core');
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
+
+/**
+ * Serialize a value as a JavaScript literal that is safe to embed in an
+ * inline <script> block. JSON.stringify handles quotes and backslashes;
+ * the extra replacements stop `</script>` breakouts and the U+2028/U+2029
+ * line-terminator edge cases.
+ * @param {*} value - Value to serialize
+ * @returns {string} Safe JavaScript literal
+ */
+function jsValueLiteral(value) {
+    return JSON.stringify(value ?? null)
+        .replace(/</g, '\\u003c')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+}
 
 /**
  * Workspace-scoped secret key for API key storage
@@ -560,6 +576,7 @@ class AIConfigPanel {
      */
     _getHtmlContent() {
         const config = this._configurationData;
+        const nonce = crypto.randomBytes(16).toString('base64');
         const statusClass = config.configStatus === 'configured' ? 'status-success' : 
                            config.configStatus === 'invalid' ? 'status-error' : 'status-warning';
         const statusIcon = config.configStatus === 'configured' ? '✓' : 
@@ -571,9 +588,10 @@ class AIConfigPanel {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IntentLens: API Configuration</title>
-    <style>${this._getStyles()}</style>
+    <style nonce="${nonce}">${this._getStyles()}</style>
 </head>
 <body>
     <div class="container">
@@ -701,7 +719,7 @@ class AIConfigPanel {
         </div>
     </div>
 
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
 
         // UI Elements
@@ -731,10 +749,12 @@ class AIConfigPanel {
         let isTestInProgress = false;
         let lastTestResult = null;
 
-        // Initialize provider
-        providerSelect.value = '${config.provider}' || 'openai';
-        modelInput.value = '${config.modelId}' || '';
-        baseUrlInput.value = '${config.baseUrl}' || '';
+        // Initialize provider (values are serialized as safe JS literals:
+        // workspace settings are attacker-controlled in untrusted repos)
+        const initialConfig = ${jsValueLiteral({ provider: config.provider, modelId: config.modelId, baseUrl: config.baseUrl })};
+        providerSelect.value = initialConfig.provider || 'openai';
+        modelInput.value = initialConfig.modelId || '';
+        baseUrlInput.value = initialConfig.baseUrl || '';
 
         // Event: Provider selection change
         providerSelect.addEventListener('change', () => {
