@@ -6,7 +6,8 @@ const { coverageLines } = require('./coverage');
 
 function runCLI(binary, root, command, input = {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = (options.spawnProcess || spawn)(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: options.env || process.env, signal: options.signal });
+    const args = [...(options.prefixArgs || []), command, '--root', root, ...(options.args || [])];
+    const child = (options.spawnProcess || spawn)(binary, args, { cwd: root, shell: false, windowsHide: true, env: options.env || process.env, signal: options.signal });
     let stdout = '', stderr = '', size = 0, settled = false, terminationError, childError, killTimer;
     const finish = (error, value) => {
       if (settled) return;

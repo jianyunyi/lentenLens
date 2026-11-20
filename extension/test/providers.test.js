@@ -1,13 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV } = require('../src/providers');
+const { configureModel, modelCredentialForCall, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV } = require('../src/providers');
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function wizard({ query = true, accept = true, key = 'fixture-api-key', selectedModel, previousKey, configureError, onStore } = {}) {
-  const baseURL = 'https://api.fixture/v1';
+function wizard({ query = true, accept = true, key = 'fixture-api-key', selectedModel, previousKey, configureError, onStore, baseURL = 'https://api.fixture/v1' } = {}) {
   const inputs = [], picks = [], warnings = [], calls = [], requests = [];
   const secrets = new Map();
   const secretName = workspaceSecretKey('/fixture/project');
@@ -249,6 +248,18 @@ test('concurrent wizard saves wait for the preceding rollback before writing the
   assert.equal(await second, true);
   assert.equal(h.secrets.get(h.secretName), 'second-key');
   assert.equal(h.calls.length, 3);
+});
+
+test('a binding write that commits before rejecting rolls back even when the key is reused', async () => {
+  const newBase = 'https://new.fixture/v1';
+  const h = wizard({ onStore: ({ name, value }) => {
+    if (name.endsWith('.binding') && JSON.parse(value).base_url === newBase) throw new Error('fixture binding write failed');
+  } });
+  const save = ui => configureModel(ui, h.folder, h.status, h.cli, h.secure, h.fetchImpl);
+  await save(h.vscode);
+  const original = await modelCredentialForCall(h.folder, h.cli, h.secure);
+  await assert.rejects(save(wizard({ baseURL: newBase }).vscode), /fixture binding write failed/);
+  assert.deepEqual(await modelCredentialForCall(h.folder, h.cli, h.secure), original);
 });
 
 test('secure storage is mandatory and base URLs reject credentials, queries, model endpoints and remote HTTP', async () => {

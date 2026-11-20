@@ -122,6 +122,34 @@ func TestTestModelCommandIsRegisteredAndDoesNotReadStdin(t *testing.T) {
 	}
 }
 
+func TestEditorModelTargetRejectsConfigChangedAfterPreflight(t *testing.T) {
+	root, state := t.TempDir(), t.TempDir()
+	t.Setenv("INTENTLENS_API_KEY", "fixture-api-key")
+	var out bytes.Buffer
+	configure := func(base string) {
+		t.Helper()
+		out.Reset()
+		stdin := strings.NewReader(`{"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":"` + base + `","model":"fixture","api_key_env":"INTENTLENS_API_KEY","token_limit":4096}},"consent":true}`)
+		if code := run([]string{"configure", "--root", root, "--state", state}, stdin, &out); code != 0 {
+			t.Fatalf("configure failed: %s", &out)
+		}
+	}
+	args := []string{"test-model", "--root", root, "--state", state, "--editor-model-target",
+		`{"provider":"openai-compatible","base_url":"https://original.fixture/v1"}`}
+	configure("https://changed.fixture/v1")
+	out.Reset()
+	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "模型服务配置已变化") {
+		t.Fatalf("mismatched target: exit=%d output=%s", code, &out)
+	}
+	// A matching target gets past the binding guard to the normal key check.
+	configure("https://original.fixture/v1")
+	t.Setenv("INTENTLENS_API_KEY", "")
+	out.Reset()
+	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "未提供此工作区配置的 API Key") {
+		t.Fatalf("matching target: exit=%d output=%s", code, &out)
+	}
+}
+
 func TestWindowsUTF8BOMInput(t *testing.T) {
 	var out bytes.Buffer
 	code := run([]string{"start", "--root", t.TempDir(), "--state", t.TempDir()}, bytes.NewBufferString("\xef\xbb\xbf"+`{"session":"bom"}`), &out)

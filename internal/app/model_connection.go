@@ -9,6 +9,25 @@ import (
 	"intentlens/internal/explain"
 )
 
+// EditorModelTarget binds an editor-injected key to the actual destination.
+// The CLI reads settings independently after the editor's preflight check.
+type EditorModelTarget struct {
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+}
+
+func (a *App) modelAPIKey(cfg explain.Config, key string) (string, error) {
+	if target := a.EditorModelTarget; target != nil {
+		if cfg.Provider != target.Provider || cfg.BaseURL != target.BaseURL || cfg.APIKeyEnv != "INTENTLENS_API_KEY" {
+			return "", errors.New("模型服务配置已变化，请先完成配置保存并重新确认 API Key")
+		}
+	}
+	if key == "" {
+		key = os.Getenv(cfg.APIKeyEnv)
+	}
+	return key, nil
+}
+
 // TestModel performs a deliberately separate, fixed, bounded provider probe.
 // No workspace files, path, source, or user question are read or transmitted.
 func (a *App) TestModel(ctx context.Context) (int, error) {
@@ -35,7 +54,10 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	key := os.Getenv(cfg.APIKeyEnv)
+	key, err := a.modelAPIKey(cfg, "")
+	if err != nil {
+		return 0, err
+	}
 	if strings.TrimSpace(key) == "" {
 		return 0, errors.New("未提供此工作区配置的 API Key")
 	}

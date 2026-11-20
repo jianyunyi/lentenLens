@@ -142,27 +142,63 @@ async function listModels(provider, baseURL, apiKey, fetchImpl = globalThis.fetc
   }
   throw new Error('模型列表页数超过安全上限，未展示不完整列表');
 }
+// Companion SecretStorage metadata includes a key digest so an interrupted key /
+// binding write fails closed, including when a previous binding already exists.
+function keyBinding(target, apiKey) {
+  return JSON.stringify({ provider: target.provider, base_url: target.base_url,
+    digest: crypto.createHash('sha256').update(apiKey).digest('hex') });
+}
+function assertModelSaveIdle(folder) {
+  if (pendingModelSaves.has(workspaceSecretKey(folder.uri.fsPath))) {
+    throw new Error('模型配置正在保存，请先完成配置保存后重试。');
+  }
+}
+async function modelCredentialForCall(folder, cli, secrets) {
+  const name = workspaceSecretKey(folder.uri.fsPath);
+  assertModelSaveIdle(folder);
+  const { settings } = await cli(folder, 'status');
+  const model = settings?.model || {};
+  const { provider, base_url, api_key_env } = model;
+  const target = { provider, base_url };
+  const key = await secrets?.get(name);
+  const binding = await secrets?.get(name + '.binding');
+  assertModelSaveIdle(folder);
+  if (!provider || !base_url || api_key_env !== SECURE_API_KEY_ENV || !key || binding !== keyBinding(target, key)) {
+    throw new Error('API Key 未绑定或与当前模型服务不匹配。请通过“启用或调整模型分析”重新保存 API Key。');
+  }
+  return { key, target, model };
+}
 async function saveModel(folder, cli, secrets, configuration, apiKey) {
   const secretName = workspaceSecretKey(folder.uri.fsPath);
+  const bindingName = secretName + '.binding';
   // Serialize saves in this extension host. Other hosts and CLI writers can still
   // race a rollback because neither storage API offers atomic compare-and-set.
   const save = (pendingModelSaves.get(secretName) || Promise.resolve()).catch(() => {}).then(async () => {
     const { settings: previousSettings } = await cli(folder, 'status');
     const previousKey = await secrets.get(secretName);
+    const previousBinding = await secrets.get(bindingName);
+    const binding = keyBinding(configuration, apiKey);
     const settings = { ...previousSettings, model: configuration };
-    // If configure commits but its response is lost, or the host stops before
-    // storing the key, the new configuration can still be paired with the old key.
+    // Commit configuration first; calls reject until the matching binding is stored.
     await cli(folder, 'configure', { settings, consent: true });
     try {
       await secrets.store(secretName, apiKey);
+      await secrets.store(bindingName, binding);
     } catch (error) {
       try {
         const { settings: currentSettings } = await cli(folder, 'status');
         if (isDeepStrictEqual(currentSettings, settings)) {
           await cli(folder, 'configure', { settings: previousSettings, consent: true });
-          if (previousKey !== apiKey && await secrets.get(secretName) === apiKey) {
-            if (previousKey === undefined) await secrets.delete(secretName);
-            else await secrets.store(secretName, previousKey);
+          const currentBinding = await secrets.get(bindingName);
+          if ((currentBinding === binding || currentBinding === previousBinding) && await secrets.get(secretName) === apiKey) {
+            if (previousKey !== apiKey) {
+              if (previousKey === undefined) await secrets.delete(secretName);
+              else await secrets.store(secretName, previousKey);
+            }
+            if (currentBinding === binding && previousBinding !== binding) {
+              if (previousBinding === undefined) await secrets.delete(bindingName);
+              else await secrets.store(bindingName, previousBinding);
+            }
           }
         }
       } catch { /* Never expose credential recovery details in UI or logs. */ }
@@ -230,4 +266,4 @@ async function configureModel(vscode, folder, status, cli, secrets, fetchImpl = 
   vscode.window.showInformationMessage('IntentLens：已按所选 provider 的实际模型列表配置并安全保存；尚未发送模型生成请求。');
   return true;
 }
-module.exports = { configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV };
+module.exports = { modelCredentialForCall, assertModelSaveIdle, configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV };

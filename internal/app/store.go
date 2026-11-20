@@ -24,6 +24,9 @@ type App struct {
 	exerciseRun     func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
 	Root            string
 	State           string
+
+	// EditorModelTarget is set only for a key supplied by the VS Code extension.
+	EditorModelTarget *EditorModelTarget
 }
 
 func Open(root, state string) (*App, error) {

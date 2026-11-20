@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { createExerciseUI } = require('./exercises');
 const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
-const { configureModel, workspaceSecretKey, SECURE_API_KEY_ENV } = require('./providers');
+const { configureModel, modelCredentialForCall, assertModelSaveIdle, SECURE_API_KEY_ENV } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
 const { createCallPathProvider } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
@@ -17,6 +17,7 @@ const { RestrictionDetailPanel } = require('./restrictionDetailPanel');
 const { AIConfigPanel } = require('./aiConfigPanel');
 const { TokenUsagePanel } = require('./tokenUsagePanel');
 
+const modelCommands = new Set(['explain', 'explain-selection', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'test-model']);
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
@@ -72,10 +73,18 @@ function activate(context) {
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const modelCommands = new Set(['explain', 'explain-selection', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'exercise-share-prepare', 'test-model']);
-    const secret = modelCommands.has(command) ? await context.secrets?.get(workspaceSecretKey(folder.uri.fsPath)) : undefined;
-    const env = modelCommands.has(command) ? { ...process.env, [SECURE_API_KEY_ENV]: secret || '' } : process.env;
-    const result = await runCLI(binary, folder.uri.fsPath, command, input, { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal, env });
+    const runOptions = { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal };
+    if (modelCommands.has(command)) {
+      const { key, target } = await modelCredentialForCall(folder, cli, context.secrets);
+      assertModelSaveIdle(folder);
+      if (options.confirmedTarget && (target.provider !== options.confirmedTarget.provider || target.base_url !== options.confirmedTarget.base_url)) {
+        throw new Error('模型服务地址或协议已变化，请确认配置保存后重新运行连接测试。');
+      }
+      runOptions.env = { ...process.env, [SECURE_API_KEY_ENV]: key };
+      // The CLI checks the target again against the exact settings used for the request.
+      runOptions.args = ['--editor-model-target', JSON.stringify(target)];
+    }
+    const result = await runCLI(binary, folder.uri.fsPath, command, input, runOptions);
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
     return result;
   }
@@ -667,22 +676,18 @@ function activate(context) {
   });
   command('testModel', async () => {
     const folder = await folderFor(); if (!folder) return;
-    const status = await cli(folder, 'status');
-    const model = status.settings?.model || {};
-    if (!model.enabled || !model.provider || !model.base_url || !model.model || model.api_key_env !== SECURE_API_KEY_ENV) {
+    const { model, target } = await modelCredentialForCall(folder, cli, context.secrets);
+    if (!model.enabled || !model.model) {
       throw new Error('请先通过“启用或调整模型分析”查询并选择 API 返回的模型 ID。');
-    }
-    if (!context.secrets || typeof context.secrets.get !== 'function' || !await context.secrets.get(workspaceSecretKey(folder.uri.fsPath))) {
-      throw new Error('此工作区没有 VS Code 安全存储的 API Key；请重新配置。');
     }
     const answer = await vscode.window.showWarningMessage(
       `将仅向以下明确配置的地址发送固定连接探针，不包含项目代码、文件路径或用户问题：\nProvider：${model.provider}\nBase URL：${model.base_url}\nAPI 返回的模型 ID：${model.model}\n\n该请求可能消耗少量 token 或产生费用。不会自动改用其他 endpoint、provider 或 model。`,
       { modal: true }, '发送此模型的测试请求');
-	    if (answer !== '发送此模型的测试请求') return;
-	    const result = await cli(folder, 'test-model', {});
-	    if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
-	    vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
-	  });
+    if (answer !== '发送此模型的测试请求') return;
+    const result = await cli(folder, 'test-model', {}, { confirmedTarget: target });
+    if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
+    vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
+  });
   command('configureAPI', async () => {
     const folder = await folderFor(); if (!folder) return;
     AIConfigPanel.show(context, folder);

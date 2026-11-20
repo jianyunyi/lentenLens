@@ -4,7 +4,9 @@ const Module = require('node:module');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const core = require('../src/core');
+const { workspaceSecretKey, SECURE_API_KEY_ENV } = require('../src/providers');
 
 function harness(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-ui-'));
@@ -13,6 +15,12 @@ function harness(t) {
   fs.writeFileSync(path.join(root, 'dep.go'), 'package main');
   const uri = file => ({ scheme: 'file', fsPath: file, toString: () => file });
   const folder = { name: 'test', uri: uri(root) }, commands = new Map(), calls = [], panels = [], watchers = [], errors = [], documents = [];
+  const target = { provider: 'openai-compatible', base_url: 'https://api.fixture/v1' };
+  const modelStatus = { settings: { model: { ...target, api_key_env: SECURE_API_KEY_ENV } } };
+  const key = 'privacy-fixture-key', name = workspaceSecretKey(root);
+  const binding = JSON.stringify({ ...target, digest: createHash('sha256').update(key).digest('hex') });
+  const stored = new Map([[name, key], [name + '.binding', binding]]);
+  const secrets = { get: async name => stored.get(name) };
   const state = { inspection: { function: { name: 'F', source: 'safe' }, dependencies: [{ name: 'G', file: 'dep.go', start_line: 1 }], evidence: [{ id: 'e', file: 'main.go', source: 'secret', start_line: 1 }], history: [], issues: [] }, rounds: [{ id: 'r', changes: [], notes: [] }], refreshes: 0 };
   const d = { dispose() {} };
   const vscode = {
@@ -28,10 +36,16 @@ function harness(t) {
   const original = Module._load;
   Module._load = function(id, ...args) {
     if (id === 'vscode') return vscode;
-    if (id === './core') return { ...core, runCLI: async (_, __, command, input) => { calls.push({ command, input }); await state.onCLI?.(command, input); return structuredClone(command === 'inspect' ? state.inspection : command === 'rounds' ? state.rounds : state.responses?.[command] ?? {}); } };
+    if (id === './core') return { ...core, runCLI: async (_, __, command, input) => {
+      calls.push({ command, input });
+      await state.onCLI?.(command, input);
+      if (command === 'inspect') return structuredClone(state.inspection);
+      if (command === 'rounds') return structuredClone(state.rounds);
+      return structuredClone(state.responses?.[command] ?? (command === 'status' ? modelStatus : {}));
+    } };
     return original.call(this, id, ...args);
   };
-  try { delete require.cache[require.resolve('../src/extension')]; require('../src/extension').activate({ subscriptions: [], extensionPath: root }); }
+  try { delete require.cache[require.resolve('../src/extension')]; require('../src/extension').activate({ subscriptions: [], extensionPath: root, secrets }); }
   finally { Module._load = original; }
   return { folder, commands, calls, panels, watchers, errors, documents, state, uri, vscode };
 }
