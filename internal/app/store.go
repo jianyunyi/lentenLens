@@ -127,28 +127,44 @@ func (a *App) read(name string, v any) error {
 		return e
 	}
 	defer root.Close()
-	info, e := root.Lstat(name)
-	if e != nil {
-		return e
+	return readStateRecord(root, name, v, root.Open)
+}
+
+func readStateRecord(root *os.Root, name string, v any, open func(string) (*os.File, error)) error {
+	for range 3 {
+		info, err := root.Lstat(name)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("本地记录必须是普通文件")
+		}
+		if info.Size() > maxStateRecordBytes {
+			return errors.New("本地记录超过读取范围")
+		}
+		f, err := open(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		openedInfo, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return err
+		}
+		if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			f.Close()
+			continue
+		}
+		defer f.Close()
+		return decodeStateRecord(f, name, v)
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("本地记录必须是普通文件")
-	}
-	if info.Size() > maxStateRecordBytes {
-		return errors.New("本地记录超过读取范围")
-	}
-	f, e := root.Open(name)
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	openedInfo, e := f.Stat()
-	if e != nil {
-		return e
-	}
-	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
-		return errors.New("本地记录路径在读取期间发生变化")
-	}
+	return errors.New("本地记录路径在读取期间发生变化")
+}
+
+func decodeStateRecord(f *os.File, name string, v any) error {
 	b, e := io.ReadAll(io.LimitReader(f, maxStateRecordBytes+1))
 	if e != nil {
 		return e
