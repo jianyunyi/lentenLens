@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { createExerciseUI } = require('./exercises');
 const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
-const { configureModel, modelCredentialForCall, assertModelSaveIdle, SECURE_API_KEY_ENV } = require('./providers');
+const { configureModel, modelCredentialForCall, assertModelSaveIdle, EDITOR_API_KEY_ENV } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
 const { createCallPathProvider, callPathEvidenceFingerprint } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
@@ -80,7 +80,7 @@ function activate(context) {
       if (options.confirmedTarget && (target.provider !== options.confirmedTarget.provider || target.base_url !== options.confirmedTarget.base_url)) {
         throw new Error('模型服务地址或协议已变化，请确认配置保存后重新运行连接测试。');
       }
-      runOptions.env = { ...process.env, [SECURE_API_KEY_ENV]: key };
+      runOptions.env = { ...process.env, [EDITOR_API_KEY_ENV]: key };
       // The CLI checks the target again against the exact settings used for the request.
       runOptions.args = ['--editor-model-target', JSON.stringify(target)];
     }

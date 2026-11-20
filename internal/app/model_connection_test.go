@@ -3,14 +3,131 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"intentlens/internal/explain"
 )
+
+type modelConnectionTransport func(*http.Request) (*http.Response, error)
+
+func (f modelConnectionTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestEditorCredentialBindingBeforeModelRequests(t *testing.T) {
+	const base = "https://selected.fixture/v1"
+	for _, tc := range []struct {
+		name, keyEnv, editorKey, wantError string
+		target                             *EditorModelTarget
+		editor                             bool
+	}{
+		{name: "editor missing target", editor: true, editorKey: "editor-key", wantError: "模型密钥绑定无效"},
+		{name: "empty editor channel missing target", editor: true, wantError: "模型密钥绑定无效"},
+		{name: "empty target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{}, wantError: "模型服务配置已变化"},
+		{name: "invalid target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "not-a-url"}, wantError: "模型服务配置已变化"},
+		{name: "provider mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai", BaseURL: base}, wantError: "模型服务配置已变化"},
+		{name: "base mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "https://other.fixture/v1"}, wantError: "模型服务配置已变化"},
+		{name: "key env mismatch", editor: true, editorKey: "editor-key", keyEnv: "INTENTLENS_APP_CLI_KEY", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base}, wantError: "模型服务配置已变化"},
+		{name: "matching target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base}},
+		{name: "ordinary CLI default key"},
+		{name: "ordinary CLI custom key", keyEnv: "INTENTLENS_APP_CLI_KEY"},
+	} {
+		for _, caller := range []string{"probe", "analysis", "exercise"} {
+			t.Run(tc.name+"/"+caller, func(t *testing.T) {
+				t.Setenv(EditorAPIKeyEnv, tc.editorKey)
+				if !tc.editor {
+					if err := os.Unsetenv(EditorAPIKeyEnv); err != nil {
+						t.Fatal(err)
+					}
+				}
+				t.Setenv("INTENTLENS_API_KEY", "cli-key")
+				t.Setenv("INTENTLENS_APP_CLI_KEY", "cli-key")
+				a, _ := fixture(t)
+				a.EditorModelTarget = tc.target
+				if err := a.Configure(Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: " " + base + "/// ", APIKeyEnv: tc.keyEnv, Model: "fixture", TokenLimit: 1000000}}, true); err != nil {
+					t.Fatal(err)
+				}
+				calls := 0
+				checkKey := func(key string) {
+					t.Helper()
+					calls++
+					want := "cli-key"
+					if tc.editor {
+						want = "editor-key"
+					}
+					if key != want {
+						t.Fatal("model used the wrong credential channel")
+					}
+				}
+				previous := http.DefaultTransport
+				http.DefaultTransport = modelConnectionTransport(func(r *http.Request) (*http.Response, error) {
+					if r.URL.String() != base+"/chat/completions" {
+						t.Error("model used the wrong destination")
+					}
+					checkKey(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+					recorder := httptest.NewRecorder()
+					_, _ = io.WriteString(recorder, `{"choices":[{"finish_reason":"stop","message":{"content":"{\"intentlens_connection_test\":\"ok\"}"}}],"usage":{"total_tokens":9}}`)
+					return recorder.Result(), nil
+				})
+				t.Cleanup(func() { http.DefaultTransport = previous })
+				a.modelRun = func(_ context.Context, _ explain.Config, u explain.Usage, key, _ string, _ []explain.Evidence) (explain.Document, explain.Usage, error) {
+					checkKey(key)
+					return explain.Document{}, u, nil
+				}
+				a.exerciseRun = func(_ context.Context, _ explain.Config, u explain.Usage, key, _ string) (string, explain.Usage, error) {
+					checkKey(key)
+					return "{}", u, nil
+				}
+				var err error
+				switch caller {
+				case "probe":
+					_, err = a.TestModel(context.Background())
+				case "analysis":
+					_, err = a.analyze(context.Background(), "fixture", "", nil)
+				case "exercise":
+					_, err = a.exerciseModel(context.Background(), "", "fixture")
+				}
+				if tc.wantError != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.wantError) || calls != 0 {
+						t.Fatalf("requests=%d error=%v", calls, err)
+					}
+					usage, usageErr := a.Usage()
+					if usageErr != nil || usage.ActualTokens != 0 || usage.UncertainTokens != 0 {
+						t.Fatalf("rejected binding changed usage: %+v error=%v", usage, usageErr)
+					}
+				} else if err != nil || calls != 1 {
+					t.Fatalf("requests=%d error=%v", calls, err)
+				}
+			})
+		}
+	}
+}
+
+func TestEditorCredentialNeverFallsBackToOtherKeys(t *testing.T) {
+	t.Setenv(EditorAPIKeyEnv, "")
+	t.Setenv("INTENTLENS_API_KEY", "ambient-cli-key")
+	cfg := explain.Config{Provider: "openai-compatible", BaseURL: "https://selected.fixture/v1", APIKeyEnv: "INTENTLENS_API_KEY"}
+	a := &App{}
+	if _, err := a.modelAPIKey(cfg, "explicit-key"); err == nil {
+		t.Fatal("explicit key bypassed the missing editor binding")
+	}
+	a.EditorModelTarget = &EditorModelTarget{Provider: cfg.Provider, BaseURL: cfg.BaseURL}
+	for _, explicit := range []string{"", "explicit-key"} {
+		if key, err := a.modelAPIKey(cfg, explicit); err != nil || key != "" {
+			t.Fatalf("empty editor channel fell back to another key: error=%v", err)
+		}
+	}
+	t.Setenv(EditorAPIKeyEnv, "bound-editor-key")
+	if key, err := a.modelAPIKey(cfg, "explicit-key"); err != nil || key != "bound-editor-key" {
+		t.Fatalf("editor credential was overridden: error=%v", err)
+	}
+}
 
 func TestTestModelProbesExactConfiguredAPIAndSettlesBudget(t *testing.T) {
 	a, _ := fixture(t)

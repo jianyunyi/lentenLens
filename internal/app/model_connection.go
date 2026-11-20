@@ -9,6 +9,10 @@ import (
 	"intentlens/internal/explain"
 )
 
+// EditorAPIKeyEnv is the per-call SecretStorage credential channel. Keep it
+// separate from INTENTLENS_API_KEY, which remains a CLI / hook default.
+const EditorAPIKeyEnv = "INTENTLENS_EDITOR_API_KEY"
+
 // EditorModelTarget binds an editor-injected key to the actual destination.
 // The CLI reads settings independently after the editor's preflight check.
 type EditorModelTarget struct {
@@ -17,10 +21,18 @@ type EditorModelTarget struct {
 }
 
 func (a *App) modelAPIKey(cfg explain.Config, key string) (string, error) {
+	editorKey, editorCredential := os.LookupEnv(EditorAPIKeyEnv)
+	if editorCredential && a.EditorModelTarget == nil {
+		return "", errors.New("VS Code 模型密钥绑定无效，请重新保存 API Key")
+	}
 	if target := a.EditorModelTarget; target != nil {
 		if cfg.Provider != target.Provider || cfg.BaseURL != target.BaseURL || cfg.APIKeyEnv != "INTENTLENS_API_KEY" {
 			return "", errors.New("模型服务配置已变化，请先完成配置保存并重新确认 API Key")
 		}
+	}
+	if editorCredential {
+		// An empty editor key must never fall back to an ambient CLI credential.
+		return editorKey, nil
 	}
 	if key == "" {
 		key = os.Getenv(cfg.APIKeyEnv)
