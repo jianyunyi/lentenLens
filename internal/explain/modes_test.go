@@ -221,7 +221,7 @@ func TestLightReviewTruncationNeverMarksClaimsSupported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 || len(doc.Claims) != 1 || doc.Claims[0].Status != "uncertain" || usage.UncertainTokens == 0 || !strings.Contains(strings.Join(doc.Unknowns, " "), "证据支持检查失败") {
+	if calls != 2 || len(doc.Claims) != 1 || doc.Claims[0].Status != "uncertain" || usage.ActualTokens != 4 || usage.UncertainTokens != 0 || !strings.Contains(strings.Join(doc.Unknowns, " "), "证据支持检查失败") {
 		t.Fatalf("truncated review was overstated: calls=%d doc=%+v usage=%+v", calls, doc, usage)
 	}
 }
