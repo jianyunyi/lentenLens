@@ -8,14 +8,19 @@ class RestrictionTreeProvider {
         this.aggregatedData = null;
     }
 
-    refresh(aggregatedData) {
+    refresh(aggregatedData, resultId, idsByItem) {
         this.aggregatedData = aggregatedData;
+        this.resultId = resultId;
+        this.idsByItem = idsByItem;
         this._onDidChangeTreeData.fire();
     }
 
     clear() {
-        this.aggregatedData = null;
-        this._onDidChangeTreeData.fire();
+        this.refresh(null);
+    }
+
+    dispose() {
+        this._onDidChangeTreeData.dispose();
     }
 
     getTreeItem(element) {
@@ -50,6 +55,7 @@ class RestrictionTreeProvider {
                 categoryItem.contextValue = 'category';
                 categoryItem.tooltip = `${category.count} issues in ${category.name}`;
                 categoryItem.category = category;
+                categoryItem.resultId = this.resultId;
                 items.push(categoryItem);
             }
 
@@ -57,7 +63,7 @@ class RestrictionTreeProvider {
         }
 
         // Category level: show items (restrictions or summaries)
-        if (element.contextValue === 'category') {
+        if (element.contextValue === 'category' && element.resultId === this.resultId) {
             const category = element.category;
             const items = [];
 
@@ -73,7 +79,7 @@ class RestrictionTreeProvider {
                     summaryItem.command = {
                         command: 'intentlens.showRestrictionDetails',
                         title: 'Show Details',
-                        arguments: [item]
+                        arguments: [this.resultId]
                     };
                     items.push(summaryItem);
                 } else {
@@ -86,11 +92,12 @@ class RestrictionTreeProvider {
                     restrictionItem.tooltip = item.message;
                     
                     // Add command to navigate to source location
-                    if (item.filePath && item.lineNumber > 0) {
+                    const recordId = this.idsByItem.get(item);
+                    if (recordId) {
                         restrictionItem.command = {
                             command: 'intentlens.navigateToRestriction',
                             title: 'Go to Location',
-                            arguments: [item.filePath, item.lineNumber]
+                            arguments: [recordId]
                         };
                     }
                     

@@ -5,15 +5,10 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 
 function createPanel(data) {
-  const copies = [], paths = [], positions = [];
-  const editor = { revealRange(range) { positions.push(range.start); } };
+  const copies = [], navigations = [];
   const vscode = {
     env: { clipboard: { writeText: async text => { copies.push(text); } } },
-    workspace: { openTextDocument: async filePath => { paths.push(filePath); return filePath; } },
-    window: { showTextDocument: async () => editor, showInformationMessage() {} },
-    Position: class { constructor(line, character) { Object.assign(this, { line, character }); } },
-    Selection: class {},
-    Range: class { constructor(start) { this.start = start; } },
+    window: { showInformationMessage() {} },
   };
   const webview = { html: '', onDidReceiveMessage(fn) { this.receive = fn; } };
   const panel = { webview, onDidDispose() {} };
@@ -23,11 +18,11 @@ function createPanel(data) {
     const modulePath = require.resolve('../src/restrictionDetailPanel');
     delete require.cache[modulePath];
     const { RestrictionDetailPanel } = require(modulePath);
-    new RestrictionDetailPanel(panel, { subscriptions: [] }, data);
+    new RestrictionDetailPanel(panel, data, new Map([[categories[0].items[0], 'host-record']]), id => navigations.push(id));
   } finally {
     Module._load = load;
   }
-  return { webview, copies, paths, positions };
+  return { webview, copies, navigations };
 }
 
 const message = "expected <T> & \"quoted\" 'name'";
@@ -61,7 +56,7 @@ test('detail panel escapes all diagnostic text and uses only nonce-authorized st
 });
 
 test('detail panel resolves copy and navigation through host records and invalidates old IDs on filter changes', async () => {
-  const { webview, copies, paths, positions } = createPanel({ categories });
+  const { webview, copies, navigations } = createPanel({ categories });
   const id = webview.html.match(/data-command="navigate" data-id="([^"]+)"/)[1];
   const [, summaryId] = [...webview.html.matchAll(/data-command="copy" data-id="([^"]+)"/g)].map(match => match[1]);
 
@@ -69,16 +64,14 @@ test('detail panel resolves copy and navigation through host records and invalid
   webview.receive({ command: 'navigate', id: 'unknown', filePath: '/other.go', line: 1 });
   webview.receive({ command: 'navigate', id: summaryId, filePath: '/other.go', line: 1 });
   assert.deepEqual(copies, []);
-  assert.deepEqual(paths, []);
+  assert.deepEqual(navigations, []);
 
   webview.receive({ command: 'copy', id, text: 'untrusted text' });
   webview.receive({ command: 'copy', id: summaryId });
   webview.receive({ command: 'navigate', id, filePath: '/other.go', line: 1 });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(copies, [message, 'a<b, c&d, e, f, g, sixth-item']);
-  assert.deepEqual(paths, [filePath]);
-  assert.equal(positions[0].line, 6);
-  assert.equal(positions[0].character, 0);
+  assert.deepEqual(navigations, ['host-record']);
 
   const filter = webview.html.match(/data-filter="([^"]+)">• Other<\/button>/)[1];
   webview.receive({ command: 'filter', id: filter });
@@ -87,5 +80,5 @@ test('detail panel resolves copy and navigation through host records and invalid
   webview.receive({ command: 'copy', id });
   webview.receive({ command: 'navigate', id });
   assert.equal(copies.length, 2);
-  assert.equal(paths.length, 1);
+  assert.equal(navigations.length, 1);
 });

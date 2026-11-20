@@ -6,12 +6,11 @@ const { escapeHTML } = require('./core');
 class RestrictionDetailPanel {
     static currentPanel = undefined;
 
-    static show(context, aggregatedData) {
+    static show(aggregatedData, idsByItem, navigate) {
         const column = vscode.ViewColumn.Two;
 
         if (RestrictionDetailPanel.currentPanel) {
             RestrictionDetailPanel.currentPanel._panel.reveal(column);
-            RestrictionDetailPanel.currentPanel._update(aggregatedData);
             return;
         }
 
@@ -26,18 +25,35 @@ class RestrictionDetailPanel {
             }
         );
 
-        RestrictionDetailPanel.currentPanel = new RestrictionDetailPanel(panel, context, aggregatedData);
+        RestrictionDetailPanel.currentPanel = new RestrictionDetailPanel(panel, aggregatedData, idsByItem, navigate);
     }
 
-    constructor(panel, context, aggregatedData) {
+    static close() {
+        RestrictionDetailPanel.currentPanel?._panel.dispose();
+    }
+
+    static update(aggregatedData, idsByItem) {
+        const current = RestrictionDetailPanel.currentPanel;
+        if (!current) return;
+        current._idsByItem = idsByItem;
+        if (!aggregatedData.categories.some(category => category.name === current._currentFilter)) current._currentFilter = 'all';
+        current._update(aggregatedData);
+    }
+
+    constructor(panel, aggregatedData, idsByItem, navigate) {
         this._panel = panel;
-        this._context = context;
-        this._aggregatedData = aggregatedData;
+        this._idsByItem = idsByItem;
         this._currentFilter = 'all';
 
         this._update(aggregatedData);
 
-        this._panel.onDidDispose(() => this.dispose(), null, context.subscriptions);
+        this._panel.onDidDispose(() => {
+            RestrictionDetailPanel.currentPanel = undefined;
+            this._records.clear();
+            this._filters.clear();
+            this._aggregatedData = undefined;
+            this._idsByItem = undefined;
+        });
 
         this._panel.webview.onDidReceiveMessage(
             message => {
@@ -55,29 +71,15 @@ class RestrictionDetailPanel {
                         vscode.window.showInformationMessage('✓ 已复制到剪贴板');
                         break;
                     case 'navigate':
-                        if (!record?.filePath || !Number.isInteger(record.line) || record.line < 1) return;
-                        this._navigateToLocation(record.filePath, record.line);
-                        break;
+                        if (record?.navigationId) return navigate(record.navigationId);
                 }
-            },
-            null,
-            context.subscriptions
+            }
         );
     }
 
     _update(aggregatedData) {
         this._aggregatedData = aggregatedData;
         this._panel.webview.html = this._getHtmlContent();
-    }
-
-    _navigateToLocation(filePath, line) {
-        vscode.workspace.openTextDocument(filePath).then(doc => {
-            vscode.window.showTextDocument(doc).then(editor => {
-                const position = new vscode.Position(line - 1, 0);
-                editor.selection = new vscode.Selection(position, position);
-                editor.revealRange(new vscode.Range(position, position));
-            });
-        });
     }
 
     _getHtmlContent() {
@@ -165,9 +167,9 @@ document.querySelectorAll('[data-command]').forEach(control => {
         const filePath = typeof restriction.filePath === 'string' ? restriction.filePath : '';
         const fileName = filePath ? filePath.split(/[\\/]/).pop() : '未知';
         const location = fileName + (restriction.lineNumber > 0 ? ':' + restriction.lineNumber : '');
-        const id = this._record({ text: String(restriction.message ?? ''), filePath, line: restriction.lineNumber });
-        const navigate = filePath && Number.isInteger(restriction.lineNumber) && restriction.lineNumber > 0
-            ? ' data-command="navigate" data-id="' + id + '"' : '';
+        const navigationId = this._idsByItem.get(restriction);
+        const id = this._record({ text: String(restriction.message ?? ''), navigationId });
+        const navigate = navigationId ? ' data-command="navigate" data-id="' + id + '"' : '';
         return '<div class="restriction-item"><div class="restriction-header"><div><span class="restriction-location"' + navigate + '>📂 ' + escapeHTML(location) + '</span></div><button class="copy-btn" data-command="copy" data-id="' + id + '">📋 复制</button></div><div class="restriction-message">' + escapeHTML(restriction.message) + '</div></div>';
     }
 
@@ -186,10 +188,6 @@ body{font-family:var(--vscode-font-family);background:var(--vscode-editor-backgr
 </style></head><body><div class="empty-state"><h2>✅ 未发现问题</h2><p>代码解析未发现任何限制或错误</p></div></body></html>`;
     }
 
-    dispose() {
-        RestrictionDetailPanel.currentPanel = undefined;
-        this._panel.dispose();
-    }
 }
 
 module.exports = { RestrictionDetailPanel };
