@@ -86,7 +86,7 @@ func TestAggregationIntegration(t *testing.T) {
 	}
 	// Verify backward compatibility - Issues field should still be populated
 	if len(i3.Issues) != i3.Aggregated.Summary.TotalRestrictions {
-		t.Errorf("Issues count (%d) doesn't match aggregated count (%d)", 
+		t.Errorf("Issues count (%d) doesn't match aggregated count (%d)",
 			len(i3.Issues), i3.Aggregated.Summary.TotalRestrictions)
 	}
 }
@@ -96,15 +96,15 @@ func TestAggregationCategories(t *testing.T) {
 	i := Build(map[string]string{
 		"parse_error.go": "package ?",
 	})
-	
+
 	if i.Aggregated == nil {
 		t.Fatal("Expected Aggregated to be non-nil")
 	}
-	
+
 	if len(i.Aggregated.Categories) == 0 {
 		t.Error("Expected at least one category")
 	}
-	
+
 	// Verify that Parse Errors category exists
 	foundParseErrors := false
 	for _, cat := range i.Aggregated.Categories {
@@ -115,7 +115,7 @@ func TestAggregationCategories(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundParseErrors {
 		t.Error("Expected Parse Errors category in aggregated result")
 	}

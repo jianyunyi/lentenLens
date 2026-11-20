@@ -19,24 +19,26 @@
 //
 // # Example Usage
 //
-//issues := []string{
-//    "main.go:10:5: parse failed: expected ';', found 'EOF'",
-//    "type check: missing imports: fmt, context",
-//    "service.go:45:2: declared and not used: result",
-//}
+//	issues := []string{
+//	   "main.go:10:5: parse failed: expected ';', found 'EOF'",
+//	   "type check: missing imports: fmt, context",
+//	   "service.go:45:2: declared and not used: result",
+//	}
 //
-//// With timeout protection
-//result, err := aggregator.AggregateWithTimeout(issues, 200*time.Millisecond)
-//if err != nil {
-//    // Handle timeout or panic
-//    log.Printf("Aggregation failed: %v", err)
-//    return
-//}
+// // With timeout protection
+// result, err := aggregator.AggregateWithTimeout(issues, 200*time.Millisecond)
 //
-//// Use aggregated result for display
-//fmt.Printf("Found %d restrictions in %d categories\n",
-//    result.Summary.TotalRestrictions,
-//    result.Summary.TotalCategories)
+//	if err != nil {
+//	   // Handle timeout or panic
+//	   log.Printf("Aggregation failed: %v", err)
+//	   return
+//	}
+//
+// // Use aggregated result for display
+// fmt.Printf("Found %d restrictions in %d categories\n",
+//
+//	result.Summary.TotalRestrictions,
+//	result.Summary.TotalCategories)
 //
 // # Classification Rules
 //
@@ -69,10 +71,12 @@
 // The package is designed to be used alongside existing restriction arrays.
 // Output includes the AggregatedResult structure which can be added to JSON
 // output while maintaining existing "issues" arrays for backward compatibility.
-//
 package aggregator
 
 import (
+	"context"
+	"math"
+	"slices"
 	"time"
 )
 
@@ -137,12 +141,12 @@ type AggregatedResult struct {
 func parseIssueString(issue string) (filePath string, line int, message string) {
 	// Try to match format: "path/file.go:123:col: message" or "path/file.go:123: message"
 	// Pattern: filepath followed by optional :line:col or :line, then message
-	
+
 	// Special case: Windows absolute path starts with drive letter (e.g., C:\)
 	// Need to skip the first colon if it's part of a Windows drive letter
 	colonIdx := -1
 	startSearch := 0
-	
+
 	// Check if this looks like a Windows absolute path (X:\ where X is a letter)
 	if len(issue) >= 3 && issue[1] == ':' && (issue[2] == '\\' || issue[2] == '/') {
 		if (issue[0] >= 'A' && issue[0] <= 'Z') || (issue[0] >= 'a' && issue[0] <= 'z') {
@@ -150,7 +154,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 			startSearch = 2
 		}
 	}
-	
+
 	// Find the first colon after the drive letter (if any)
 	for i := startSearch; i < len(issue); i++ {
 		if issue[i] == ':' {
@@ -158,20 +162,20 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 			break
 		}
 	}
-	
+
 	// If no colon found, treat entire string as message
 	if colonIdx == -1 {
 		message = issue
 		return
 	}
-	
+
 	// Check if the part before first colon looks like a file path
 	// (contains / or \ or ends with .go)
 	potentialPath := issue[:colonIdx]
 	if len(potentialPath) > 0 && (containsPathSeparator(potentialPath) || endsWithGoExt(potentialPath)) {
 		filePath = potentialPath
 		remainder := issue[colonIdx+1:]
-		
+
 		// Try to parse line number from remainder
 		if len(remainder) > 0 {
 			// Look for next colon to find where line number ends
@@ -182,7 +186,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 					break
 				}
 			}
-			
+
 			if nextColonIdx > 0 {
 				// Try to parse the part before next colon as line number
 				lineStr := remainder[:nextColonIdx]
@@ -192,7 +196,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 					// Successfully parsed line number
 					// Now check if there's a column number or message
 					messageStart := remainder[nextColonIdx+1:]
-					
+
 					// Check if next part is a column number (another number before colon)
 					if len(messageStart) > 0 {
 						thirdColonIdx := -1
@@ -202,7 +206,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 								break
 							}
 						}
-						
+
 						if thirdColonIdx > 0 {
 							colStr := messageStart[:thirdColonIdx]
 							_, colErr := atoi(colStr)
@@ -212,7 +216,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 								return
 							}
 						}
-						
+
 						// No column number, this is the message
 						message = trimSpace(messageStart)
 						return
@@ -241,7 +245,7 @@ func parseIssueString(issue string) (filePath string, line int, message string) 
 		message = issue
 		return
 	}
-	
+
 	return
 }
 
@@ -263,15 +267,15 @@ func trimSpace(s string) string {
 	// Trim leading and trailing whitespace
 	start := 0
 	end := len(s)
-	
+
 	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
 		start++
 	}
-	
+
 	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
 		end--
 	}
-	
+
 	return s[start:end]
 }
 
@@ -279,13 +283,17 @@ func atoi(s string) (int, error) {
 	if len(s) == 0 {
 		return 0, &parseError{"empty string"}
 	}
-	
+
 	n := 0
 	for i := 0; i < len(s); i++ {
 		if s[i] < '0' || s[i] > '9' {
 			return 0, &parseError{"invalid digit"}
 		}
-		n = n*10 + int(s[i]-'0')
+		digit := int(s[i] - '0')
+		if n > (math.MaxInt-digit)/10 {
+			return 0, &parseError{"integer overflow"}
+		}
+		n = n*10 + digit
 	}
 	return n, nil
 }
@@ -308,22 +316,23 @@ func (e *parseError) Error() string {
 // - Other → Other category
 func classifyRestriction(r *Restriction) {
 	msg := toLower(r.Message)
-	
+
 	if contains(msg, "parse failed") {
 		r.Type = "parse"
 		r.Category = "Parse Errors"
 		r.Severity = "error"
+	} else if contains(msg, "type check:") && contains(msg, "missing imports:") {
+		r.Type = "type_check"
+		r.Category = "Missing Imports"
+		r.Severity = "error"
+	} else if contains(msg, "undefined:") || contains(msg, "not declared") {
+		r.Type = "type_check"
+		r.Category = "Undefined Identifiers"
+		r.Severity = "error"
 	} else if contains(msg, "type check:") {
 		r.Type = "type_check"
+		r.Category = "Type Check Errors"
 		r.Severity = "error"
-		
-		if contains(msg, "missing imports:") {
-			r.Category = "Missing Imports"
-		} else if contains(msg, "undefined:") || contains(msg, "not declared") {
-			r.Category = "Undefined Identifiers"
-		} else {
-			r.Category = "Type Check Errors"
-		}
 	} else if contains(msg, "ambiguous") || contains(r.Message, "调用目标未唯一确定") {
 		// Note: Chinese text is case-sensitive, so we check the original message
 		r.Type = "ambiguous"
@@ -357,7 +366,7 @@ func contains(s, substr string) bool {
 	if len(s) < len(substr) {
 		return false
 	}
-	
+
 	for i := 0; i <= len(s)-len(substr); i++ {
 		match := true
 		for j := 0; j < len(substr); j++ {
@@ -412,11 +421,14 @@ func severityRank(category string) int {
 
 // groupByCategory groups restrictions by category and creates CategoryGroup slices.
 // Categories are sorted by severity rank (errors first, then warnings, then info).
-func groupByCategory(restrictions []Restriction) []CategoryGroup {
+func groupByCategory(ctx context.Context, restrictions []Restriction) []CategoryGroup {
 	// Create map: category -> []Restriction
 	categoryMap := make(map[string][]Restriction)
 
 	for i := range restrictions {
+		if ctx.Err() != nil {
+			return nil
+		}
 		category := restrictions[i].Category
 		categoryMap[category] = append(categoryMap[category], restrictions[i])
 	}
@@ -427,6 +439,9 @@ func groupByCategory(restrictions []Restriction) []CategoryGroup {
 		// Convert []Restriction to []interface{}
 		interfaceItems := make([]interface{}, len(items))
 		for i, item := range items {
+			if ctx.Err() != nil {
+				return nil
+			}
 			interfaceItems[i] = item
 		}
 
@@ -500,13 +515,19 @@ func parseMissingImportsMessage(message string) []string {
 }
 
 // extractMissingPackages collects all missing packages from restrictions, deduplicates, and sorts.
-func extractMissingPackages(restrictions []Restriction) []string {
+func extractMissingPackages(ctx context.Context, restrictions []Restriction) []string {
 	packageSet := make(map[string]bool)
 
 	for _, r := range restrictions {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if r.Category == "Missing Imports" {
 			packages := parseMissingImportsMessage(r.Message)
 			for _, pkg := range packages {
+				if ctx.Err() != nil {
+					return nil
+				}
 				packageSet[pkg] = true
 			}
 		}
@@ -515,24 +536,21 @@ func extractMissingPackages(restrictions []Restriction) []string {
 	// Convert to sorted slice
 	var packages []string
 	for pkg := range packageSet {
+		if ctx.Err() != nil {
+			return nil
+		}
 		packages = append(packages, pkg)
 	}
 
 	// Sort packages alphabetically
-	for i := 0; i < len(packages); i++ {
-		for j := i + 1; j < len(packages); j++ {
-			if packages[i] > packages[j] {
-				packages[i], packages[j] = packages[j], packages[i]
-			}
-		}
-	}
+	slices.Sort(packages)
 
 	return packages
 }
 
 // summarizeMissingImports creates an ItemSummary from missing import restrictions.
-func summarizeMissingImports(restrictions []Restriction) ItemSummary {
-	packages := extractMissingPackages(restrictions)
+func summarizeMissingImports(ctx context.Context, restrictions []Restriction) ItemSummary {
+	packages := extractMissingPackages(ctx, restrictions)
 	count := len(packages)
 
 	var sampleItems []string
@@ -558,7 +576,7 @@ func formatMissingImportsMessage(count int, sampleItems []string) string {
 	if count <= 3 {
 		return "Missing imports: " + join(sampleItems, ", ")
 	}
-	
+
 	// Format: "10 missing imports (e.g., pkg1, pkg2, pkg3)"
 	countStr := itoa(count)
 	sample := join(sampleItems, ", ")
@@ -569,135 +587,135 @@ func formatMissingImportsMessage(count int, sampleItems []string) string {
 // Input: "调用目标未唯一确定：errors.New" or "ambiguous reference to New"
 // Returns: "errors.New" or "New", or empty string if not an ambiguous call message
 func parseAmbiguousCallMessage(message string) string {
-// Check for Chinese format: "调用目标未唯一确定：target"
-chinesePrefix := "调用目标未唯一确定："
-if len(message) >= len(chinesePrefix) {
-// Try to find the Chinese prefix
-for i := 0; i <= len(message)-len(chinesePrefix); i++ {
-match := true
-for j := 0; j < len(chinesePrefix); j++ {
-if i+j >= len(message) || message[i+j] != chinesePrefix[j] {
-match = false
-break
-}
-}
-if match {
-// Extract target after the colon
-target := trimSpace(message[i+len(chinesePrefix):])
-if target != "" {
-return target
-}
-}
-}
-}
+	// Check for Chinese format: "调用目标未唯一确定：target"
+	chinesePrefix := "调用目标未唯一确定："
+	if len(message) >= len(chinesePrefix) {
+		// Try to find the Chinese prefix
+		for i := 0; i <= len(message)-len(chinesePrefix); i++ {
+			match := true
+			for j := 0; j < len(chinesePrefix); j++ {
+				if i+j >= len(message) || message[i+j] != chinesePrefix[j] {
+					match = false
+					break
+				}
+			}
+			if match {
+				// Extract target after the colon
+				target := trimSpace(message[i+len(chinesePrefix):])
+				if target != "" {
+					return target
+				}
+			}
+		}
+	}
 
-// Check for English format: "ambiguous reference to <target>"
-ambiguousPrefix := "ambiguous reference to "
-lowerMsg := toLower(message)
-idx := -1
+	// Check for English format: "ambiguous reference to <target>"
+	ambiguousPrefix := "ambiguous reference to "
+	lowerMsg := toLower(message)
+	idx := -1
 
-for i := 0; i <= len(lowerMsg)-len(ambiguousPrefix); i++ {
-match := true
-for j := 0; j < len(ambiguousPrefix); j++ {
-if lowerMsg[i+j] != ambiguousPrefix[j] {
-match = false
-break
-}
-}
-if match {
-idx = i
-break
-}
-}
+	for i := 0; i <= len(lowerMsg)-len(ambiguousPrefix); i++ {
+		match := true
+		for j := 0; j < len(ambiguousPrefix); j++ {
+			if lowerMsg[i+j] != ambiguousPrefix[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			idx = i
+			break
+		}
+	}
 
-if idx != -1 {
-target := trimSpace(message[idx+len(ambiguousPrefix):])
-if target != "" {
-return target
-}
-}
+	if idx != -1 {
+		target := trimSpace(message[idx+len(ambiguousPrefix):])
+		if target != "" {
+			return target
+		}
+	}
 
-// Also check for "ambiguous call" format
-if contains(lowerMsg, "ambiguous") {
-// Return a generic marker
-return "ambiguous"
-}
+	// Also check for "ambiguous call" format
+	if contains(lowerMsg, "ambiguous") {
+		// Return a generic marker
+		return "ambiguous"
+	}
 
-return ""
+	return ""
 }
 
 // extractAmbiguousTargets collects all ambiguous call targets from restrictions, deduplicates, and sorts.
-func extractAmbiguousTargets(restrictions []Restriction) []string {
-targetSet := make(map[string]bool)
+func extractAmbiguousTargets(ctx context.Context, restrictions []Restriction) []string {
+	targetSet := make(map[string]bool)
 
-for _, r := range restrictions {
-if r.Category == "Ambiguous Calls" {
-target := parseAmbiguousCallMessage(r.Message)
-if target != "" {
-targetSet[target] = true
-}
-}
-}
+	for _, r := range restrictions {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if r.Category == "Ambiguous Calls" {
+			target := parseAmbiguousCallMessage(r.Message)
+			if target != "" {
+				targetSet[target] = true
+			}
+		}
+	}
 
-// Convert map to slice
-var targets []string
-for target := range targetSet {
-targets = append(targets, target)
-}
+	// Convert map to slice
+	var targets []string
+	for target := range targetSet {
+		if ctx.Err() != nil {
+			return nil
+		}
+		targets = append(targets, target)
+	}
 
-// Sort alphabetically
-for i := 0; i < len(targets); i++ {
-for j := i + 1; j < len(targets); j++ {
-if targets[i] > targets[j] {
-targets[i], targets[j] = targets[j], targets[i]
-}
-}
-}
+	// Sort alphabetically
+	slices.Sort(targets)
 
-return targets
+	return targets
 }
 
 // summarizeAmbiguousCalls creates an ItemSummary from ambiguous call restrictions.
-func summarizeAmbiguousCalls(restrictions []Restriction) ItemSummary {
-targets := extractAmbiguousTargets(restrictions)
-count := len(targets)
+func summarizeAmbiguousCalls(ctx context.Context, restrictions []Restriction) ItemSummary {
+	targets := extractAmbiguousTargets(ctx, restrictions)
+	count := len(targets)
 
-var sampleItems []string
-if count <= 3 {
-sampleItems = targets
-} else {
-sampleItems = targets[:3]
-}
+	var sampleItems []string
+	if count <= 3 {
+		sampleItems = targets
+	} else {
+		sampleItems = targets[:3]
+	}
 
-message := formatAmbiguousCallsMessage(count, sampleItems)
+	message := formatAmbiguousCallsMessage(count, sampleItems)
 
-return ItemSummary{
-Type:        "summary",
-Count:       count,
-SampleItems: sampleItems,
-FullList:    targets,
-Message:     message,
-}
+	return ItemSummary{
+		Type:        "summary",
+		Count:       count,
+		SampleItems: sampleItems,
+		FullList:    targets,
+		Message:     message,
+	}
 }
 
 // formatAmbiguousCallsMessage formats the human-readable summary message for ambiguous calls.
 func formatAmbiguousCallsMessage(count int, sampleItems []string) string {
-if count == 0 {
-return "No ambiguous calls"
-}
+	if count == 0 {
+		return "No ambiguous calls"
+	}
 
-if count == 1 {
-return "1 ambiguous call: " + sampleItems[0]
-}
+	if count == 1 {
+		return "1 ambiguous call: " + sampleItems[0]
+	}
 
-if count <= 3 {
-return itoa(count) + " ambiguous calls: " + join(sampleItems, ", ")
-}
+	if count <= 3 {
+		return itoa(count) + " ambiguous calls: " + join(sampleItems, ", ")
+	}
 
-// Format: "15 ambiguous calls (e.g., errors.New, len, json.Valid)"
-countStr := itoa(count)
-sample := join(sampleItems, ", ")
-return countStr + " ambiguous calls (e.g., " + sample + ")"
+	// Format: "15 ambiguous calls (e.g., errors.New, len, json.Valid)"
+	countStr := itoa(count)
+	sample := join(sampleItems, ", ")
+	return countStr + " ambiguous calls (e.g., " + sample + ")"
 }
 
 // Helper function to join strings with a separator
@@ -770,10 +788,13 @@ func itoa(n int) string {
 }
 
 // parseRestrictions converts []string issue messages to []Restriction
-func parseRestrictions(issues []string) []Restriction {
+func parseRestrictions(ctx context.Context, issues []string) []Restriction {
 	restrictions := make([]Restriction, 0, len(issues))
 
 	for _, issue := range issues {
+		if ctx.Err() != nil {
+			return nil
+		}
 		if issue == "" {
 			continue
 		}
@@ -812,65 +833,77 @@ func calculateSummary(groups []CategoryGroup) Summary {
 
 // Aggregate aggregates parse restrictions into structured, hierarchical display
 func Aggregate(issues []string) AggregatedResult {
+	result, _ := AggregateContext(context.Background(), issues)
+	return result
+}
+
+// AggregateContext aggregates issues until completion or cancellation.
+func AggregateContext(ctx context.Context, issues []string) (AggregatedResult, error) {
+	if err := ctx.Err(); err != nil {
+		return AggregatedResult{}, err
+	}
 	// Step 1: Parse and classify
-	restrictions := parseRestrictions(issues)
+	restrictions := parseRestrictions(ctx, issues)
+	if err := ctx.Err(); err != nil {
+		return AggregatedResult{}, err
+	}
 
 	// Step 2: Group by category
-	groups := groupByCategory(restrictions)
+	groups := groupByCategory(ctx, restrictions)
 
-	// Step 3: Apply Missing Imports summarization
+	// Step 3: Summarize categories with repetitive diagnostics.
 	for i := range groups {
-		if groups[i].Name == "Missing Imports" {
-			// Convert Items back to []Restriction
+		switch groups[i].Name {
+		case "Missing Imports", "Ambiguous Calls":
 			restrictions := make([]Restriction, 0, len(groups[i].Items))
 			for _, item := range groups[i].Items {
+				if err := ctx.Err(); err != nil {
+					return AggregatedResult{}, err
+				}
 				if r, ok := item.(Restriction); ok {
 					restrictions = append(restrictions, r)
 				}
 			}
 
-			// Create summary
-			summary := summarizeMissingImports(restrictions)
-
-			// Replace Items with summary
+			var summary ItemSummary
+			if groups[i].Name == "Missing Imports" {
+				summary = summarizeMissingImports(ctx, restrictions)
+			} else {
+				summary = summarizeAmbiguousCalls(ctx, restrictions)
+			}
+			if err := ctx.Err(); err != nil {
+				return AggregatedResult{}, err
+			}
 			groups[i].Items = []interface{}{summary}
-			// Keep count as total restrictions, not summary count
-			} else if groups[i].Name == "Ambiguous Calls" {
-    // Convert Items back to []Restriction
-    restrictions := make([]Restriction, 0, len(groups[i].Items))
-    for _, item := range groups[i].Items {
-        if r, ok := item.(Restriction); ok {
-            restrictions = append(restrictions, r)
-        }
-    }
-
-    // Create summary
-    summary := summarizeAmbiguousCalls(restrictions)
-
-    // Replace Items with summary
-    groups[i].Items = []interface{}{summary}
-    // Keep count as total restrictions, not summary count
-
-
 		}
 	}
 
 	// Step 4: Calculate summary statistics
 	summary := calculateSummary(groups)
+	if err := ctx.Err(); err != nil {
+		return AggregatedResult{}, err
+	}
 
 	// Step 5: Build result
 	return AggregatedResult{
 		Summary:    summary,
 		Categories: groups,
 		Timestamp:  time.Now(),
-	}
+	}, nil
 }
 
-// AggregateWithTimeout runs Aggregate() with timeout protection (default 200ms)
+// AggregateWithTimeout runs aggregation with timeout protection (default 200ms).
 func AggregateWithTimeout(issues []string, timeout time.Duration) (AggregatedResult, error) {
+	return aggregateWithTimeout(issues, timeout, AggregateContext)
+}
+
+func aggregateWithTimeout(issues []string, timeout time.Duration, aggregate func(context.Context, []string) (AggregatedResult, error)) (AggregatedResult, error) {
+	issues = slices.Clone(issues)
 	if timeout == 0 {
 		timeout = 200 * time.Millisecond
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	type result struct {
 		agg AggregatedResult
@@ -889,17 +922,19 @@ func AggregateWithTimeout(issues []string, timeout time.Duration) (AggregatedRes
 			}
 		}()
 
-		agg := Aggregate(issues)
-		resultChan <- result{agg: agg, err: nil}
+		agg, err := aggregate(ctx, issues)
+		resultChan <- result{agg: agg, err: err}
 	}()
 
 	// Wait for result or timeout
 	select {
 	case res := <-resultChan:
-		return res.agg, res.err
-	case <-time.After(timeout):
-		return AggregatedResult{}, formatTimeoutError(timeout)
+		if ctx.Err() == nil {
+			return res.agg, res.err
+		}
+	case <-ctx.Done():
 	}
+	return AggregatedResult{}, formatTimeoutError(timeout)
 }
 
 // formatError creates an error from a panic value
@@ -934,5 +969,3 @@ type aggregationError struct {
 func (e *aggregationError) Error() string {
 	return e.msg
 }
-
-
