@@ -38,7 +38,7 @@ jobs:
         run: go vet ./...
       
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
       
       - name: Run staticcheck
         run: staticcheck ./...
@@ -63,8 +63,18 @@ jobs:
         run: go test ./...
       - name: Go vet
         run: go vet ./...
-      - name: Synthetic capture performance check
-        run: go test -run '^$' -bench '^BenchmarkTakeGoSynthetic$' -benchtime=1x -benchmem ./internal/capture
+      - name: Workspace indexing performance check
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_file=$(mktemp)
+          trap 'rm -f "$output_file"' EXIT
+          go test -run '^$' -bench '^BenchmarkIndexWorkspace$' -benchtime=1x -benchmem ./internal/app | tee "$output_file"
+          if ! grep -q '^PASS[[:space:]]*$' "$output_file" ||
+             ! grep -Eq '^BenchmarkIndexWorkspace/[^[:space:]]+[[:space:]]+[1-9][0-9]*[[:space:]]+[0-9.]+[[:space:]]+ns/op' "$output_file"; then
+            echo "Expected at least one completed workspace indexing benchmark."
+            exit 1
+          fi
 
       - name: Extension tests (Windows)
         if: runner.os == 'Windows'
