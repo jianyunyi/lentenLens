@@ -8,7 +8,7 @@ const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
 const { configureModel, modelCredentialForCall, assertModelSaveIdle, SECURE_API_KEY_ENV } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
-const { createCallPathProvider } = require('./callpath');
+const { createCallPathProvider, callPathEvidenceFingerprint } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, selectedErrorDiagnostics, validateSelectionResult, renderSelectionExplanation, page, escapeHTML } = require('./core');
@@ -584,7 +584,7 @@ function activate(context) {
     if (!folder) throw new Error('调用路径来源工作区已关闭，请重新加载。');
     const current = await cli(folder, 'call-path', state.input);
     if (state !== callPathState) throw new Error('调用路径已失效，请重新加载。');
-    if (JSON.stringify(current) !== JSON.stringify(state.data)) {
+    if (callPathEvidenceFingerprint(current) !== callPathEvidenceFingerprint(state.data)) {
       callPathState = undefined;
       callPathProvider.clear();
       throw new Error('源码证据已变化，请重新加载调用路径。');

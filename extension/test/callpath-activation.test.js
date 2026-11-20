@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-function setup() {
+function setup({ restrictionsAggregation = true } = {}) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-ui-oracle-'));
   const commands = new Map(), providers = new Map(), errors = [], calls = [], opened = [], callbacks = {}, warnings = [], panels = [];
   const disposable = () => ({ dispose() {} });
@@ -31,7 +31,7 @@ function setup() {
   const vscode = {
     workspace:{isTrusted:true,workspaceFolders:folders,textDocuments:documents,
       getWorkspaceFolder:value=>folders.find(f=>value.fsPath.startsWith(f.uri.fsPath+path.sep)),
-      getConfiguration:()=>({get:(key,fallback)=>fallback ?? ''}),
+      getConfiguration:()=>({get:(key,fallback)=>key==='restrictionsAggregation'?restrictionsAggregation:fallback ?? ''}),
       openTextDocument:async value=>{opened.push(value.fsPath);return documents.find(d=>d.uri.fsPath===value.fsPath);},
       createFileSystemWatcher:glob=>({dispose(){},onDidCreate:fn=>{callbacks[glob+'create']=fn;return disposable();},onDidChange:fn=>{callbacks[glob+'change']=fn;return disposable();},onDidDelete:fn=>{callbacks[glob+'delete']=fn;return disposable();}}),
       onDidChangeTextDocument:fn=>{callbacks.text=fn;return disposable();},onDidGrantWorkspaceTrust:()=>disposable(),onDidSaveTextDocument:()=>disposable(),onDidChangeWorkspaceFolders:()=>disposable(),
@@ -82,6 +82,68 @@ test('call path aggregated response contract refreshes restriction tree and deta
     assert.deepEqual(h.errors,[]);
   }finally{h.cleanup();}
 });
+
+for (const restrictionsAggregation of [true, false]) {
+  for (const target of ['function', 'call']) {
+    test(`call path ${target} navigation ignores aggregation timestamps with display ${restrictionsAggregation}`,async()=>{
+      const h=setup({restrictionsAggregation});try{
+        const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+        const initial={...h.graph(0),aggregated:structuredClone(aggregated)};
+        const current=structuredClone(initial);
+        current.aggregated.timestamp='2026-11-21T00:00:00Z';
+        const initialJSON=JSON.stringify(initial), currentJSON=JSON.stringify(current);
+        h.setResponse(()=>initial);
+        await h.commands.get('intentlens.callPath')();
+        const root=h.provider.getChildren().find(item=>item.kind==='function');
+        const evidence=target==='function'?root.command.arguments[0]:h.site();
+        h.setResponse(()=>current);
+        await h.commands.get('intentlens.openCallPathSite')(evidence);
+        assert.deepEqual(h.errors,[]);
+        assert.deepEqual(h.opened,[h.documents[0].uri.fsPath]);
+        const position=h.vscode.window.activeTextEditor.selection.start;
+        assert.equal(position.line,1);
+        assert.equal(position.character,target==='function'?0:h.documents[0].lineAt(1).text.indexOf('Leaf'));
+        assert.strictEqual(h.provider.getChildren().find(item=>item.kind==='function'),root);
+        assert.equal(JSON.stringify(initial),initialJSON);
+        assert.equal(JSON.stringify(current),currentJSON);
+        assert.deepEqual(h.restrictions.aggregatedData,restrictionsAggregation?aggregated:null);
+      }finally{h.cleanup();}
+    });
+  }
+}
+
+const evidenceChanges = [
+  ['function source',data=>{data.functions[0].source+=' // changed';}],
+  ['call edge',data=>{data.calls[0].targets=['main.go:Other'];}],
+  ['call source',data=>{data.calls[0].source='Leaf(secret)';}],
+  ['raw diagnostic',data=>{data.issues.push('main.go:8: undefined: Changed');}],
+  ['aggregated diagnostic',data=>{data.aggregated.categories[1].items[0].message+=' changed';}],
+  ['aggregated count',data=>{data.aggregated.summary.totalRestrictions++;}],
+  ['aggregated full list',data=>{data.aggregated.categories[0].items[0].fullList[3]='missing/changed';}],
+];
+for (const target of ['function', 'call']) {
+  for (const [change, mutate] of evidenceChanges) {
+    test(`call path ${target} navigation still rejects changed ${change} with aggregation`,async()=>{
+      const h=setup();try{
+        const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+        const initial={...h.graph(0),aggregated:structuredClone(aggregated)};
+        h.setResponse(()=>initial);
+        await h.commands.get('intentlens.callPath')();
+        const root=h.provider.getChildren().find(item=>item.kind==='function');
+        const evidence=target==='function'?root.command.arguments[0]:h.site();
+        const current=structuredClone(initial);
+        current.aggregated.timestamp='2026-11-21T00:00:00Z';
+        mutate(current);
+        h.setResponse(()=>current);
+        await h.commands.get('intentlens.openCallPathSite')(evidence);
+        assert.equal(h.opened.length,0);
+        assert.equal(h.errors.length,1);
+        assert.match(h.errors[0],/源码证据已变化/);
+        assert.equal(h.provider.getChildren()[0].command.command,'intentlens.callPath');
+      }finally{h.cleanup();}
+    });
+  }
+}
 
 test('call path icon action is usable; navigation retains original workspace and converts UTF-8 source columns',async()=>{
   const h=setup();try{
