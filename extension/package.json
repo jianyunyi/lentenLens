@@ -62,7 +62,7 @@
                      },
     "scripts":  {
                     "test":  "node --test test/*.test.js",
-                    "check":  "node --check src/core.js \u0026\u0026 node --check src/coverage.js \u0026\u0026 node --check src/extension.js \u0026\u0026 node --check src/callpath.js \u0026\u0026 node --check src/sidebar.js \u0026\u0026 node --check src/sessions.js \u0026\u0026 node --check src/recovery.js \u0026\u0026 node --check src/exercises.js \u0026\u0026 node --check src/inline.js \u0026\u0026 node --check src/providers.js \u0026\u0026 node --check src/taskpanel.js",
+                    "check":  "node --check src/aiConfigPanel.js && node --check src/boundaries.js && node --check src/callpath-enhanced.js && node --check src/callpath.js && node --check src/core.js && node --check src/coverage.js && node --check src/exercises.js && node --check src/extension.js && node --check src/inline.js && node --check src/providers.js && node --check src/recovery.js && node --check src/restrictionDetailPanel.js && node --check src/restrictionView.js && node --check src/sessions.js && node --check src/sidebar.js && node --check src/taskmanagement.js && node --check src/taskpanel.js && node --check src/tokenUsagePanel.js",
                     "bench:all":  "node test/profiling/run-benchmarks.js",
                     "bench:task-panel":  "node test/profiling/run-benchmarks.js task-panel",
                     "bench:boundary":  "node test/profiling/run-benchmarks.js boundary",
@@ -323,7 +323,47 @@
                                                                                                             "default":  true,
                                                                                                             "scope":  "window",
                                                                                                             "description":  "Enable unified display for parse restrictions (aggregates multiple errors into hierarchical view)"
-                                                                                                        }
+                                                                                                        },
+                                                                 "intentlens.apiProvider":  {
+                                                                                                     "type":  "string",
+                                                                                                     "enum":  [
+                                                                                                     "openai",
+                                                                                                     "anthropic",
+                                                                                                     "other"
+                                                                                                     ],
+                                                                                                     "default":  "openai",
+                                                                                                     "scope":  "window",
+                                                                                                     "description":  "AI API provider selected in the API configuration panel"
+                                                                 },
+                                                                 "intentlens.apiModelId":  {
+                                                                                                     "type":  "string",
+                                                                                                     "default":  "",
+                                                                                                     "scope":  "window",
+                                                                                                     "description":  "Model ID selected in the API configuration panel"
+                                                                 },
+                                                                 "intentlens.apiBaseUrl":  {
+                                                                                                     "type":  "string",
+                                                                                                     "default":  "",
+                                                                                                     "scope":  "window",
+                                                                                                     "description":  "Custom API base URL used when the provider is other"
+                                                                 },
+                                                                 "intentlens.configStatus":  {
+                                                                                                     "type":  "string",
+                                                                                                     "enum":  [
+                                                                                                     "unconfigured",
+                                                                                                     "configured",
+                                                                                                     "invalid"
+                                                                                                     ],
+                                                                                                     "default":  "unconfigured",
+                                                                                                     "scope":  "window",
+                                                                                                     "description":  "API configuration status managed by the configuration panel"
+                                                                 },
+                                                                 "intentlens.lastValidation":  {
+                                                                                                     "type":  "string",
+                                                                                                     "default":  "",
+                                                                                                     "scope":  "window",
+                                                                                                     "description":  "ISO timestamp of the last successful API configuration validation"
+                                                                 }
                                                              }
                                           }
                     }

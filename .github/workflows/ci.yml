@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # For CodeQL
-  pull-requests: write    # For PR comments
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

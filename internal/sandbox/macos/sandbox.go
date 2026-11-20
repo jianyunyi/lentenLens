@@ -1,3 +1,4 @@
+//go:build darwin
 // +build darwin
 
 package macos
@@ -70,13 +71,10 @@ func (s *Sandbox) Cleanup() error {
 	return nil
 }
 
-// Capabilities returns the isolation features available on macOS.
+// Capabilities returns no isolation features because sandbox profile isolation is not yet implemented.
+// Run currently provides no isolation; add capabilities only after they are implemented.
 func (s *Sandbox) Capabilities() []string {
-	return []string{
-		"filesystem_isolation",
-		"network_blocking",
-		"process_isolation",
-	}
+	return []string{}
 }
 
 // NewMacOSSandbox creates a new macOS sandbox.

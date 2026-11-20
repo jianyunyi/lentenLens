@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package windows
@@ -47,14 +48,10 @@ func (s *Sandbox) Cleanup() error {
 	return nil
 }
 
-// Capabilities returns the isolation features available on Windows.
+// Capabilities returns no isolation features because AppContainer isolation is not yet implemented.
+// Run currently provides no isolation; add capabilities only after they are implemented.
 func (s *Sandbox) Capabilities() []string {
-	return []string{
-		"filesystem_isolation",
-		"network_blocking",
-		"resource_limits",
-		"process_isolation",
-	}
+	return []string{}
 }
 
 // NewWindowsSandbox creates a new Windows sandbox.

@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package linux
@@ -89,16 +90,10 @@ func (s *Sandbox) Cleanup() error {
 	return nil
 }
 
-// Capabilities returns the isolation features available on Linux.
+// Capabilities returns no isolation features because seccomp/cgroup isolation is not yet implemented.
+// Run currently provides no isolation; add capabilities only after they are implemented.
 func (s *Sandbox) Capabilities() []string {
-	return []string{
-		"filesystem_isolation",
-		"network_blocking",
-		"resource_limits",
-		"process_isolation",
-		"seccomp_bpf",
-		"cgroup_v2",
-	}
+	return []string{}
 }
 
 // NewLinuxSandbox creates a new Linux sandbox.

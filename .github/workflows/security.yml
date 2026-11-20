@@ -75,7 +75,7 @@ jobs:
           go-version: '1.25.0'
       
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        uses: securego/gosec@244f1f6f4d1d0d14f89e79a73dab1219eabb5228 # pin of master @ 2026-11-20
         with:
           args: '-fmt sarif -out gosec-results.sarif ./...'
       
@@ -148,7 +148,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Run Trivy vulnerability scanner in repo mode
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # pin of master @ 2026-11-20
         with:
           scan-type: 'fs'
           scan-ref: '.'
