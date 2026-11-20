@@ -70,6 +70,14 @@ func (a *App) Stop(session string) (Round, error) {
 	if session == "" || active.Session != session {
 		return Round{}, errors.New("会话与开始基线不匹配")
 	}
+	committed, e := a.committedRound(active)
+	if e == nil {
+		// A prior Stop published the round but did not remove the baseline.
+		return committed, a.removeActive()
+	}
+	if !errors.Is(e, os.ErrNotExist) {
+		return Round{}, e
+	}
 	after, e := capture.Take(a.Root)
 	if e != nil {
 		return Round{}, e
@@ -97,8 +105,22 @@ func (a *App) Stop(session string) (Round, error) {
 	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
 		return Round{}, writeErr
 	}
-	if removeErr := os.Remove(filepath.Join(a.State, "active.json")); removeErr != nil {
+	if removeErr := a.removeActive(); removeErr != nil {
 		return Round{}, removeErr
+	}
+	return round, nil
+}
+
+func (a *App) committedRound(active Active) (Round, error) {
+	var round Round
+	if !validID(active.ID) {
+		return round, errors.New("无效轮次 ID")
+	}
+	if err := a.read("round-"+active.ID+".json", &round); err != nil {
+		return Round{}, err
+	}
+	if round.ID != active.ID || round.Session != active.Session {
+		return Round{}, errors.New("已提交轮次与开始基线不匹配")
 	}
 	return round, nil
 }
@@ -109,7 +131,11 @@ func (a *App) Abort() error {
 		return e
 	}
 	defer unlock()
-	e = os.Remove(filepath.Join(a.State, "active.json"))
+	return a.removeActive()
+}
+
+func (a *App) removeActive() error {
+	e := os.Remove(filepath.Join(a.State, "active.json"))
 	if errors.Is(e, os.ErrNotExist) {
 		return nil
 	}
