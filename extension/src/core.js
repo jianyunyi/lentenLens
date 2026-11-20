@@ -7,13 +7,47 @@ const { coverageLines } = require('./coverage');
 function runCLI(binary, root, command, input = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const child = (options.spawnProcess || spawn)(binary, [...(options.prefixArgs || []), command, '--root', root], { cwd: root, shell: false, windowsHide: true, env: options.env || process.env, signal: options.signal });
-    let stdout = '', stderr = '', size = 0, settled = false, terminationError, childError;
-    const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
-    const timer = setTimeout(() => { terminationError = new Error('IntentLens CLI timed out'); child.kill(); }, options.timeout || 180000);
-    child.on('error', error => { childError = error; });
+    let stdout = '', stderr = '', size = 0, settled = false, terminationError, childError, killTimer;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const kill = signal => {
+      try { child.kill(signal); } catch { /* The child may already have exited. */ }
+    };
+    const terminate = (error, sendSignal = true) => {
+      if (settled || terminationError) return;
+      terminationError = error;
+      clearTimeout(timer);
+      killTimer = setTimeout(() => {
+        kill('SIGKILL');
+        finish(childError || terminationError);
+        // Descendants can keep these pipes open even after the child exits.
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+      }, 1000);
+      if (sendSignal) kill();
+    };
+    const timer = setTimeout(() => terminate(new Error('IntentLens CLI timed out')), options.timeout || 180000);
+    child.on('error', error => {
+      if (settled) return;
+      childError ||= error;
+      // Spawn errors and AbortSignal cancellation already come from Node.
+      terminate(error, false);
+    });
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', data => { size += Buffer.byteLength(data); if (size > 32 * 1024 * 1024) { terminationError = new Error('CLI response exceeds 32 MiB'); child.kill(); } else stdout += data; });
+    child.stdout.on('data', data => {
+      if (settled || terminationError) return;
+      size += Buffer.byteLength(data);
+      if (size > 32 * 1024 * 1024) terminate(new Error('CLI response exceeds 32 MiB'));
+      else stdout += data;
+    });
     child.stderr.on('data', data => { if (stderr.length < 8192) stderr += data.toString(); });
     child.on('close', code => {
       if (settled) return;
@@ -24,7 +58,10 @@ function runCLI(binary, root, command, input = {}, options = {}) {
       if (code !== 0 || value?.error) return finish(new Error(value?.error || `CLI exited ${code}`));
       finish(null, value);
     });
-    child.stdin.on('error', error => finish(error));
+    child.stdin.on('error', error => {
+      terminate(error);
+      child.stdin.destroy();
+    });
     child.stdin.end(JSON.stringify(input));
   });
 }
