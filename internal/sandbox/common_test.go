@@ -15,12 +15,12 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: Config{
-				WorkDir:        "/tmp",
-				Timeout:        10 * time.Second,
-				MemoryLimitMB:  500,
-				MaxFDs:         256,
-				MaxProcesses:   1,
-				DenyNetwork:    true,
+				WorkDir:       "/tmp",
+				Timeout:       10 * time.Second,
+				MemoryLimitMB: 500,
+				MaxFDs:        256,
+				MaxProcesses:  1,
+				DenyNetwork:   true,
 			},
 			wantErr: false,
 		},
