@@ -6,9 +6,9 @@ const crypto = require('node:crypto');
 const { createExerciseUI } = require('./exercises');
 const { createInline } = require('./inline');
 const { createSessions } = require('./sessions');
-const { configureModel, modelCredentialForCall, assertModelSaveIdle, SECURE_API_KEY_ENV } = require('./providers');
+const { configureModel, modelCredentialForCall, assertModelSaveIdle, EDITOR_API_KEY_ENV } = require('./providers');
 const { createCaptureRecovery } = require('./recovery');
-const { createCallPathProvider } = require('./callpath');
+const { createCallPathProvider, callPathEvidenceFingerprint } = require('./callpath');
 const { createModelAnswerProvider } = require('./sidebar');
 const { coverageSummary, limitedCoverage } = require('./coverage');
 const { runCLI, confinedPath, renderInspection, renderIndexStatus, renderRound, renderSharePreview, renderShared, renderSaved, selectedErrorDiagnostics, validateSelectionResult, renderSelectionExplanation, page, escapeHTML } = require('./core');
@@ -44,6 +44,7 @@ function activate(context) {
   const guard = fn => async (...args) => { try { return await fn(...args); } catch (error) { vscode.window.showErrorMessage(`IntentLens: ${error.message}`); } };
   let inlineUI;
   let documentEpoch = 0;
+  const openFolder = root => (vscode.workspace.workspaceFolders || []).find(folder => folder.uri.scheme === 'file' && folder.uri.fsPath === root);
   function clearInline() {
     documentEpoch++;
     callPathState = undefined;
@@ -80,7 +81,7 @@ function activate(context) {
       if (options.confirmedTarget && (target.provider !== options.confirmedTarget.provider || target.base_url !== options.confirmedTarget.base_url)) {
         throw new Error('模型服务地址或协议已变化，请确认配置保存后重新运行连接测试。');
       }
-      runOptions.env = { ...process.env, [SECURE_API_KEY_ENV]: key };
+      runOptions.env = { ...process.env, [EDITOR_API_KEY_ENV]: key };
       // The CLI checks the target again against the exact settings used for the request.
       runOptions.args = ['--editor-model-target', JSON.stringify(target)];
     }
@@ -114,7 +115,7 @@ function activate(context) {
   const sessions = createSessions({
     workspaceState: sessionState,
     cli: (root, command, input) => {
-      const folder = (vscode.workspace.workspaceFolders || []).find(item => item.uri.scheme === 'file' && item.uri.fsPath === root);
+      const folder = openFolder(root);
       if (!folder) throw new Error('本地工作区已关闭，请重新打开后重试。');
       return cli(folder, command, input);
     },
@@ -127,8 +128,11 @@ function activate(context) {
   const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); modelAnswerProvider?.refresh(); };
   async function openCurrent(folder, file, line = 1, column = 0) {
     trusted();
-    const target = confinedPath(folder.uri.fsPath, file);
+    await revealCurrent(confinedPath(folder.uri.fsPath, file), line, column);
+  }
+  async function revealCurrent(target, line, column = 0, beforeShow = () => {}) {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+    await beforeShow();
     const editor = await vscode.window.showTextDocument(doc);
     const lineIndex = Math.max(0, Math.min(doc.lineCount - 1, Number(line || 1) - 1));
     // Go token columns count UTF-8 bytes (1-based); VS Code uses UTF-16 code
@@ -399,37 +403,131 @@ function activate(context) {
   });
   context.subscriptions.push(restrictionTreeProvider, restrictionTreeView);
 
-  // Schema validation for aggregated data
-  function validateAggregatedSchema(data) {
-    if (!data) return false;
-    if (!data.summary || typeof data.summary.totalRestrictions !== 'number') return false;
-    if (!Array.isArray(data.categories)) return false;
-    return true;
+  let restrictionResult;
+  function clearRestrictions(root) {
+    if (!restrictionResult || (root !== undefined && restrictionResult.root !== root)) return;
+    restrictionResult = undefined;
+    restrictionTreeProvider.clear();
+    RestrictionDetailPanel.close();
   }
 
-  // Show aggregated restrictions function
-  function showAggregatedRestrictions(aggregated) {
-    if (!validateAggregatedSchema(aggregated)) {
+  function setRestrictions(folder, aggregated) {
+    if (!aggregated || !restrictionsEnabled()) return clearRestrictions();
+    if (typeof aggregated.summary?.totalRestrictions !== 'number' || !Array.isArray(aggregated.categories) ||
+        !aggregated.categories.every(category => Array.isArray(category?.items) && category.items.every(item => typeof item?.message === 'string'))) {
+      clearRestrictions();
       vscode.window.showErrorMessage('IntentLens: 解析限制数据格式无效');
       return;
     }
 
-    // Update tree view
-    restrictionTreeProvider.refresh(aggregated);
-
-    // Show notification with action buttons
-    const totalCount = aggregated.summary.totalRestrictions;
-    const categoryCount = aggregated.summary.totalCategories;
-    
-    vscode.window.showWarningMessage(
-      `IntentLens: 发现 ${totalCount} 个解析限制（${categoryCount} 类）`,
-      '展开详情', '忽略'
-    ).then(selection => {
-      if (selection === '展开详情') {
-        RestrictionDetailPanel.show(context, aggregated);
+    const root = folder.uri.fsPath;
+    const id = crypto.randomUUID(), records = new Map(), idsByItem = new Map();
+    for (const category of aggregated.categories) {
+      for (const item of category.items) {
+        if (item?.type === 'summary' || typeof item?.filePath !== 'string' || !item.filePath ||
+            !Number.isInteger(item.lineNumber) || item.lineNumber < 1) continue;
+        const recordId = crypto.randomUUID();
+        const record = { line: item.lineNumber };
+        idsByItem.set(item, recordId);
+        records.set(recordId, record);
+        try {
+          const file = item.filePath;
+          if (path.isAbsolute(file) && file.split(/[/\\]/).some(part => part === '.' || part === '..')) continue;
+          const relative = path.isAbsolute(file) ? path.relative(root, file) : file;
+          record.target = confinedPath(root, relative);
+          record.relative = relative;
+        } catch { /* Keep the diagnostic visible, but refuse to open an unresolved path. */ }
       }
-    });
+    }
+    restrictionResult = { id, root, aggregated, records, idsByItem };
+    restrictionTreeProvider.refresh(aggregated, id, idsByItem);
+    RestrictionDetailPanel.update(aggregated, idsByItem);
+    notifyRestrictions(id, aggregated.summary);
   }
+  const restrictionsEnabled = () => vscode.workspace.getConfiguration('intentlens').get('restrictionsAggregation', true);
+
+  function notifyRestrictions(id, { totalRestrictions, totalCategories }) {
+    vscode.window.showWarningMessage(
+      `IntentLens: 发现 ${totalRestrictions} 个解析限制（${totalCategories} 类）`,
+      '展开详情', '忽略'
+    ).then(guard(selection => {
+      if (selection === '展开详情' && restrictionResult?.id === id) return showRestrictionDetails(id, true);
+    }));
+  }
+
+  function restrictionFolder(result) {
+    trusted();
+    if (!result || restrictionResult !== result) throw new Error('解析限制记录已失效，请重新加载调用路径。');
+    const folder = openFolder(result.root);
+    if (!folder) {
+      clearRestrictions(result.root);
+      throw new Error('解析限制的来源工作区已关闭，请重新加载调用路径。');
+    }
+    if (!restrictionsEnabled()) {
+      clearRestrictions(result.root);
+      throw new Error('解析限制汇总已关闭。');
+    }
+    return folder;
+  }
+
+  async function validateRestrictions(result) {
+    const folder = restrictionFolder(result);
+    // The index only aggregates files admitted by the current CLI policy. Recheck
+    // against it even if the .intentignore watcher has not fired yet.
+    let current;
+    try { current = await cli(folder, 'index'); }
+    catch (error) {
+      if (restrictionResult === result) clearRestrictions(result.root);
+      throw new Error(`无法核对当前解析限制和排除规则：${error.message}`);
+    }
+    restrictionFolder(result);
+    if (callPathEvidenceFingerprint({ aggregated: current.aggregated }) !== callPathEvidenceFingerprint({ aggregated: result.aggregated })) {
+      clearRestrictions(result.root);
+      throw new Error('解析限制已变化或目标已被当前排除规则排除，请重新加载调用路径。');
+    }
+  }
+
+  async function showRestrictionDetails(id = restrictionResult?.id, fromNotification = false) {
+    const result = restrictionResult;
+    if (id === undefined) return;
+    if (!result || result.id !== id) {
+      if (fromNotification) return;
+      throw new Error('解析限制记录已失效，请重新加载调用路径。');
+    }
+    try {
+      await validateRestrictions(result);
+      restrictionFolder(result);
+      RestrictionDetailPanel.show(result.aggregated, result.idsByItem, navigateToRestriction);
+    } catch (error) {
+      // VS Code messages cannot be withdrawn; stale notification actions are dropped.
+      if (!fromNotification) throw error;
+    }
+  }
+
+  const navigateToRestriction = guard(async id => {
+    const result = restrictionResult;
+    const record = result?.records.get(id);
+    if (!record) throw new Error('解析限制记录已失效，请重新加载调用路径。');
+    const checkTarget = () => {
+      try {
+        if (record.target && confinedPath(result.root, record.relative) === record.target) return;
+      } catch { /* Report an actionable error for both unsafe and missing files. */ }
+      throw new Error('解析限制的目标不在来源工作区内、已移动或不可访问。');
+    };
+    restrictionFolder(result);
+    checkTarget();
+    await validateRestrictions(result);
+    restrictionFolder(result);
+    checkTarget();
+    await revealCurrent(record.target, record.line, 0, async () => {
+      restrictionFolder(result);
+      checkTarget();
+      await validateRestrictions(result);
+      restrictionFolder(result);
+      checkTarget();
+    });
+  });
+  context.subscriptions.push({ dispose: () => clearRestrictions() });
   context.subscriptions.push(vscode.languages.registerCodeLensProvider({ language: 'go', scheme: 'file' }, {
     onDidChangeCodeLenses: lensesChanged.event,
     async provideCodeLenses(document, token) {
@@ -495,12 +593,9 @@ function activate(context) {
     callPathState = { requestEpoch, folderRoot: folder.uri.fsPath, input: { file, line } };
     const data = await cli(folder, 'call-path', { file, line });
     if (epoch !== documentEpoch || callPathState?.requestEpoch !== requestEpoch) return;
+    if (!openFolder(folder.uri.fsPath)) return;
     callPathProvider.setData(data);
-
-    // Check for aggregated restrictions in CLI response
-    if (data.aggregated && vscode.workspace.getConfiguration('intentlens').get('restrictionsAggregation', true)) {
-      showAggregatedRestrictions(data.aggregated);
-    }
+    setRestrictions(folder, data.aggregated);
     callPathState = { requestEpoch, folderRoot: folder.uri.fsPath, input: { file, line }, data };
     return data;
   }
@@ -508,28 +603,12 @@ function activate(context) {
   command('refreshCallPath', loadCallPath);
   command('refreshModelAnswer', () => modelAnswerProvider?.refresh());
 
-  // Register restriction view commands
-  command('showRestrictionDetails', () => {
-    const aggregated = restrictionTreeProvider.aggregatedData;
-    if (aggregated) {
-      RestrictionDetailPanel.show(context, aggregated);
-    }
-  });
-  command('navigateToRestriction', (filePath, lineNumber) => {
-    vscode.workspace.openTextDocument(filePath).then(doc => {
-      vscode.window.showTextDocument(doc).then(editor => {
-        const position = new vscode.Position(lineNumber - 1, 0);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(new vscode.Range(position, position));
-      });
-    });
-  });
+  command('showRestrictionDetails', id => showRestrictionDetails(id));
+  context.subscriptions.push(vscode.commands.registerCommand('intentlens.navigateToRestriction', navigateToRestriction));
   command('refreshRestrictions', () => {
-    restrictionTreeProvider.refresh(restrictionTreeProvider.aggregatedData);
+    if (restrictionResult) restrictionTreeProvider.refresh(restrictionResult.aggregated, restrictionResult.id, restrictionResult.idsByItem);
   });
-  command('clearRestrictions', () => {
-    restrictionTreeProvider.clear();
-  });
+  command('clearRestrictions', () => clearRestrictions());
   command('openModelEvidence', async (_folder, evidence) => {
     if (!evidence || typeof evidence.source !== 'string') throw new Error('本地引用证据无效。');
     await snapshot(evidence.source, evidence.file);
@@ -580,11 +659,11 @@ function activate(context) {
     if (!call || typeof call.file !== 'string' || !Number.isInteger(call.line) || call.line < 1 || !Number.isInteger(call.column) || call.column < 0 || call.column > 100000000) throw new Error('源码调用点证据无效。');
     const state = callPathState;
     if (!state?.data || !state.folderRoot || !state.input) throw new Error('调用路径已失效，请重新加载。');
-    const folder = (vscode.workspace.workspaceFolders || []).find(item => item.uri.scheme === 'file' && item.uri.fsPath === state.folderRoot);
+    const folder = openFolder(state.folderRoot);
     if (!folder) throw new Error('调用路径来源工作区已关闭，请重新加载。');
     const current = await cli(folder, 'call-path', state.input);
     if (state !== callPathState) throw new Error('调用路径已失效，请重新加载。');
-    if (JSON.stringify(current) !== JSON.stringify(state.data)) {
+    if (callPathEvidenceFingerprint(current) !== callPathEvidenceFingerprint(state.data)) {
       callPathState = undefined;
       callPathProvider.clear();
       throw new Error('源码证据已变化，请重新加载调用路径。');
@@ -725,7 +804,13 @@ function activate(context) {
     apiBar.show();
     context.subscriptions.push(apiBar);
   }
-  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => { clearInline(); refresh(); }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    if (restrictionResult && !openFolder(restrictionResult.root)) clearRestrictions();
+    clearInline(); refresh();
+  }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
+  if (vscode.workspace.onDidChangeConfiguration) context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('intentlens.restrictionsAggregation') && !restrictionsEnabled()) clearRestrictions();
+  }));
   if (vscode.window.onDidChangeActiveTextEditor) context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => modelAnswerProvider?.refresh()));
   if (vscode.window.onDidChangeTextEditorSelection) context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => modelAnswerProvider?.refresh()));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
@@ -738,6 +823,7 @@ function activate(context) {
     if (!folder || folder.uri.scheme !== 'file') return;
     const root = folder.uri.fsPath;
     policyVersions.set(root, (policyVersions.get(root) || 0) + 1);
+    clearRestrictions(root);
     for (const [view, panelRoot] of panels) if (panelRoot === root) view.dispose();
     refresh();
     if (vscode.workspace.isTrusted) await cli(folder, 'status');

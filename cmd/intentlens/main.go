@@ -69,6 +69,20 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	if flags.NArg() != 0 {
 		return fail(out, fmt.Errorf("不支持的位置参数：%q", flags.Arg(0)))
 	}
+	var target *app.EditorModelTarget
+	var targetProvided bool
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "editor-model-target" {
+			targetProvided = true
+		}
+	})
+	_, editorCredential := os.LookupEnv(app.EditorAPIKeyEnv)
+	if targetProvided || editorCredential {
+		target = &app.EditorModelTarget{}
+		if err := json.Unmarshal([]byte(*editorModelTarget), target); err != nil || target.Provider == "" || target.BaseURL == "" {
+			return fail(out, errors.New("VS Code 模型密钥绑定无效，请重新保存 API Key"))
+		}
+	}
 	if command == "integration-info" {
 		return emit(out, integrationInfo())
 	}
@@ -89,13 +103,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	if e != nil {
 		return fail(out, e)
 	}
-	if *editorModelTarget != "" {
-		var target app.EditorModelTarget
-		if err := json.Unmarshal([]byte(*editorModelTarget), &target); err != nil || target.Provider == "" || target.BaseURL == "" {
-			return fail(out, errors.New("VS Code 模型密钥绑定无效，请重新保存 API Key"))
-		}
-		a.EditorModelTarget = &target
-	}
+	a.EditorModelTarget = target
 	var result any
 	switch command {
 	case "capture-event":

@@ -6,9 +6,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-function setup() {
+function setup({ restrictionsAggregation = true } = {}) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'intentlens-ui-oracle-'));
-  const commands = new Map(), providers = new Map(), errors = [], calls = [], opened = [], callbacks = {}, warnings = [], panels = [];
+  const commands = new Map(), providers = new Map(), errors = [], calls = [], opened = [], callbacks = {}, warnings = [], panels = [], copies = [];
   const disposable = () => ({ dispose() {} });
   const uri = file => ({ scheme:'file', fsPath:file, toString:()=>`file://${file}` });
   const folders = ['A','B'].map(name => { const root=path.join(temporary,name); fs.mkdirSync(root); return {name,uri:uri(root)}; });
@@ -30,16 +30,22 @@ function setup() {
   const editor = document => ({document,selection:{active:{line:1}},revealRange(){}});
   const vscode = {
     workspace:{isTrusted:true,workspaceFolders:folders,textDocuments:documents,
-      getWorkspaceFolder:value=>folders.find(f=>value.fsPath.startsWith(f.uri.fsPath+path.sep)),
-      getConfiguration:()=>({get:(key,fallback)=>fallback ?? ''}),
+      getWorkspaceFolder:value=>vscode.workspace.workspaceFolders.find(f=>value.fsPath.startsWith(f.uri.fsPath+path.sep)),
+      getConfiguration:()=>({get:(key,fallback)=>key==='restrictionsAggregation'?restrictionsAggregation:fallback ?? ''}),
       openTextDocument:async value=>{opened.push(value.fsPath);return documents.find(d=>d.uri.fsPath===value.fsPath);},
       createFileSystemWatcher:glob=>({dispose(){},onDidCreate:fn=>{callbacks[glob+'create']=fn;return disposable();},onDidChange:fn=>{callbacks[glob+'change']=fn;return disposable();},onDidDelete:fn=>{callbacks[glob+'delete']=fn;return disposable();}}),
-      onDidChangeTextDocument:fn=>{callbacks.text=fn;return disposable();},onDidGrantWorkspaceTrust:()=>disposable(),onDidSaveTextDocument:()=>disposable(),onDidChangeWorkspaceFolders:()=>disposable(),
+      onDidChangeTextDocument:fn=>{callbacks.text=fn;return disposable();},onDidGrantWorkspaceTrust:()=>disposable(),onDidSaveTextDocument:()=>disposable(),
+      onDidChangeWorkspaceFolders:fn=>{callbacks.folders=fn;return disposable();},
     },
     window:{activeTextEditor:editor(documents[0]),createTreeView:(id,options)=>{providers.set(id,options.treeDataProvider);return disposable();},showErrorMessage:message=>errors.push(message),showTextDocument:async doc=>{const e=editor(doc);vscode.window.activeTextEditor=e;return e;},
-      showWarningMessage:async (...args)=>{warnings.push(args);},
-      createWebviewPanel:()=>{const panel={webview:{html:'',onDidReceiveMessage:()=>disposable()},onDidDispose:()=>disposable()};panels.push(panel);return panel;},
+      showWarningMessage:(...args)=>new Promise(resolve=>{warnings.push({ args, resolve });}),showInformationMessage() {},
+      createWebviewPanel:()=>{
+        const panel={webview:{html:'',onDidReceiveMessage(fn){this.receive=fn;return disposable();}},reveal(){},
+          onDidDispose(fn){this.onDispose=fn;return disposable();},dispose(){this.disposed=true;this.onDispose();}};
+        panels.push(panel);return panel;
+      },
     },
+    env:{clipboard:{writeText:async text=>copies.push(text)}},
     commands:{registerCommand:(id,fn)=>{commands.set(id,fn);return disposable();},executeCommand:async()=>{}},
     languages:{registerCodeLensProvider:()=>disposable()},
     EventEmitter:class{event=()=>{};fire(){};dispose(){}},TreeItem:class{constructor(label,collapsibleState){this.label=label;this.collapsibleState=collapsibleState;}},TreeItemCollapsibleState:{None:0,Collapsed:1},
@@ -55,8 +61,106 @@ function setup() {
   }finally{Module._load=original;}
   const provider=providers.get('intentlens.callPath');
   function site(){const root=provider.getChildren().find(item=>item.kind==='function');return provider.getChildren(root)[0].command.arguments[0];}
-  return {vscode,commands,provider,restrictions:providers.get('intentlens.restrictions'),errors,calls,opened,callbacks,documents,folders,graph,editor,site,warnings,panels,setResponse:fn=>{respond=fn;},cleanup:()=>fs.rmSync(temporary,{recursive:true,force:true})};
+  return {vscode,commands,provider,restrictions:providers.get('intentlens.restrictions'),errors,calls,opened,callbacks,documents,folders,graph,editor,site,warnings,panels,copies,setResponse:fn=>{respond=fn;},cleanup:()=>fs.rmSync(temporary,{recursive:true,force:true})};
 }
+
+function locatedAggregated(filePath='main.go') {
+  const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+  const value=structuredClone(aggregated);
+  value.categories[1].items[0].filePath=filePath;
+  value.categories[1].items[0].lineNumber=2;
+  return value;
+}
+
+test('relative restriction paths resolve from their originating workspace and navigate through the shared guard',async()=>{
+  const h=setup();try{
+    const aggregated=locatedAggregated();
+    h.setResponse(()=>({...h.graph(0),aggregated}));
+    await h.commands.get('intentlens.callPath')();
+    const item=h.restrictions.getChildren(h.restrictions.getChildren().find(row=>row.category?.name==='Undefined Identifiers'))[0];
+    assert.equal(item.command.command,'intentlens.navigateToRestriction');
+    await h.commands.get(item.command.command)(...item.command.arguments);
+    assert.deepEqual(h.opened,[h.documents[0].uri.fsPath]);
+    assert.equal(h.vscode.window.activeTextEditor.selection.start.line,1);
+    assert.deepEqual(h.errors,[]);
+  }finally{h.cleanup();}
+});
+
+test('restriction paths outside the workspace are refused without opening a file',async()=>{
+  const h=setup();try{
+    const aggregated=locatedAggregated('../outside.go');
+    h.setResponse(()=>({...h.graph(0),aggregated}));
+    await h.commands.get('intentlens.callPath')();
+    const item=h.restrictions.getChildren(h.restrictions.getChildren().find(row=>row.category?.name==='Undefined Identifiers'))[0];
+    await h.commands.get(item.command.command)(...item.command.arguments);
+    assert.deepEqual(h.opened,[]);
+    assert.match(h.errors.at(-1),/不在来源工作区内/);
+  }finally{h.cleanup();}
+});
+
+test('closed workspace clears restriction records and drops a delayed notification action',async()=>{
+  const h=setup();try{
+    h.setResponse(()=>({...h.graph(0),aggregated:locatedAggregated()}));
+    await h.commands.get('intentlens.callPath')();
+    const resolve=h.warnings.at(-1).resolve;
+    h.vscode.workspace.workspaceFolders=h.folders.slice(1);
+    h.callbacks.folders();
+    assert.equal(h.restrictions.aggregatedData,null);
+    resolve('展开详情');
+    await new Promise(done=>setImmediate(done));
+    assert.equal(h.panels.length,0);
+    assert.deepEqual(h.opened,[]);
+    assert.deepEqual(h.errors,[]);
+  }finally{h.cleanup();}
+});
+
+test('a newly excluded diagnostic is rejected even before the ignore watcher runs',async()=>{
+  const h=setup();try{
+    const original={...h.graph(0),aggregated:locatedAggregated()};
+    h.setResponse(()=>original);
+    await h.commands.get('intentlens.callPath')();
+    const item=h.restrictions.getChildren(h.restrictions.getChildren().find(row=>row.category?.name==='Undefined Identifiers'))[0];
+    h.setResponse(()=>({...h.graph(0),aggregated:{summary:{...original.aggregated.summary,totalRestrictions:0},categories:[]}}));
+    await h.commands.get(item.command.command)(...item.command.arguments);
+    assert.deepEqual(h.opened,[]);
+    assert.equal(h.restrictions.aggregatedData,null);
+    assert.match(h.errors.at(-1),/已变化或目标已被当前排除规则排除/);
+  }finally{h.cleanup();}
+});
+
+test('a new call-path result without aggregation clears the old restriction tree and panel',async()=>{
+  const h=setup();try{
+    h.setResponse(()=>({...h.graph(0),aggregated:locatedAggregated()}));
+    await h.commands.get('intentlens.callPath')();
+    await h.commands.get('intentlens.showRestrictionDetails')(h.restrictions.resultId);
+    assert.equal(h.panels.length,1);
+    h.setResponse(()=>h.graph(0));
+    await h.commands.get('intentlens.callPath')();
+    assert.equal(h.restrictions.aggregatedData,null);
+    assert.equal(h.restrictions.resultId,undefined);
+    assert.equal(h.panels[0].disposed,true);
+  }finally{h.cleanup();}
+});
+
+test('valid restriction details open through the shared guard and copy the host record text',async()=>{
+  const h=setup();try{
+    h.setResponse(()=>({...h.graph(0),aggregated:locatedAggregated()}));
+    await h.commands.get('intentlens.callPath')();
+    await h.commands.get('intentlens.showRestrictionDetails')(h.restrictions.resultId);
+    const panel=h.panels[0];
+    const navigateId=panel.webview.html.match(/data-command="navigate" data-id="([^"]+)"/)[1];
+    panel.webview.receive({command:'navigate',id:navigateId,filePath:'/fabricated.go',line:90});
+    await new Promise(done=>setImmediate(done));
+    assert.deepEqual(h.opened,[h.documents[0].uri.fsPath]);
+    const copyId=[...panel.webview.html.matchAll(/data-command="copy" data-id="([^"]+)"/g)][1][1];
+    panel.webview.receive({command:'copy',id:copyId,text:'forged'});
+    await new Promise(done=>setImmediate(done));
+    assert.deepEqual(h.copies,[aggregatedMessage(h)]);
+    assert.deepEqual(h.errors,[]);
+  }finally{h.cleanup();}
+});
+
+function aggregatedMessage() { return 'type check: main.go:8:14: undefined: Missing'; }
 
 test('call path aggregated response contract refreshes restriction tree and details',async()=>{
   const h=setup();try{
@@ -73,7 +177,7 @@ test('call path aggregated response contract refreshes restriction tree and deta
     const diagnostic=h.restrictions.getChildren(undefinedCategory)[0];
     assert.match(diagnostic.label,/type check: main\.go:8:14: undefined: Missing/);
     assert.equal(diagnostic.command,undefined);
-    assert.match(h.warnings[0][0],/2 个解析限制（2 类）/);
+    assert.match(h.warnings[0].args[0],/2 个解析限制（2 类）/);
     await h.commands.get('intentlens.showRestrictionDetails')();
     assert.equal(h.panels.length,1);
     assert.match(h.panels[0].webview.html,/4 missing imports/);
@@ -82,6 +186,68 @@ test('call path aggregated response contract refreshes restriction tree and deta
     assert.deepEqual(h.errors,[]);
   }finally{h.cleanup();}
 });
+
+for (const restrictionsAggregation of [true, false]) {
+  for (const target of ['function', 'call']) {
+    test(`call path ${target} navigation ignores aggregation timestamps with display ${restrictionsAggregation}`,async()=>{
+      const h=setup({restrictionsAggregation});try{
+        const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+        const initial={...h.graph(0),aggregated:structuredClone(aggregated)};
+        const current=structuredClone(initial);
+        current.aggregated.timestamp='2026-11-21T00:00:00Z';
+        const initialJSON=JSON.stringify(initial), currentJSON=JSON.stringify(current);
+        h.setResponse(()=>initial);
+        await h.commands.get('intentlens.callPath')();
+        const root=h.provider.getChildren().find(item=>item.kind==='function');
+        const evidence=target==='function'?root.command.arguments[0]:h.site();
+        h.setResponse(()=>current);
+        await h.commands.get('intentlens.openCallPathSite')(evidence);
+        assert.deepEqual(h.errors,[]);
+        assert.deepEqual(h.opened,[h.documents[0].uri.fsPath]);
+        const position=h.vscode.window.activeTextEditor.selection.start;
+        assert.equal(position.line,1);
+        assert.equal(position.character,target==='function'?0:h.documents[0].lineAt(1).text.indexOf('Leaf'));
+        assert.strictEqual(h.provider.getChildren().find(item=>item.kind==='function'),root);
+        assert.equal(JSON.stringify(initial),initialJSON);
+        assert.equal(JSON.stringify(current),currentJSON);
+        assert.deepEqual(h.restrictions.aggregatedData,restrictionsAggregation?aggregated:null);
+      }finally{h.cleanup();}
+    });
+  }
+}
+
+const evidenceChanges = [
+  ['function source',data=>{data.functions[0].source+=' // changed';}],
+  ['call edge',data=>{data.calls[0].targets=['main.go:Other'];}],
+  ['call source',data=>{data.calls[0].source='Leaf(secret)';}],
+  ['raw diagnostic',data=>{data.issues.push('main.go:8: undefined: Changed');}],
+  ['aggregated diagnostic',data=>{data.aggregated.categories[1].items[0].message+=' changed';}],
+  ['aggregated count',data=>{data.aggregated.summary.totalRestrictions++;}],
+  ['aggregated full list',data=>{data.aggregated.categories[0].items[0].fullList[3]='missing/changed';}],
+];
+for (const target of ['function', 'call']) {
+  for (const [change, mutate] of evidenceChanges) {
+    test(`call path ${target} navigation still rejects changed ${change} with aggregation`,async()=>{
+      const h=setup();try{
+        const {aggregated}=require('../../internal/app/testdata/callpath-aggregation.json');
+        const initial={...h.graph(0),aggregated:structuredClone(aggregated)};
+        h.setResponse(()=>initial);
+        await h.commands.get('intentlens.callPath')();
+        const root=h.provider.getChildren().find(item=>item.kind==='function');
+        const evidence=target==='function'?root.command.arguments[0]:h.site();
+        const current=structuredClone(initial);
+        current.aggregated.timestamp='2026-11-21T00:00:00Z';
+        mutate(current);
+        h.setResponse(()=>current);
+        await h.commands.get('intentlens.openCallPathSite')(evidence);
+        assert.equal(h.opened.length,0);
+        assert.equal(h.errors.length,1);
+        assert.match(h.errors[0],/源码证据已变化/);
+        assert.equal(h.provider.getChildren()[0].command.command,'intentlens.callPath');
+      }finally{h.cleanup();}
+    });
+  }
+}
 
 test('call path icon action is usable; navigation retains original workspace and converts UTF-8 source columns',async()=>{
   const h=setup();try{

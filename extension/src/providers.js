@@ -3,6 +3,8 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const SECURE_API_KEY_ENV = 'INTENTLENS_API_KEY';
+// Keep the persisted setting compatible; inject editor keys on a distinct channel.
+const EDITOR_API_KEY_ENV = 'INTENTLENS_EDITOR_API_KEY';
 const MAX_MODEL_RESPONSE_BYTES = 1024 * 1024;
 const MAX_MODEL_PAGES = 50;
 const MAX_MODELS = 5000;
@@ -266,4 +268,4 @@ async function configureModel(vscode, folder, status, cli, secrets, fetchImpl = 
   vscode.window.showInformationMessage('IntentLens：已按所选 provider 的实际模型列表配置并安全保存；尚未发送模型生成请求。');
   return true;
 }
-module.exports = { modelCredentialForCall, assertModelSaveIdle, configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV };
+module.exports = { modelCredentialForCall, assertModelSaveIdle, configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV, EDITOR_API_KEY_ENV };

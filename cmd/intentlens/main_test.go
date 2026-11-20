@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"intentlens/internal/app"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,6 +149,83 @@ func TestEditorModelTargetRejectsConfigChangedAfterPreflight(t *testing.T) {
 	out.Reset()
 	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "未提供此工作区配置的 API Key") {
 		t.Fatalf("matching target: exit=%d output=%s", code, &out)
+	}
+}
+
+func TestCLIEditorCredentialBinding(t *testing.T) {
+	const validTarget = `{"provider":"openai-compatible","base_url":"https://original.fixture/v1"}`
+	for _, tc := range []struct {
+		name, flag, target, keyEnv, wantError string
+		editor                                bool
+	}{
+		{name: "editor missing target", editor: true, wantError: "模型密钥绑定无效"},
+		{name: "editor empty target", editor: true, flag: "--editor-model-target=", wantError: "模型密钥绑定无效"},
+		{name: "explicit empty equals", flag: "--editor-model-target=", wantError: "模型密钥绑定无效"},
+		{name: "explicit empty argument", flag: "--editor-model-target", wantError: "模型密钥绑定无效"},
+		{name: "malformed JSON", editor: true, flag: "--editor-model-target", target: "{", wantError: "模型密钥绑定无效"},
+		{name: "null target", editor: true, flag: "--editor-model-target", target: "null", wantError: "模型密钥绑定无效"},
+		{name: "empty object", editor: true, flag: "--editor-model-target", target: "{}", wantError: "模型密钥绑定无效"},
+		{name: "missing base", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible"}`, wantError: "模型密钥绑定无效"},
+		{name: "wrong type", editor: true, flag: "--editor-model-target", target: `{"provider":1,"base_url":"https://original.fixture/v1"}`, wantError: "模型密钥绑定无效"},
+		{name: "invalid URL", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"not-a-url"}`, wantError: "模型服务配置已变化"},
+		{name: "provider mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai","base_url":"https://original.fixture/v1"}`, wantError: "模型服务配置已变化"},
+		{name: "base mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"https://changed.fixture/v1"}`, wantError: "模型服务配置已变化"},
+		{name: "key env mismatch", editor: true, flag: "--editor-model-target", target: validTarget, keyEnv: "INTENTLENS_CLI_TEST_KEY", wantError: "模型服务配置已变化"},
+		{name: "matching editor target", editor: true, flag: "--editor-model-target", target: validTarget},
+		{name: "ordinary CLI default key"},
+		{name: "ordinary CLI custom key", keyEnv: "INTENTLENS_CLI_TEST_KEY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Keep configuration on the ordinary CLI path, as in the extension.
+			t.Setenv(app.EditorAPIKeyEnv, "")
+			if err := os.Unsetenv(app.EditorAPIKeyEnv); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("INTENTLENS_API_KEY", "cli-fixture-key")
+			t.Setenv("INTENTLENS_CLI_TEST_KEY", "cli-fixture-key")
+			calls := 0
+			previous := http.DefaultTransport
+			http.DefaultTransport = cliInMemoryTransport{handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				wantKey := "cli-fixture-key"
+				if tc.editor {
+					wantKey = "editor-fixture-key"
+				}
+				if r.URL.String() != "https://original.fixture/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer "+wantKey {
+					t.Error("request used the wrong destination or credential channel")
+				}
+				_, _ = io.WriteString(w, `{"choices":[{"finish_reason":"stop","message":{"content":"{\"intentlens_connection_test\":\"ok\"}"}}],"usage":{"total_tokens":9}}`)
+			})}
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			root, state := t.TempDir(), t.TempDir()
+			var out bytes.Buffer
+			config := `{"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":" https://original.fixture/v1/// ","model":"fixture","api_key_env":"` + tc.keyEnv + `","token_limit":4096}},"consent":true}`
+			if code := run([]string{"configure", "--root", root, "--state", state}, strings.NewReader(config), &out); code != 0 {
+				t.Fatalf("configure: %s", &out)
+			}
+			if tc.editor {
+				t.Setenv(app.EditorAPIKeyEnv, "editor-fixture-key")
+			}
+			args := []string{"test-model", "--root", root, "--state", state}
+			if tc.flag != "" {
+				args = append(args, tc.flag)
+				if tc.flag == "--editor-model-target" {
+					args = append(args, tc.target)
+				}
+			}
+			out.Reset()
+			code := run(args, failOnRead{}, &out)
+			if tc.wantError != "" {
+				if code != 1 || !strings.Contains(out.String(), tc.wantError) || calls != 0 {
+					t.Fatalf("exit=%d requests=%d output=%s", code, calls, &out)
+				}
+			} else if code != 0 || calls != 1 || !strings.Contains(out.String(), `"tested":true`) {
+				t.Fatalf("exit=%d requests=%d output=%s", code, calls, &out)
+			}
+			if strings.Contains(out.String(), "fixture-key") {
+				t.Fatal("credential leaked into command output")
+			}
+		})
 	}
 }
 

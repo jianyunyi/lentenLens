@@ -10,6 +10,16 @@ function text(value, fallback = '') { return typeof value === 'string' ? value :
 function positiveLine(value) { return Number.isInteger(value) && value > 0 && value <= 100000000 ? value : undefined; }
 function positiveColumn(value) { return Number.isInteger(value) && value >= 0 && value <= 100000000 ? value : 0; }
 
+function callPathEvidenceFingerprint(payload) {
+  const evidence = { ...payload };
+  if (evidence.aggregated && typeof evidence.aggregated === 'object' && !Array.isArray(evidence.aggregated)) {
+    // Generation time is display metadata; retain every diagnostic and graph field.
+    evidence.aggregated = { ...evidence.aggregated };
+    delete evidence.aggregated.timestamp;
+  }
+  return JSON.stringify(evidence);
+}
+
 function validatePathPayload(payload) {
   if (!payload || typeof payload !== 'object' || !Array.isArray(payload.functions) || !Array.isArray(payload.calls)) {
     throw new Error('调用路径响应格式无效');
@@ -138,4 +148,4 @@ function inferRoots(payload, functions) {
 }
 function coverageText(coverage) { return coverageSummary(coverage); }
 
-module.exports = { createCallPathProvider, validatePathPayload, coverageText, MAX_NODES, MAX_CALLS, MAX_RENDERED_OCCURRENCES };
+module.exports = { createCallPathProvider, callPathEvidenceFingerprint, validatePathPayload, coverageText, MAX_NODES, MAX_CALLS, MAX_RENDERED_OCCURRENCES };
