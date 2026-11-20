@@ -1,5 +1,6 @@
 // TokenUsagePanel displays the project usage reported by the CLI status command.
 const vscode = require('vscode');
+const crypto = require('node:crypto');
 
 class TokenUsagePanel {
     static currentPanel = undefined;
@@ -69,6 +70,7 @@ class TokenUsagePanel {
     }
 
     _getHtmlContent() {
+        const nonce = crypto.randomBytes(16).toString('base64');
         const status = this._status;
         const usage = status?.usage;
         const model = status?.settings?.model;
@@ -86,18 +88,19 @@ class TokenUsagePanel {
 
         return `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<style nonce="${nonce}">
 body{font-family:var(--vscode-font-family);color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);padding:20px;margin:0}
 .container{max-width:760px;margin:auto}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--vscode-panel-border);padding-bottom:12px}
 button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;border-radius:3px;padding:7px 12px;cursor:pointer}
 .section{margin:20px 0;padding:16px;background:var(--vscode-sideBar-background);border-left:3px solid var(--vscode-textLink-foreground)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.card{padding:14px;background:var(--vscode-editor-background);text-align:center}
 .label{font-size:12px;color:var(--vscode-descriptionForeground)}.value{font-size:20px;font-weight:600;margin-top:8px;overflow-wrap:anywhere}
-.muted{color:var(--vscode-descriptionForeground);font-size:12px}.bar{height:8px;background:var(--vscode-progressBar-background);margin-top:12px}.fill{height:100%;background:var(--vscode-textLink-foreground)}
+.muted{color:var(--vscode-descriptionForeground);font-size:12px}.bar{height:8px;background:var(--vscode-progressBar-background);margin-top:12px}.fill{height:100%;background:var(--vscode-textLink-foreground);width:${percent.toFixed(1)}%}
 [role=alert]{color:var(--vscode-errorForeground)}
 </style></head><body><main class="container">
 <div class="header"><div><h2>模型 Token 用量</h2><div class="muted">数据来源：当前工作区的 IntentLens CLI 状态</div></div>
-<button onclick="vscode.postMessage({command:'refresh'})">刷新</button></div>
+<button id="refreshButton">刷新</button></div>
 ${error}
 ${this._loading ? '<p role="status">正在读取 CLI 用量状态…</p>' : ''}
 <section class="section"><h3>下一次调用配置</h3><p>Provider：${escapeHTML(provider)}<br>模型：${escapeHTML(modelID)}</p><p class="muted">累计用量按项目共享预算统计；配置变更不会把历史用量归到当前模型。</p></section>
@@ -107,10 +110,15 @@ ${this._loading ? '<p role="status">正在读取 CLI 用量状态…</p>' : ''}
 <div class="card"><div class="label">总计（含未确认）</div><div class="value">${value(used)}</div></div>
 <div class="card"><div class="label">剩余预算 Token</div><div class="value">${value(remaining)}</div></div>
 </div><div class="muted">项目调用上限：${value(limit)} tokens。未确认用量也计入预算保留量。</div>
-<div class="bar"><div class="fill" style="width:${percent.toFixed(1)}%"></div></div>
+<div class="bar"><div class="fill"></div></div>
 <p class="muted">当前状态仅记录总 token，未提供输入与输出拆分。</p></section>
 <section class="section"><h3>费用</h3><p>${escapeHTML(costStatus)}</p><p class="muted">费用估算不能替代服务商账单；未取得适用于当前 provider 和模型的费率时不显示金额。</p></section>
-<script>const vscode=acquireVsCodeApi();</script></main></body></html>`;
+<script nonce="${nonce}">
+const vscode=acquireVsCodeApi();
+document.getElementById('refreshButton').addEventListener('click', () => {
+    vscode.postMessage({command:'refresh'});
+});
+</script></main></body></html>`;
     }
 
     dispose() {
