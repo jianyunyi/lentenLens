@@ -241,7 +241,11 @@ func (a *App) ExerciseFeedback(ctx context.Context, id, attemptID, reason, key s
 		if err != nil {
 			return view, err
 		}
-		raw, err := a.exerciseModel(ctx, key, `仅评价用户对修改理由的解释质量，返回 JSON {"feedback":"中文补充反馈"}。不要给分，不改变测试结果，不宣称完全理解或测试未覆盖的正确性。测试失败必须保留，未验证题目反馈只能暂定。材料：`+string(payload))
+		paths := exerciseSourcePaths(view.PackageDir, view.Spec.Baseline, attempt.Files)
+		if view.TargetFile != "" {
+			paths = append(paths, view.TargetFile)
+		}
+		raw, err := a.exerciseModel(ctx, key, `仅评价用户对修改理由的解释质量，返回 JSON {"feedback":"中文补充反馈"}。不要给分，不改变测试结果，不宣称完全理解或测试未覆盖的正确性。测试失败必须保留，未验证题目反馈只能暂定。材料：`+string(payload), paths)
 		if err != nil {
 			return view, err
 		}

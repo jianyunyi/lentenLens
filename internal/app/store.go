@@ -17,13 +17,15 @@ import (
 )
 
 type App struct {
-	applyStageFault func() error    // Test seam before a source rename.
-	applyFault      func(int) error // In-process failure injection; never serialized.
-	modelRun        func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
-	selectionRun    func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
-	exerciseRun     func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
-	Root            string
-	State           string
+	applyStageFault   func() error    // Test seam before a source rename.
+	applyFault        func(int) error // In-process failure injection; never serialized.
+	afterModelReserve func()          // Test seam after usage is reserved on disk.
+	modelTransport    http.RoundTripper
+	modelRun          func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
+	selectionRun      func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error)
+	exerciseRun       func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
+	Root              string
+	State             string
 
 	// EditorModelTarget is set only for a key supplied by the VS Code extension.
 	EditorModelTarget *EditorModelTarget
@@ -98,16 +100,7 @@ func OpenWithHTTPTransport(root, state string, transport http.RoundTripper) (*Ap
 	if err != nil {
 		return nil, err
 	}
-	if transport != nil {
-		a.modelRun = func(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
-			cfg.HTTPTransport = transport
-			return explain.Run(ctx, cfg, usage, key, question, evidence)
-		}
-		a.selectionRun = func(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
-			cfg.HTTPTransport = transport
-			return explain.RunSelection(ctx, cfg, usage, key, question, evidence)
-		}
-	}
+	a.modelTransport = transport
 	return a, nil
 }
 

@@ -460,30 +460,26 @@ func (a *App) analyzeWith(ctx context.Context, question, key string, evidence []
 	if strings.TrimSpace(key) == "" {
 		return explain.Document{}, fmt.Errorf("需要密钥环境变量 %s；请在启动编辑器或 hook 的环境中配置", settings.Model.APIKeyEnv)
 	}
-	reserve := analysisReservation(settings.Model.VerificationMode, question, evidence, selection)
-	if reserve > usage.Remaining(settings.Model.TokenLimit) {
+	paths, err := analysisSourcePaths(evidence, selection, selectionFile)
+	if err != nil {
+		return explain.Document{}, err
+	}
+	// Review includes generated claims, which may echo any first-stage source.
+	cfg := a.modelRequestConfig(settings.Model, paths)
+	reserve := analysisReservation(cfg.VerificationMode, question, evidence, selection)
+	if reserve > usage.Remaining(cfg.TokenLimit) {
 		return explain.Document{}, fmt.Errorf("预算不足；本次保守预留 %d tokens", reserve)
 	}
-	reserved := usage
-	reserved.UncertainTokens += reserve
-	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+	if writeErr := a.reserveModelUsage(usage, reserve); writeErr != nil {
 		return explain.Document{}, writeErr
 	}
-	runner := a.analysisRunner(selection)
-	if selection {
-		if policyErr := a.checkSelectionReservation(selectionFile, usage); policyErr != nil {
-			return explain.Document{}, policyErr
-		}
-	}
-	doc, updated, callErr := runner(ctx, settings.Model, usage, key, question, evidence)
-	if writeErr := a.write("usage.json", updated); writeErr != nil {
-		return explain.Document{}, writeErr
-	}
-	if callErr != nil {
-		return explain.Document{}, callErr
-	}
-	if err := a.validateAnalysisEvidence(evidence, selection, selectionFile); err != nil {
+	doc, updated, callErr := a.runAnalysis(ctx, cfg, usage, key, question, evidence, selection)
+	if err := a.settleModelUsage(updated, callErr); err != nil {
 		return explain.Document{}, err
+	}
+	// Policy may also change during the final request.
+	if err := a.checkModelSourcePaths(paths); err != nil {
+		return explain.Document{}, fmt.Errorf("分析期间无法确认源文件仍被允许，结果未保存：%w", err)
 	}
 	return doc, nil
 }
@@ -495,53 +491,50 @@ func analysisReservation(mode, question string, evidence []explain.Evidence, sel
 	return explain.ReservationForMode(mode, question, evidence)
 }
 
-func (a *App) analysisRunner(selection bool) func(context.Context, explain.Config, explain.Usage, string, string, []explain.Evidence) (explain.Document, explain.Usage, error) {
+func (a *App) runAnalysis(ctx context.Context, cfg explain.Config, usage explain.Usage, key, question string, evidence []explain.Evidence, selection bool) (explain.Document, explain.Usage, error) {
 	runner := a.modelRun
 	if selection {
 		runner = a.selectionRun
 	}
 	if runner != nil {
-		return runner
+		// A fake runner replaces the HTTP send, so apply the same guard here.
+		if err := cfg.CheckRequestPolicy(); err != nil {
+			return explain.Document{}, usage, err
+		}
+		return runner(ctx, cfg, usage, key, question, evidence)
 	}
 	if selection {
-		return explain.RunSelection
+		return explain.RunSelection(ctx, cfg, usage, key, question, evidence)
 	}
-	return explain.Run
+	return explain.Run(ctx, cfg, usage, key, question, evidence)
 }
 
-func (a *App) checkSelectionReservation(file string, usage explain.Usage) error {
-	if policyErr := a.requireSelectionFileAllowed(file); policyErr != nil {
-		if restoreErr := a.write("usage.json", usage); restoreErr != nil {
-			return fmt.Errorf("%w；无法恢复预算预留：%v", policyErr, restoreErr)
+func analysisSourcePaths(evidence []explain.Evidence, selection bool, selectionFile string) ([]string, error) {
+	var paths []string
+	if selection {
+		if strings.TrimSpace(selectionFile) == "" {
+			return nil, errors.New("缺少当前文件路径，无法应用排除规则")
 		}
-		return policyErr
+		paths = append(paths, selectionFile)
 	}
-	return nil
-}
-
-func (a *App) validateAnalysisEvidence(evidence []explain.Evidence, selection bool, selectionFile string) error {
-	// Policy may change while the remote request is running: do not persist newly excluded sources.
-	for i := range evidence {
-		ev := &evidence[i]
+	for _, ev := range evidence {
 		if selection {
-			if policyErr := a.requireSelectionFileAllowed(selectionFile); policyErr != nil {
-				return fmt.Errorf("分析期间无法确认选区文件仍被允许；结果未返回：%w", policyErr)
-			}
 			validSelectionEvidence := (ev.Kind == "selection" && ev.ID == "selected-code") || (ev.Kind == "diagnostics" && ev.ID == "selected-diagnostics")
 			if !validSelectionEvidence || ev.File != "" {
-				return errors.New("选区证据超出本次请求范围；结果未返回")
+				return nil, errors.New("选区证据超出本次请求范围")
 			}
 			continue
 		}
-		ok, err := a.evidenceAllowed(*ev)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errors.New("分析期间排除规则变化；结果未保存")
+		if ev.File != "" {
+			if !safeRelative(filepath.ToSlash(ev.File)) {
+				return nil, fmt.Errorf("分析证据的文件路径无效：%q", ev.File)
+			}
+			paths = append(paths, ev.File)
+		} else if ev.Kind != "prompt" && ev.Kind != "self_report" {
+			return nil, errors.New("分析证据缺少源文件路径")
 		}
 	}
-	return nil
+	return paths, nil
 }
 
 func (a *App) ExplainRound(ctx context.Context, r Round, idx codeindex.Index, key string) (Explanation, error) {

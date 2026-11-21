@@ -129,6 +129,9 @@ func callLimitMode(ctx context.Context, cfg Config, key, system, prompt string, 
 	if cfg.HTTPTransport != nil {
 		client.Transport = cfg.HTTPTransport
 	}
+	if err := cfg.CheckRequestPolicy(); err != nil {
+		return "", 0, err
+	}
 	res, err := client.Do(req)
 	if err != nil {
 		return "", -1, errors.New("模型请求失败，结果及计费未确认")

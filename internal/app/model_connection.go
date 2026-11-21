@@ -3,9 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"intentlens/internal/capture"
 	"intentlens/internal/explain"
 )
 
@@ -44,6 +47,56 @@ func (a *App) modelAPIKeyForTarget(cfg explain.Config, key string, requireModel 
 		key = os.Getenv(cfg.APIKeyEnv)
 	}
 	return key, nil
+}
+
+func (a *App) modelRequestConfig(cfg explain.Config, paths []string) explain.Config {
+	cfg.HTTPTransport = a.modelTransport
+	cfg.BeforeRequest = func() error { return a.checkModelSourcePaths(paths) }
+	return cfg
+}
+
+func (a *App) checkModelSourcePaths(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	policy, err := capture.LoadPolicy(a.Root)
+	if err != nil {
+		return fmt.Errorf("无法读取当前排除策略 (.intentignore)：%w", err)
+	}
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		path = filepath.ToSlash(path)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		allowed, err := policy.Allowed(a.Root, path)
+		if err != nil {
+			return fmt.Errorf("无法按当前排除策略检查路径 %q：%w", path, err)
+		}
+		if !allowed {
+			return fmt.Errorf("路径 %q 已被排除或不安全，请检查当前排除策略 (.intentignore)", path)
+		}
+	}
+	return nil
+}
+
+func (a *App) reserveModelUsage(usage explain.Usage, reserve int) error {
+	usage.UncertainTokens += reserve
+	if err := a.write("usage.json", usage); err != nil {
+		return err
+	}
+	if a.afterModelReserve != nil {
+		a.afterModelReserve()
+	}
+	return nil
+}
+
+func (a *App) settleModelUsage(usage explain.Usage, callErr error) error {
+	if err := a.write("usage.json", usage); err != nil {
+		return errors.Join(callErr, fmt.Errorf("无法写入模型用量结算：%w", err))
+	}
+	return callErr
 }
 
 // TestModel performs a deliberately separate, fixed, bounded provider probe.
@@ -92,7 +145,7 @@ func (a *App) TestModel(ctx context.Context) (int, error) {
 	if writeErr := a.write("usage.json", reserved); writeErr != nil {
 		return 0, writeErr
 	}
-	tokens, err := explain.TestConnection(ctx, cfg, key)
+	tokens, err := explain.TestConnection(ctx, a.modelRequestConfig(cfg, nil), key)
 	if err != nil {
 		// The provider may have received the request. Keep the reservation as
 		// uncertain instead of claiming the test was free or unbilled.

@@ -21,11 +21,13 @@ const modelCommands = new Set(['explain', 'explain-selection', 'analyze-round', 
 
 function activate(context) {
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
-  const panels = new Map(), policyVersions = new Map();
+  const panels = new Map(), policyVersions = new Map(), roundPages = new Map();
   let callPathProvider;
   let callPathView;
   let callPathState;
   let modelAnswerProvider;
+  const modelEvidenceRecords = new Map();
+  let modelAnswerGeneration = 0;
   const indexDiagnostics = new Map();
   const sourcePanels = new Set();
   const indexBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 90);
@@ -126,7 +128,7 @@ function activate(context) {
     },
   });
   const recovery = createCaptureRecovery({ vscode, cli, sessions });
-  const refresh = () => { invalidateIndex(); treeChanged.fire(); lensesChanged.fire(); modelAnswerProvider?.refresh(); };
+  const refresh = () => { invalidateIndex(); roundPages.clear(); treeChanged.fire(); lensesChanged.fire(); modelAnswerProvider?.refresh(); };
   async function openCurrent(folder, file, line = 1, column = 0) {
     trusted();
     await revealCurrent(confinedPath(folder.uri.fsPath, file), line, column);
@@ -143,8 +145,9 @@ function activate(context) {
     editor.selection = new vscode.Selection(pos, pos);
     editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
   }
-  async function snapshot(source, file) {
+  async function snapshot(source, file, beforeShow = () => {}) {
     const document = await vscode.workspace.openTextDocument({ content: source || '', language: file?.endsWith('.go') ? 'go' : 'plaintext' });
+    await beforeShow();
     await vscode.window.showTextDocument(document, { preview: false });
   }
   function panel(title, render, handler, folder, tracksSource = false) {
@@ -307,19 +310,25 @@ function activate(context) {
   async function showRound(folder, round) {
     trusted();
     const id = round.id;
-    round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
-    if (!round) throw new Error('轮次已不存在或已被排除。');
+    const loadRound = (cursor = '') => cli(folder, 'round-detail', { round_id: id, cursor, limit: 50 });
+    const sameFirstPage = (latest, current) => {
+      const { changes: latestChanges, next_cursor: _latestCursor, ...latestMetadata } = latest;
+      const { changes: currentChanges, next_cursor: _currentCursor, ...currentMetadata } = current;
+      return JSON.stringify(latestMetadata) === JSON.stringify(currentMetadata) &&
+        JSON.stringify(latestChanges || []) === JSON.stringify((currentChanges || []).slice(0, 50));
+    };
+    round = await loadRound();
     let busy = false;
     const view = panel(`IntentLens · ${round.id}`, nonce => renderRound(round, nonce), async message => {
       if (busy) return;
       busy = true;
       try {
         let latest;
-        try { latest = (await cli(folder, 'rounds')).find(entry => entry.id === id); }
+        try { latest = await loadRound(); }
         catch (error) { view.dispose(); throw error; }
         if (!panels.has(view)) return;
         if (!latest) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
-        if (JSON.stringify(latest) !== JSON.stringify(round)) {
+        if (!sameFirstPage(latest, round)) {
           round = latest;
           view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
           throw new Error('轮次证据已变化，面板已刷新，请重新选择操作。');
@@ -328,16 +337,16 @@ function activate(context) {
           const action = round.analysis ? '重新生成轮次解释' : '生成轮次解释';
           const answer = await vscode.window.showWarningMessage(`${action}？`, { modal: true, detail: '将按项目模型配置发送本轮允许的历史代码证据，并消耗模型 token 预算。不会使用 IDE 订阅凭据，不会修改源码；新解释会成为本轮展示版本，旧解释仍保存在本地历史。' }, action);
           if (answer !== action || !panels.has(view)) return;
-          latest = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          latest = await loadRound();
           if (!panels.has(view)) return;
           if (!latest) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
-          if (JSON.stringify(latest) !== JSON.stringify(round)) {
+          if (!sameFirstPage(latest, round)) {
             round = latest;
             view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
             throw new Error('轮次证据已变化，面板已刷新，请重新确认生成。');
           }
           await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `IntentLens：${action}并检查证据支持`, cancellable: false }, () => cli(folder, 'analyze-round', { round_id: id }));
-          round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          round = await loadRound();
           if (panels.has(view)) {
             if (!round) { view.dispose(); throw new Error('轮次已不存在或已被排除。'); }
             view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
@@ -348,22 +357,34 @@ function activate(context) {
         if (['share', 'revise', 'flag', 'exercise'].includes(message.action)) {
           if (message.group !== 'analysis') return;
           await explanationAction(folder, round.analysis, message);
-          round = (await cli(folder, 'rounds')).find(entry => entry.id === id);
+          round = await loadRound();
           if (panels.has(view) && round) view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
           return;
         }
         if (message.action === 'snapshot' || message.action === 'current') {
           if (message.group !== 'analysis') return;
           const ev = selectedIndex(round.analysis?.evidence, message.index);
-          if (message.action === 'snapshot') await snapshot(ev.source, ev.file);
+          if (message.action === 'snapshot') {
+            const current = await cli(folder, 'explanation-evidence', { explanation_id: round.analysis.id, evidence_id: ev.id });
+            await snapshot(current.source, current.file);
+          }
           else await openCurrent(folder, ev.file, ev.start_line);
+          return;
+        }
+        if (message.action === 'loadMoreChanges') {
+          if (!round.next_cursor) return;
+          const page = await loadRound(round.next_cursor);
+          round = { ...round, changes: [...round.changes, ...(page.changes || [])], next_cursor: page.next_cursor };
+          if (panels.has(view)) view.webview.html = renderRound(round, crypto.randomBytes(18).toString('hex'));
           return;
         }
         if (!['change', 'changeCurrent'].includes(message.action)) return;
         const change = selectedIndex(round.changes, message.index);
         if (message.action === 'changeCurrent') return openCurrent(folder, change.path);
-        const before = await vscode.workspace.openTextDocument({ content: change.before?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
-        const after = await vscode.workspace.openTextDocument({ content: change.after?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
+        const beforeResult = await cli(folder, 'round-file', { round_id: id, file: change.path, side: 'before' });
+        const afterResult = await cli(folder, 'round-file', { round_id: id, file: change.path, side: 'after' });
+        const before = await vscode.workspace.openTextDocument({ content: beforeResult.file?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
+        const after = await vscode.workspace.openTextDocument({ content: afterResult.file?.content || '', language: change.path.endsWith('.go') ? 'go' : 'plaintext' });
         await vscode.commands.executeCommand('vscode.diff', before.uri, after.uri, `${change.path} — 历史 before / after`);
       } finally { busy = false; }
     }, folder);
@@ -378,21 +399,57 @@ function activate(context) {
       });
       if (item.round) return [];
       try {
-        const rounds = await cli(item.folder, 'rounds');
-        return rounds.map(round => {
-          const node = new vscode.TreeItem(`${round.started} · ${round.changes?.length || 0} 文件`, vscode.TreeItemCollapsibleState.None);
+        const root = item.folder.uri.fsPath;
+        let cached = roundPages.get(root);
+        if (!cached) {
+          const page = await cli(item.folder, 'rounds', { limit: 50 });
+          cached = { items: page.items || [], nextCursor: page.next_cursor };
+          roundPages.set(root, cached);
+        }
+        const nodes = cached.items.map(round => {
+          const node = new vscode.TreeItem(`${round.started} · ${round.change_count || 0} 文件`, vscode.TreeItemCollapsibleState.None);
           node.round = round; node.folder = item.folder; node.description = round.source;
           node.command = { command: 'intentlens.openRound', title: '查看轮次', arguments: [item.folder, round] };
           return node;
         });
+        if (cached.nextCursor) {
+          const more = new vscode.TreeItem('加载更多轮次…', vscode.TreeItemCollapsibleState.None);
+          more.command = { command: 'intentlens.loadMoreRounds', title: '加载下一页轮次', arguments: [root, cached.nextCursor] };
+          nodes.push(more);
+        }
+        return nodes;
       } catch (error) { vscode.window.showErrorMessage(`IntentLens: ${error.message}`); return []; }
     },
   };
+  command('loadMoreRounds', async (root, cursor) => {
+    const folder = openFolder(root);
+    if (!folder) throw new Error('轮次来源工作区已关闭，请重新打开后重试。');
+    const page = await cli(folder, 'rounds', { cursor, limit: 50 });
+    const cached = roundPages.get(root) || { items: [], nextCursor: undefined };
+    cached.items.push(...(page.items || []));
+    cached.nextCursor = page.next_cursor;
+    roundPages.set(root, cached);
+    treeChanged.fire(undefined);
+  });
   context.subscriptions.push(treeChanged, lensesChanged, vscode.window.createTreeView('intentlens.rounds', { treeDataProvider: provider }));
   callPathProvider = createCallPathProvider(vscode);
   callPathView = vscode.window.createTreeView('intentlens.callPath', { treeDataProvider: callPathProvider });
   const modelAnswerChanged = new vscode.EventEmitter();
-  modelAnswerProvider = createModelAnswerProvider({ vscode, treeChanged: modelAnswerChanged, getCurrentTarget: getCurrentModelTarget });
+  modelAnswerProvider = createModelAnswerProvider({
+    vscode,
+    treeChanged: modelAnswerChanged,
+    getCurrentTarget: getCurrentModelTarget,
+    issueEvidenceRecord: record => {
+      if (!record?.root || !record?.explanationID || !record?.evidenceID || record.generation !== modelAnswerGeneration) return undefined;
+      const id = crypto.randomUUID();
+      modelEvidenceRecords.set(id, { ...record });
+      return id;
+    },
+    onInvalidate: generation => {
+      modelAnswerGeneration = generation;
+      modelEvidenceRecords.clear();
+    },
+  });
   const modelAnswerView = vscode.window.createTreeView('intentlens.modelAnswer', { treeDataProvider: modelAnswerProvider });
   context.subscriptions.push(callPathProvider, callPathView, modelAnswerProvider, modelAnswerChanged, modelAnswerView);
 
@@ -610,9 +667,41 @@ function activate(context) {
     if (restrictionResult) restrictionTreeProvider.refresh(restrictionResult.aggregated, restrictionResult.id, restrictionResult.idsByItem);
   });
   command('clearRestrictions', () => clearRestrictions());
-  command('openModelEvidence', async (_folder, evidence) => {
-    if (!evidence || typeof evidence.source !== 'string') throw new Error('本地引用证据无效。');
-    await snapshot(evidence.source, evidence.file);
+  command('openModelEvidence', async recordID => {
+    trusted();
+    const record = modelEvidenceRecords.get(recordID);
+    if (!record || record.generation !== modelAnswerGeneration) throw new Error('此侧栏证据已失效，请刷新后重新展开。');
+    const folder = openFolder(record.root);
+    if (!folder) {
+      modelEvidenceRecords.delete(recordID);
+      throw new Error('引用证据来源工作区已关闭，已拒绝打开。');
+    }
+    const assertEvidenceCurrent = () => {
+      trusted();
+      if (modelEvidenceRecords.get(recordID) !== record || record.generation !== modelAnswerGeneration) throw new Error('侧栏已刷新或证据记录已失效，已拒绝打开。');
+      if (!openFolder(record.root)) throw new Error('引用证据来源工作区已关闭，已拒绝打开。');
+    };
+    const validateCurrentEvidence = async () => {
+      assertEvidenceCurrent();
+      const editor = vscode.window.activeTextEditor;
+      const folderForEditor = editor && vscode.workspace.getWorkspaceFolder(editor.document.uri);
+      const file = editor?.document?.uri?.scheme === 'file' && folderForEditor
+        ? path.relative(folderForEditor.uri.fsPath, editor.document.uri.fsPath).split(path.sep).join('/')
+        : undefined;
+      const line = editor ? editor.selection.active.line + 1 : undefined;
+      if (!editor || editor.document.isDirty || folderForEditor?.uri?.fsPath !== record.root || file !== record.file || line !== record.line) {
+        throw new Error('侧栏当前函数已变化，已拒绝打开旧引用证据。');
+      }
+      const current = await cli(folder, 'explanation-evidence', { explanation_id: record.explanationID, evidence_id: record.evidenceID });
+      assertEvidenceCurrent();
+      if (!current || typeof current.source !== 'string') throw new Error('当前排除策略下无法读取此引用证据，已拒绝打开。');
+      return current;
+    };
+    const evidence = await validateCurrentEvidence();
+    await snapshot(evidence.source, evidence.file, async () => {
+      const latest = await validateCurrentEvidence();
+      if (latest.source !== evidence.source || latest.hash !== evidence.hash) throw new Error('引用证据在打开前已变化，已拒绝显示旧快照。');
+    });
   });
   command('explainSelection', async () => {
     trusted();
@@ -749,13 +838,13 @@ function activate(context) {
       else await openCurrent(folder, ev.file, ev.start_line);
     }, folder);
   });
-  command('enableModel', async () => {
-    const folder = await folderFor(); if (!folder) return;
+  async function configureForFolder(folder) {
     const status = await cli(folder, 'status');
-    if (await configureModel(vscode, folder, status, cli, context.secrets)) refresh();
-  });
-  command('testModel', async () => {
-    const folder = await folderFor(); if (!folder) return;
+    const saved = await configureModel(vscode, folder, status, cli, context.secrets);
+    if (saved) refresh();
+    return saved;
+  }
+  async function testModelForFolder(folder) {
     const { model, target } = await modelCredentialForCall(folder, cli, context.secrets);
     if (!model.enabled || !model.model) {
       throw new Error('请先通过“启用或调整模型分析”查询并选择 API 返回的模型 ID。');
@@ -767,10 +856,17 @@ function activate(context) {
     const result = await cli(folder, 'test-model', {}, { confirmedTarget: { ...target, model: model.model } });
     if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
     vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
+    return result;
+  }
+  command('enableModel', async () => {
+    const folder = await folderFor(); if (folder) return configureForFolder(folder);
+  });
+  command('testModel', async () => {
+    const folder = await folderFor(); if (folder) return testModelForFolder(folder);
   });
   command('configureAPI', async () => {
     const folder = await folderFor(); if (!folder) return;
-    AIConfigPanel.show(context, folder);
+    return AIConfigPanel.show(context, folder, { cli, configure: configureForFolder, testConnection: testModelForFolder });
   });
   command('viewTokenUsage', async () => {
     const activeUri = vscode.window.activeTextEditor?.document?.uri;

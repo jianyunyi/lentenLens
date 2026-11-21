@@ -23,7 +23,7 @@ function createCaptureRecovery({ vscode, cli, sessions }) {
     const answer = await vscode.window.showWarningMessage('恢复当前未结束的轮次？', { modal: true, detail: `轮次 ${active.id}，开始于 ${active.started}。它可能由 IDE、Skill 或其它工具启动；请先确认没有其它操作仍在使用它。恢复只关联本地会话，不修改基线，也不确认变更作者。` }, action);
     if (answer !== action) return;
     await unchanged(folder, active);
-    const adopted = await sessions.adopt(folder.uri.fsPath, active.session);
+    const adopted = await sessions.adopt(folder.uri.fsPath, active.session, active.id);
     if (!adopted) throw new Error('已有轮次操作正在执行，请完成后重试恢复。');
     // If another process changed the baseline while local state was saved, do not
     // report success or retain a knowingly invalid association.

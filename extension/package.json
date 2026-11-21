@@ -323,47 +323,7 @@
                                                                                                             "default":  true,
                                                                                                             "scope":  "window",
                                                                                                             "description":  "Enable unified display for parse restrictions (aggregates multiple errors into hierarchical view)"
-                                                                                                        },
-                                                                 "intentlens.apiProvider":  {
-                                                                                                     "type":  "string",
-                                                                                                     "enum":  [
-                                                                                                     "openai",
-                                                                                                     "anthropic",
-                                                                                                     "other"
-                                                                                                     ],
-                                                                                                     "default":  "openai",
-                                                                                                     "scope":  "window",
-                                                                                                     "description":  "AI API provider selected in the API configuration panel"
-                                                                 },
-                                                                 "intentlens.apiModelId":  {
-                                                                                                     "type":  "string",
-                                                                                                     "default":  "",
-                                                                                                     "scope":  "window",
-                                                                                                     "description":  "Model ID selected in the API configuration panel"
-                                                                 },
-                                                                 "intentlens.apiBaseUrl":  {
-                                                                                                     "type":  "string",
-                                                                                                     "default":  "",
-                                                                                                     "scope":  "window",
-                                                                                                     "description":  "Custom API base URL used when the provider is other"
-                                                                 },
-                                                                 "intentlens.configStatus":  {
-                                                                                                     "type":  "string",
-                                                                                                     "enum":  [
-                                                                                                     "unconfigured",
-                                                                                                     "configured",
-                                                                                                     "invalid"
-                                                                                                     ],
-                                                                                                     "default":  "unconfigured",
-                                                                                                     "scope":  "window",
-                                                                                                     "description":  "API configuration status managed by the configuration panel"
-                                                                 },
-                                                                 "intentlens.lastValidation":  {
-                                                                                                     "type":  "string",
-                                                                                                     "default":  "",
-                                                                                                     "scope":  "window",
-                                                                                                     "description":  "ISO timestamp of the last successful API configuration validation"
-                                                                 }
+                                                                                                        }
                                                              }
                                           }
                     }

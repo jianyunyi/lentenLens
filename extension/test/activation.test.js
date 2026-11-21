@@ -39,6 +39,7 @@ test('extension registers testModel in manifest, activates it, and dispatches to
     if (command === 'status') return status();
     assert.equal(command, 'configure');
     model = input.settings.model;
+    return { saved: true };
   }, secrets, async () => new Response(JSON.stringify({ data: [{ id: 'returned-model-id' }] })));
   const vscode = {
     workspace: { isTrusted: false, workspaceFolders: [], getWorkspaceFolder: uri => uri?.fsPath?.startsWith(folder.uri.fsPath) ? folder : undefined, getConfiguration: () => ({ get: () => '' }), createFileSystemWatcher: () => ({ ...disposable, onDidCreate: () => disposable, onDidChange: () => disposable, onDidDelete: () => disposable }), onDidChangeTextDocument: () => ({ dispose() {} }), onDidGrantWorkspaceTrust: () => disposable, onDidSaveTextDocument: () => disposable, onDidChangeWorkspaceFolders: () => disposable, workspaceState },

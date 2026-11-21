@@ -43,9 +43,14 @@ function target(history = []) {
 test('model-answer provider sorts saved versions and maps claims to their local evidence', async () => {
   const h = harness();
   let targetReads = 0;
+  const issuedRecords = [];
   const old = { id: 'old', created: '2026-01-01T00:00:00Z', freshness: '已引用证据未变', document: { claims: [{ id: 'c0', text: '旧说法', status: 'supported', section: 'flow', evidence_ids: ['e1'] }] }, evidence: [evidence] };
   const latest = { id: 'new', created: '2026-02-01T00:00:00Z', freshness: '解释已过期：引用变化', document: { claims: [{ id: 'c1', text: '最新回答中的结论', status: 'uncertain', section: 'behavior', evidence_ids: ['e1'] }], unknowns: ['未记录的设计动机'] }, evidence: [evidence] };
-  const provider = createModelAnswerProvider({ ...h, getCurrentTarget: async () => { targetReads++; return target([old, latest]); } });
+  const provider = createModelAnswerProvider({
+    ...h,
+    getCurrentTarget: async () => { targetReads++; return target([old, latest]); },
+    issueEvidenceRecord: record => { issuedRecords.push(record); return 'host-evidence-record'; },
+  });
   const [answerRoot] = await provider.getChildren();
   assert.match(answerRoot.label, /模型回答/);
   const versions = await provider.getChildren(answerRoot);
@@ -58,10 +63,35 @@ test('model-answer provider sorts saved versions and maps claims to their local 
   const [citation] = await provider.getChildren(claim);
   assert.equal(citation.label, 'main.go:3–7');
   assert.equal(citation.command.command, 'intentlens.openModelEvidence');
-  assert.equal(citation.command.arguments[0], folder);
-  assert.equal(citation.command.arguments[1], evidence);
+  assert.deepEqual(citation.command.arguments, ['host-evidence-record']);
+  assert.equal(JSON.stringify(citation.command.arguments).includes(evidence.source), false);
+  assert.deepEqual(issuedRecords[0], { generation: 0, root: folder.uri.fsPath, file: 'main.go', line: 3, explanationID: 'new', evidenceID: 'e1' });
   assert.ok(answerRows.some(row => /未记录的设计动机/.test(row.label)));
   assert.equal(targetReads, 1);
+});
+
+test('refresh invalidates old sidebar descendants before they can create another evidence command', async () => {
+  const h = harness();
+  const issuedRecords = [];
+  let invalidationGeneration = 0;
+  const entry = { id: 'explanation-1', document: { claims: [{ id: 'c1', text: 'claim', evidence_ids: ['e1'] }] }, evidence: [evidence] };
+  const provider = createModelAnswerProvider({
+    ...h,
+    getCurrentTarget: async () => target([entry]),
+    issueEvidenceRecord: record => { issuedRecords.push(record); return `record-${issuedRecords.length}`; },
+    onInvalidate: generation => { invalidationGeneration = generation; },
+  });
+  const [root] = await provider.getChildren();
+  const [version] = await provider.getChildren(root);
+  const [claim] = await provider.getChildren(version);
+  const [citation] = await provider.getChildren(claim);
+  assert.ok(citation.command);
+  provider.refresh();
+  assert.equal(invalidationGeneration, 1);
+  const [stalePlaceholder] = await provider.getChildren(claim);
+  assert.match(stalePlaceholder.label, /已失效/);
+  assert.equal(issuedRecords.length, 1);
+  provider.dispose();
 });
 
 test('model-answer provider never asks the model to create a missing answer', async () => {

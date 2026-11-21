@@ -155,7 +155,7 @@ function assertModelSaveIdle(folder) {
     throw new Error('模型配置正在保存，请先完成配置保存后重试。');
   }
 }
-async function modelCredentialForCall(folder, cli, secrets) {
+async function readModelConfiguration(folder, cli, secrets) {
   const name = workspaceSecretKey(folder.uri.fsPath);
   assertModelSaveIdle(folder);
   const { settings } = await cli(folder, 'status');
@@ -165,10 +165,15 @@ async function modelCredentialForCall(folder, cli, secrets) {
   const key = await secrets?.get(name);
   const binding = await secrets?.get(name + '.binding');
   assertModelSaveIdle(folder);
-  if (!provider || !base_url || api_key_env !== SECURE_API_KEY_ENV || !key || binding !== keyBinding(target, key)) {
+  const credentialBound = !!(provider && base_url && api_key_env === SECURE_API_KEY_ENV && key && binding === keyBinding(target, key));
+  return { model, target, key: credentialBound ? key : undefined };
+}
+async function modelCredentialForCall(folder, cli, secrets) {
+  const credential = await readModelConfiguration(folder, cli, secrets);
+  if (!credential.key) {
     throw new Error('API Key 未绑定或与当前模型服务不匹配。请通过“启用或调整模型分析”重新保存 API Key。');
   }
-  return { key, target, model };
+  return credential;
 }
 async function saveModel(folder, cli, secrets, configuration, apiKey) {
   const secretName = workspaceSecretKey(folder.uri.fsPath);
@@ -182,7 +187,8 @@ async function saveModel(folder, cli, secrets, configuration, apiKey) {
     const binding = keyBinding(configuration, apiKey);
     const settings = { ...previousSettings, model: configuration };
     // Commit configuration first; calls reject until the matching binding is stored.
-    await cli(folder, 'configure', { settings, consent: true });
+    const result = await cli(folder, 'configure', { settings, consent: true });
+    if (result?.saved !== true) throw new Error('后端未确认配置已保存。');
     try {
       await secrets.store(secretName, apiKey);
       await secrets.store(bindingName, binding);
@@ -268,4 +274,4 @@ async function configureModel(vscode, folder, status, cli, secrets, fetchImpl = 
   vscode.window.showInformationMessage('IntentLens：已按所选 provider 的实际模型列表配置并安全保存；尚未发送模型生成请求。');
   return true;
 }
-module.exports = { modelCredentialForCall, assertModelSaveIdle, configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV, EDITOR_API_KEY_ENV };
+module.exports = { modelCredentialForCall, readModelConfiguration, assertModelSaveIdle, configureModel, presets, verificationModes, validateBase, listModels, workspaceSecretKey, SECURE_API_KEY_ENV, EDITOR_API_KEY_ENV };

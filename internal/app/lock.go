@@ -11,7 +11,7 @@ import (
 // The inode is persistent: unlinking it can allow two independent lock owners.
 // A legacy lock file is harmless once all pre-upgrade processes have stopped.
 func (a *App) lock(name string) (func(), error) {
-	if name != "capture" && name != "analysis" && name != "exercise" && name != "revision" && name != "settings" && name != "state" {
+	if name != "capture" && name != "analysis" && name != "round-analysis-auto" && name != "exercise" && name != "revision" && name != "settings" && name != "state" {
 		return nil, errors.New("无效操作锁")
 	}
 	root, err := os.OpenRoot(a.State)

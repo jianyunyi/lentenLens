@@ -185,24 +185,6 @@ func TestSelectionCoordinatesPreserveExclusiveLineBoundary(t *testing.T) {
 	}
 }
 
-func TestSelectionPolicyChangeBeforeRunRestoresReservation(t *testing.T) {
-	a, root := fixture(t)
-	usage := explain.Usage{ActualTokens: 5, UncertainTokens: 2}
-	reserved := usage
-	reserved.UncertainTokens += 100
-	if err := a.write("usage.json", reserved); err != nil {
-		t.Fatal(err)
-	}
-	put(t, root, ".intentignore", "private.ts\n")
-	if err := a.checkSelectionReservation("private.ts", usage); err == nil || !strings.Contains(err.Error(), "排除") {
-		t.Fatalf("changed policy did not stop selection: %v", err)
-	}
-	got, err := a.Usage()
-	if err != nil || got != usage {
-		t.Fatalf("original usage not restored: got=%+v want=%+v err=%v", got, usage, err)
-	}
-}
-
 func TestSelectionPolicyChangeDuringAnalysisRejectsResultAndRecordsUsage(t *testing.T) {
 	a, root := fixture(t)
 	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid/v1", APIKeyEnv: "INTENTLENS_SELECTION_TEST_KEY", Model: "fixture-model", TokenLimit: 200000, VerificationMode: explain.ModeFast}}
