@@ -61,6 +61,12 @@ func Take(root string) (Snapshot, error) {
 
 // TakeWithPolicy returns the snapshot and the policy used to capture it.
 func TakeWithPolicy(root string) (Snapshot, Policy, error) {
+	return takeWithPolicy(root, filepath.WalkDir)
+}
+
+type walkDirFunc func(string, fs.WalkDirFunc) error
+
+func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Snapshot{}, Policy{}, err
@@ -79,7 +85,7 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 		return Snapshot{}, Policy{}, err
 	}
 	defer confined.Close()
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+	err = walkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if p == root {
 			return walkErr
 		}
@@ -95,6 +101,10 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 			return nil
 		}
 		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				s.Omitted = append(s.Omitted, rel)
+				return filepath.SkipDir
+			}
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
 		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
@@ -108,6 +118,10 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 			return nil
 		}
 		info, e := d.Info()
+		if errors.Is(e, fs.ErrNotExist) {
+			s.Omitted = append(s.Omitted, rel)
+			return nil
+		}
 		if e != nil {
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
@@ -116,6 +130,10 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 			return nil
 		}
 		ok, e := safePath(root, rel)
+		if errors.Is(e, fs.ErrNotExist) {
+			s.Omitted = append(s.Omitted, rel)
+			return nil
+		}
 		if e != nil {
 			return e
 		}
@@ -149,6 +167,10 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 // TakeGo captures only Go source for indexing. Non-Go files never consume the
 // source budget; all ordinary path and privacy checks still apply.
 func TakeGo(root string) (Snapshot, Coverage, error) {
+	return takeGo(root, filepath.WalkDir)
+}
+
+func takeGo(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
@@ -162,13 +184,17 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 	}
 	s := Snapshot{Files: map[string]File{}, Omitted: []string{}, PolicyHash: policy.Hash()}
 	c := Coverage{Complete: true, Scope: "go-only", BudgetBytes: MaxSnapshotBytes, Omitted: []CoverageOmission{}, OmissionReasons: map[string]string{}}
+	omitChanged := func(rel string) {
+		s.Omitted = append(s.Omitted, rel)
+		addCoverageOmission(&c, rel, "file_changed")
+	}
 	total := 0
 	confined, err := os.OpenRoot(root)
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
 	}
 	defer confined.Close()
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+	err = walkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if p == root {
 			return walkErr
 		}
@@ -185,6 +211,10 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			return nil
 		}
 		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				omitChanged(rel)
+				return filepath.SkipDir
+			}
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
 		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
@@ -211,6 +241,10 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			return nil
 		}
 		info, e := d.Info()
+		if errors.Is(e, fs.ErrNotExist) {
+			omitChanged(rel)
+			return nil
+		}
 		if e != nil {
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
@@ -227,6 +261,10 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 			return nil
 		}
 		ok, e := safePath(root, rel)
+		if errors.Is(e, fs.ErrNotExist) {
+			omitChanged(rel)
+			return nil
+		}
 		if e != nil {
 			return e
 		}
@@ -236,8 +274,7 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 		}
 		data, e := readCaptureFile(confined, rel, info)
 		if e == errFileChanged {
-			s.Omitted = append(s.Omitted, rel)
-			addCoverageOmission(&c, rel, "file_changed")
+			omitChanged(rel)
 			return nil
 		}
 		if e != nil {
@@ -272,6 +309,9 @@ var errFileChanged = errors.New("file changed during capture")
 
 func readCaptureFile(root *os.Root, relative string, walked fs.FileInfo) (data []byte, err error) {
 	f, err := root.Open(filepath.FromSlash(relative))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, errFileChanged
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cannot read capture path %q", relative)
 	}

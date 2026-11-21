@@ -128,23 +128,28 @@ func TestEditorModelTargetRejectsConfigChangedAfterPreflight(t *testing.T) {
 	root, state := t.TempDir(), t.TempDir()
 	t.Setenv("INTENTLENS_API_KEY", "fixture-api-key")
 	var out bytes.Buffer
-	configure := func(base string) {
+	configure := func(base, model string) {
 		t.Helper()
 		out.Reset()
-		stdin := strings.NewReader(`{"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":"` + base + `","model":"fixture","api_key_env":"INTENTLENS_API_KEY","token_limit":4096}},"consent":true}`)
+		stdin := strings.NewReader(`{"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":"` + base + `","model":"` + model + `","api_key_env":"INTENTLENS_API_KEY","token_limit":4096}},"consent":true}`)
 		if code := run([]string{"configure", "--root", root, "--state", state}, stdin, &out); code != 0 {
 			t.Fatalf("configure failed: %s", &out)
 		}
 	}
 	args := []string{"test-model", "--root", root, "--state", state, "--editor-model-target",
-		`{"provider":"openai-compatible","base_url":"https://original.fixture/v1"}`}
-	configure("https://changed.fixture/v1")
+		`{"provider":"openai-compatible","base_url":"https://original.fixture/v1","model":"fixture"}`}
+	configure("https://changed.fixture/v1", "fixture")
 	out.Reset()
 	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "模型服务配置已变化") {
 		t.Fatalf("mismatched target: exit=%d output=%s", code, &out)
 	}
+	configure("https://original.fixture/v1", "changed-model")
+	out.Reset()
+	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "模型服务配置已变化") {
+		t.Fatalf("mismatched model: exit=%d output=%s", code, &out)
+	}
 	// A matching target gets past the binding guard to the normal key check.
-	configure("https://original.fixture/v1")
+	configure("https://original.fixture/v1", "fixture")
 	t.Setenv("INTENTLENS_API_KEY", "")
 	out.Reset()
 	if code := run(args, failOnRead{}, &out); code != 1 || !strings.Contains(out.String(), "未提供此工作区配置的 API Key") {
@@ -153,7 +158,7 @@ func TestEditorModelTargetRejectsConfigChangedAfterPreflight(t *testing.T) {
 }
 
 func TestCLIEditorCredentialBinding(t *testing.T) {
-	const validTarget = `{"provider":"openai-compatible","base_url":"https://original.fixture/v1"}`
+	const validTarget = `{"provider":"openai-compatible","base_url":"https://original.fixture/v1","model":"fixture"}`
 	for _, tc := range []struct {
 		name, flag, target, keyEnv, wantError string
 		editor                                bool
@@ -166,10 +171,12 @@ func TestCLIEditorCredentialBinding(t *testing.T) {
 		{name: "null target", editor: true, flag: "--editor-model-target", target: "null", wantError: "模型密钥绑定无效"},
 		{name: "empty object", editor: true, flag: "--editor-model-target", target: "{}", wantError: "模型密钥绑定无效"},
 		{name: "missing base", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible"}`, wantError: "模型密钥绑定无效"},
+		{name: "missing model", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"https://original.fixture/v1"}`, wantError: "模型服务配置已变化"},
 		{name: "wrong type", editor: true, flag: "--editor-model-target", target: `{"provider":1,"base_url":"https://original.fixture/v1"}`, wantError: "模型密钥绑定无效"},
-		{name: "invalid URL", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"not-a-url"}`, wantError: "模型服务配置已变化"},
-		{name: "provider mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai","base_url":"https://original.fixture/v1"}`, wantError: "模型服务配置已变化"},
-		{name: "base mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"https://changed.fixture/v1"}`, wantError: "模型服务配置已变化"},
+		{name: "invalid URL", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"not-a-url","model":"fixture"}`, wantError: "模型服务配置已变化"},
+		{name: "provider mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai","base_url":"https://original.fixture/v1","model":"fixture"}`, wantError: "模型服务配置已变化"},
+		{name: "base mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"https://changed.fixture/v1","model":"fixture"}`, wantError: "模型服务配置已变化"},
+		{name: "model mismatch", editor: true, flag: "--editor-model-target", target: `{"provider":"openai-compatible","base_url":"https://original.fixture/v1","model":"other-model"}`, wantError: "模型服务配置已变化"},
 		{name: "key env mismatch", editor: true, flag: "--editor-model-target", target: validTarget, keyEnv: "INTENTLENS_CLI_TEST_KEY", wantError: "模型服务配置已变化"},
 		{name: "matching editor target", editor: true, flag: "--editor-model-target", target: validTarget},
 		{name: "ordinary CLI default key"},

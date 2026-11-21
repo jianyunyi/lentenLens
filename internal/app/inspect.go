@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,6 +35,57 @@ type Explanation struct {
 	Document    explain.Document   `json:"document"`
 	Evidence    []explain.Evidence `json:"evidence"`
 	Freshness   string             `json:"freshness"`
+}
+
+func oldFunctionID(f codeindex.Function) string { return f.File + ":" + f.Name }
+
+func legacyFunctionID(file, id string) (string, bool) {
+	prefix := file + ":"
+	if file == "" || !strings.HasPrefix(id, prefix) {
+		return "", false
+	}
+	name := strings.TrimPrefix(id, prefix)
+	if at := strings.LastIndex(name, "@"); at >= 0 {
+		position := strings.Split(name[at+1:], ":")
+		if len(position) != 2 {
+			return "", false
+		}
+		for _, part := range position {
+			value, err := strconv.Atoi(part)
+			if err != nil || value <= 0 {
+				return "", false
+			}
+		}
+		name = name[:at]
+	}
+	if name == "" {
+		return "", false
+	}
+	return prefix + name, true
+}
+
+func findFunctionByHistoricalID(functions []codeindex.Function, saved Explanation) (codeindex.Function, bool) {
+	for _, f := range functions {
+		if f.ID == saved.FunctionID {
+			return f, true
+		}
+	}
+	legacyID, ok := legacyFunctionID(saved.File, saved.FunctionID)
+	if !ok {
+		return codeindex.Function{}, false
+	}
+	var candidate codeindex.Function
+	matches := 0
+	for _, f := range functions {
+		if f.File == saved.File && oldFunctionID(f) == legacyID {
+			candidate = f
+			matches++
+		}
+	}
+	if matches != 1 {
+		return codeindex.Function{}, false
+	}
+	return candidate, true
 }
 
 func (a *App) Index() (codeindex.Index, error) {
@@ -169,7 +221,8 @@ func (a *App) Inspect(file string, line int) (Inspection, error) {
 		if readErr := a.read(ent.Name(), &saved); readErr != nil {
 			return result, readErr
 		}
-		if saved.FunctionID != result.Function.ID {
+		historicalFunction, matches := findFunctionByHistoricalID(idx.Functions, saved)
+		if !matches || historicalFunction.ID != result.Function.ID {
 			continue
 		}
 		visible := true

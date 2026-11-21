@@ -30,11 +30,12 @@ func TestEditorCredentialBindingBeforeModelRequests(t *testing.T) {
 		{name: "editor missing target", editor: true, editorKey: "editor-key", wantError: "模型密钥绑定无效"},
 		{name: "empty editor channel missing target", editor: true, wantError: "模型密钥绑定无效"},
 		{name: "empty target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{}, wantError: "模型服务配置已变化"},
-		{name: "invalid target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "not-a-url"}, wantError: "模型服务配置已变化"},
-		{name: "provider mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai", BaseURL: base}, wantError: "模型服务配置已变化"},
-		{name: "base mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "https://other.fixture/v1"}, wantError: "模型服务配置已变化"},
-		{name: "key env mismatch", editor: true, editorKey: "editor-key", keyEnv: "INTENTLENS_APP_CLI_KEY", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base}, wantError: "模型服务配置已变化"},
-		{name: "matching target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base}},
+		{name: "invalid target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "not-a-url", Model: "fixture"}, wantError: "模型服务配置已变化"},
+		{name: "provider mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai", BaseURL: base, Model: "fixture"}, wantError: "模型服务配置已变化"},
+		{name: "base mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: "https://other.fixture/v1", Model: "fixture"}, wantError: "模型服务配置已变化"},
+		{name: "model mismatch", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base, Model: "changed-model"}, wantError: "模型服务配置已变化"},
+		{name: "key env mismatch", editor: true, editorKey: "editor-key", keyEnv: "INTENTLENS_APP_CLI_KEY", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base, Model: "fixture"}, wantError: "模型服务配置已变化"},
+		{name: "matching target", editor: true, editorKey: "editor-key", target: &EditorModelTarget{Provider: "openai-compatible", BaseURL: base, Model: "fixture"}},
 		{name: "ordinary CLI default key"},
 		{name: "ordinary CLI custom key", keyEnv: "INTENTLENS_APP_CLI_KEY"},
 	} {
@@ -117,7 +118,7 @@ func TestEditorCredentialNeverFallsBackToOtherKeys(t *testing.T) {
 	if _, err := a.modelAPIKey(cfg, "explicit-key"); err == nil {
 		t.Fatal("explicit key bypassed the missing editor binding")
 	}
-	a.EditorModelTarget = &EditorModelTarget{Provider: cfg.Provider, BaseURL: cfg.BaseURL}
+	a.EditorModelTarget = &EditorModelTarget{Provider: cfg.Provider, BaseURL: cfg.BaseURL, Model: cfg.Model}
 	for _, explicit := range []string{"", "explicit-key"} {
 		if key, err := a.modelAPIKey(cfg, explicit); err != nil || key != "" {
 			t.Fatalf("empty editor channel fell back to another key: error=%v", err)
@@ -145,6 +146,9 @@ func TestTestModelProbesExactConfiguredAPIAndSettlesBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		wire, _ := json.Marshal(request)
+		if request["model"] != "explicit-fixture-model" {
+			t.Errorf("probe used unexpected model ID: %v", request["model"])
+		}
 		for _, forbidden := range []string{"auth.go", "private source", a.Root, "user question"} {
 			if strings.Contains(string(wire), forbidden) {
 				t.Errorf("workspace data leaked into fixed test request: %q", forbidden)

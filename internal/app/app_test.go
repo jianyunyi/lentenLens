@@ -100,8 +100,8 @@ func TestRoundUsesStartBaselineAndRetainsHistoricalChanges(t *testing.T) {
 	if len(r.Changes) != 1 || r.Changes[0].Before.Content != "package p\nfunc F() int { return 1 }\n" {
 		t.Fatalf("bad net diff: %+v", r)
 	}
-	if _, err = a.Stop("session"); err == nil {
-		t.Fatal("duplicate stop accepted")
+	if retry, err := a.Stop("session"); err != nil || digest(retry) != digest(r) {
+		t.Fatalf("duplicate Stop = %+v, %v, want the committed round", retry, err)
 	}
 	rounds, err := a.List()
 	if err != nil || len(rounds) != 1 {

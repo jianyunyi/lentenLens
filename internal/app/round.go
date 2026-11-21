@@ -54,6 +54,10 @@ func (a *App) Start(session string) (Active, error) {
 		return Active{}, e
 	}
 	active := Active{ID: newID(), Session: session, Started: time.Now().UTC().Format(time.RFC3339Nano), Snapshot: snap}
+	// Bind a reused session to its new round before publishing the baseline.
+	if e = a.write(captureRefName(session), active.ID); e != nil {
+		return Active{}, e
+	}
 	return active, a.write("active.json", active)
 }
 
@@ -64,16 +68,26 @@ func (a *App) Stop(session string) (Round, error) {
 	}
 	defer unlock()
 	var active Active
-	if e = a.read("active.json", &active); e != nil {
+	e = a.read("active.json", &active)
+	if errors.Is(e, os.ErrNotExist) && session != "" {
+		committed, err := a.retryRound(session)
+		if !errors.Is(err, os.ErrNotExist) {
+			return committed, err
+		}
+	}
+	if e != nil {
 		return Round{}, errors.New("缺少有效的轮次开始基线")
 	}
 	if session == "" || active.Session != session {
 		return Round{}, errors.New("会话与开始基线不匹配")
 	}
-	committed, e := a.committedRound(active)
+	committed, e := a.committedRound(active.Session, active.ID)
 	if e == nil {
 		// A prior Stop published the round but did not remove the baseline.
-		return committed, a.removeActive()
+		if e = a.scrubCommittedRound(&committed); e != nil {
+			return Round{}, e
+		}
+		return committed, a.finishRound(active)
 	}
 	if !errors.Is(e, os.ErrNotExist) {
 		return Round{}, e
@@ -89,7 +103,7 @@ func (a *App) Stop(session string) (Round, error) {
 	if writeErr := a.write("round-"+round.ID+".json", round); writeErr != nil {
 		return Round{}, writeErr
 	}
-	if removeErr := a.removeActive(); removeErr != nil {
+	if removeErr := a.finishRound(active); removeErr != nil {
 		return Round{}, removeErr
 	}
 	return round, nil
@@ -115,18 +129,99 @@ func (a *App) buildRound(active Active, after capture.Snapshot, policy capture.P
 			delete(active.Snapshot.Files, p)
 		}
 	}
-	return Round{ID: active.ID, Session: active.Session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: capture.Diff(active.Snapshot, after), Omitted: append(active.Snapshot.Omitted, after.Omitted...), Notes: notes, Source: "unconfirmed"}, nil
+	// Keep omissions as coverage information for Diff, then filter what is published.
+	changes := capture.Diff(active.Snapshot, after)
+	omitted := append(active.Snapshot.Omitted, after.Omitted...)
+	kept := omitted[:0]
+	for _, p := range omitted {
+		ok, err := policy.Allowed(a.Root, p)
+		if err != nil {
+			return Round{}, err
+		}
+		if ok {
+			kept = append(kept, p)
+		}
+	}
+	return Round{ID: active.ID, Session: active.Session, Started: active.Started, Ended: time.Now().UTC().Format(time.RFC3339Nano), Changes: changes, Omitted: kept, Notes: notes, Source: "unconfirmed"}, nil
 }
 
-func (a *App) committedRound(active Active) (Round, error) {
-	var round Round
-	if !validID(active.ID) {
-		return round, errors.New("无效轮次 ID")
+func captureRefName(session string) string {
+	return "capture-ref-" + hash(session) + ".json"
+}
+
+func (a *App) finishRound(active Active) error {
+	name := captureRefName(active.Session)
+	var id string
+	if err := a.read(name, &id); err != nil || id != active.ID {
+		// An older version may have written the baseline without a reference.
+		if err := a.write(name, active.ID); err != nil {
+			return err
+		}
 	}
-	if err := a.read("round-"+active.ID+".json", &round); err != nil {
+	return a.removeActive()
+}
+
+func (a *App) retryRound(session string) (Round, error) {
+	var round Round
+	var id string
+	err := a.read(captureRefName(session), &id)
+	if errors.Is(err, os.ErrNotExist) {
+		round, err = a.latestLegacyRound(session)
+	} else if err == nil {
+		round, err = a.committedRound(session, id)
+	}
+	if err != nil {
 		return Round{}, err
 	}
-	if round.ID != active.ID || round.Session != active.Session {
+	if err = a.scrubCommittedRound(&round); err != nil {
+		return Round{}, err
+	}
+	return round, nil
+}
+
+// Older versions could remove the baseline before a reference was recorded.
+func (a *App) latestLegacyRound(session string) (Round, error) {
+	entries, err := os.ReadDir(a.State)
+	if err != nil {
+		return Round{}, err
+	}
+	var latest Round
+	var latestEnd time.Time
+	for _, entry := range entries {
+		name, ok := strings.CutPrefix(entry.Name(), "round-")
+		if !ok {
+			continue
+		}
+		id, ok := strings.CutSuffix(name, ".json")
+		if !ok || !validID(id) {
+			continue
+		}
+		var round Round
+		if err := a.read(entry.Name(), &round); err != nil {
+			return Round{}, err
+		}
+		if round.ID != id || round.Session != session {
+			continue
+		}
+		if ended, err := time.Parse(time.RFC3339Nano, round.Ended); err == nil && ended.After(latestEnd) {
+			latest, latestEnd = round, ended
+		}
+	}
+	if latest.ID == "" {
+		return Round{}, os.ErrNotExist
+	}
+	return latest, nil
+}
+
+func (a *App) committedRound(session, id string) (Round, error) {
+	var round Round
+	if !validID(id) {
+		return round, errors.New("无效轮次 ID")
+	}
+	if err := a.read("round-"+id+".json", &round); err != nil {
+		return Round{}, err
+	}
+	if round.ID != id || round.Session != session {
 		return Round{}, errors.New("已提交轮次与开始基线不匹配")
 	}
 	return round, nil

@@ -49,22 +49,61 @@ func TestRunChecksEveryClaimAndRejectsInventedReferences(t *testing.T) {
 	}
 }
 
-func TestReviewFailureDoesNotPublishVerifiedClaims(t *testing.T) {
-	calls := 0
-	server := newInMemoryRoundTripper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls == 2 {
-			w.WriteHeader(500)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"claims":[{"id":"c1","text":"zero","kind":"behavior","evidence_ids":["e1"]}]}`}}, "usage": map[string]int{"input_tokens": 10, "output_tokens": 10}})
-	}))
-	doc, usage, err := Run(context.Background(), Config{Enabled: true, Endpoint: "https://model.invalid", HTTPTransport: server, Model: "test", TokenLimit: 100000}, Usage{}, "key", "explain", []Evidence{{ID: "e1", Source: "return 0"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doc.Claims[0].Status != "uncertain" || usage.UncertainTokens == 0 {
-		t.Fatalf("failure presented as verified: %+v %+v", doc, usage)
+func TestReviewFailureAccountsForUsage(t *testing.T) {
+	const answerTokens = 2 // modeFixtureResponse reports one input and one output token.
+	for _, tc := range []struct {
+		name     string
+		httpCode int
+		stop     string
+		tokens   int
+	}{
+		{name: "http error", httpCode: http.StatusInternalServerError},
+		{name: "missing usage", stop: "end_turn"},
+		{name: "truncated with exact usage", stop: "max_tokens", tokens: 17},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, reviewEstimate := 0, 0
+			server := newInMemoryRoundTripper(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls == 1 {
+					_ = json.NewEncoder(w).Encode(modeFixtureResponse("anthropic", `{"claims":[{"id":"c1","text":"zero","kind":"behavior","evidence_ids":["e1"]}]}`, "end_turn"))
+					return
+				}
+				var request struct {
+					System    string `json:"system"`
+					MaxTokens int    `json:"max_tokens"`
+					Messages  []struct{ Content string }
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) != 1 {
+					t.Fatalf("invalid review request: %+v, %v", request, err)
+				}
+				reviewEstimate = estimateTokens(len(request.System)+len(request.Messages[0].Content), request.MaxTokens)
+				if tc.httpCode != 0 {
+					w.WriteHeader(tc.httpCode)
+					return
+				}
+				response := modeFixtureResponse("anthropic", `{"checks":[{"claim_id":"c1","status":"supported"}]}`, tc.stop)
+				if tc.tokens == 0 {
+					delete(response, "usage")
+				} else {
+					response["usage"] = map[string]int{"input_tokens": tc.tokens - 5, "output_tokens": 5}
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			}))
+			cfg := Config{Enabled: true, Endpoint: "https://model.invalid", HTTPTransport: server, Model: "test", TokenLimit: 100000, VerificationMode: ModeLight}
+			evidence := []Evidence{{ID: "e1", Source: "return 0"}}
+			doc, usage, err := Run(context.Background(), cfg, Usage{}, "key", "explain", evidence)
+			if err != nil || calls != 2 || len(doc.Claims) != 1 || doc.Claims[0].Status != "uncertain" {
+				t.Fatalf("review failure must leave the claim unverified: calls=%d doc=%+v err=%v", calls, doc, err)
+			}
+			want := Usage{ActualTokens: answerTokens + tc.tokens}
+			if tc.tokens == 0 {
+				want.UncertainTokens = reviewEstimate
+			}
+			if usage != want {
+				t.Fatalf("usage=%+v, want %+v", usage, want)
+			}
+		})
 	}
 }
 

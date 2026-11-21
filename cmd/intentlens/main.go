@@ -62,7 +62,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	root := flags.String("root", ".", "project root")
 	state := flags.String("state", "", "external local state directory")
 	roundID := flags.String("round", "", "round id")
-	editorModelTarget := flags.String("editor-model-target", "", "VS Code credential's bound provider and base URL")
+	editorModelTarget := flags.String("editor-model-target", "", "VS Code credential's bound provider, base URL, and model")
 	if e := flags.Parse(args[1:]); e != nil {
 		return fail(out, e)
 	}

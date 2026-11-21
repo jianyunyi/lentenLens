@@ -295,7 +295,7 @@ func run(ctx context.Context, config *Config, usage Usage, key, question string,
 	if profile.mode == ModeFast {
 		return doc, usage, nil
 	}
-	return reviewDocument(ctx, &cfg, usage, key, doc, evidence, profile, reserve, selection)
+	return reviewDocument(ctx, &cfg, usage, key, doc, evidence, profile, selection)
 }
 
 func validateRunInput(cfg *Config, key, question string, evidence []Evidence) error {
@@ -357,7 +357,7 @@ func filterClaims(doc *Document, evidence []Evidence) {
 	doc.Claims = claims
 }
 
-func reviewDocument(ctx context.Context, cfg *Config, usage Usage, key string, doc Document, evidence []Evidence, profile runProfile, reserve int, selection bool) (Document, Usage, error) {
+func reviewDocument(ctx context.Context, cfg *Config, usage Usage, key string, doc Document, evidence []Evidence, profile runProfile, selection bool) (Document, Usage, error) {
 	reviewEvidence := citedEvidence(doc.Claims, evidence)
 	reviewPayload, err := json.Marshal(map[string]any{"claims": doc.Claims, "evidence": reviewEvidence})
 	if err != nil {
@@ -367,18 +367,19 @@ func reviewDocument(ctx context.Context, cfg *Config, usage Usage, key string, d
 	if profile.mode == ModeStrict && !selection {
 		reviewPrompt += "\n" + strictPurposeEvidencePrompt
 	}
-	if estimateTokens(len(reviewPayload)+len(reviewPrompt), profile.reviewLimit) > usage.Remaining(cfg.TokenLimit) {
+	reviewEstimate := estimateTokens(len(reviewPayload)+len(reviewPrompt), profile.reviewLimit)
+	if reviewEstimate > usage.Remaining(cfg.TokenLimit) {
 		doc.Unknowns = append(doc.Unknowns, "剩余预算不足以检查证据；说法保留待确认")
 		return doc, usage, nil
 	}
 	raw, n, err := callLimitMode(ctx, *cfg, key, reviewPrompt, string(reviewPayload), profile.reviewLimit, profile.mode)
 	if err != nil {
-		usage.accountFailure(n, reserve/2)
+		usage.accountFailure(n, reviewEstimate)
 		doc.Unknowns = append(doc.Unknowns, "证据支持检查失败；所有说法仅作待确认内容")
 		return doc, usage, nil
 	}
 	if err = usage.charge(n); err != nil {
-		usage.uncertain(reserve / 2)
+		usage.uncertain(reviewEstimate)
 		return doc, usage, err
 	}
 	applyReviewChecks(&doc, raw, reviewEvidence, profile.mode)
