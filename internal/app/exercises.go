@@ -53,7 +53,7 @@ type ExerciseDisplay struct {
 	Attempts    []ExerciseAttempt  `json:"attempts"`
 }
 
-func (a *App) exerciseModel(ctx context.Context, key, prompt string) (string, error) {
+func (a *App) exerciseModel(ctx context.Context, key, prompt string, paths []string) (string, error) {
 	unlock, err := a.lock("analysis")
 	if err != nil {
 		return "", err
@@ -78,20 +78,33 @@ func (a *App) exerciseModel(ctx context.Context, key, prompt string) (string, er
 	if len(prompt) > 100000 || reserve > u.Remaining(cfg.Model.TokenLimit) {
 		return "", fmt.Errorf("预算不足或上下文过大：本次保守预留 %d tokens，请主动调整预算或缩小范围", reserve)
 	}
-	reserved := u
-	reserved.UncertainTokens += reserve
-	if writeErr := a.write("usage.json", reserved); writeErr != nil {
+	if writeErr := a.reserveModelUsage(u, reserve); writeErr != nil {
 		return "", writeErr
 	}
-	run := a.exerciseRun
-	if run == nil {
-		run = explain.Structured
+	model := a.modelRequestConfig(cfg.Model, paths)
+	run := explain.Structured
+	if a.exerciseRun != nil {
+		// A fake runner replaces the HTTP send, so apply the same guard here.
+		if policyErr := model.CheckRequestPolicy(); policyErr != nil {
+			return "", a.settleModelUsage(u, policyErr)
+		}
+		run = a.exerciseRun
 	}
-	raw, updated, callErr := run(ctx, cfg.Model, u, key, prompt)
-	if writeErr := a.write("usage.json", updated); writeErr != nil {
-		return "", writeErr
+	raw, updated, callErr := run(ctx, model, u, key, prompt)
+	if err := a.settleModelUsage(updated, callErr); err != nil {
+		return "", err
 	}
-	return raw, callErr
+	return raw, nil
+}
+
+func exerciseSourcePaths(dir string, fileSets ...map[string]string) []string {
+	paths := []string{exercise.JoinSource(dir, exercise.AcceptanceFile)}
+	for _, files := range fileSets {
+		for name := range files {
+			paths = append(paths, exercise.JoinSource(dir, name))
+		}
+	}
+	return paths
 }
 
 func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, parentID, key string) (Exercise, error) {
@@ -180,7 +193,11 @@ func (a *App) GenerateExercise(ctx context.Context, sourceID, claimID, file, par
 	}
 	prompt := `根据给定 Go 包代码为熟悉编程的开发者生成一道小行为修改题，中文。仅使用代码，不推测作者动机。不得需要外部服务、依赖下载或凭据。只允许修改已有非测试 Go 文件；保持已有测试通过。返回 JSON {"title":"...","requirements":[{"id":"r1","text":"明确行为要求","test":"TestIntentLensName"}],"acceptance":"一个完整 Go 测试文件源码","reference":{"已有文件.go":"完整参考修改源码"}}。验收文件仅包含 TestIntentLens 前缀测试函数（不定义其他函数、init、TestMain），每个要求一项测试。所有新增测试必须在基线因预期行为缺失而失败，失败断言包含 INTENTLENS_EXPECTED_MISSING；参考修改使所有新旧测试通过。输出不包含 baseline。参考修改不会展示给作答者。材料：` + string(payload)
 	prompt += "\n出题必须围绕 target_evidence 标识的行为片段；包其余代码仅用于构建和回归，不任意换成另一处练习。"
-	raw, err := a.exerciseModel(ctx, key, prompt)
+	paths := exerciseSourcePaths(dir, files)
+	for _, ev := range targetEvidence {
+		paths = append(paths, ev.File)
+	}
+	raw, err := a.exerciseModel(ctx, key, prompt, paths)
 	if err != nil {
 		return Exercise{}, err
 	}

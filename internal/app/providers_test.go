@@ -39,7 +39,7 @@ func TestProviderSwitchPreservesUsageAndResolvesConfiguredKey(t *testing.T) {
 		check(c, u, key)
 		return "{}", u, nil
 	}
-	if _, err := a.exerciseModel(context.Background(), "", "fixture"); err != nil {
+	if _, err := a.exerciseModel(context.Background(), "", "fixture", nil); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(filepath.Join(a.State, "settings.json"))

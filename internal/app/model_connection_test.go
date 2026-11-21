@@ -20,6 +20,15 @@ func (f modelConnectionTransport) RoundTrip(r *http.Request) (*http.Response, er
 	return f(r)
 }
 
+func stubModelEndpoint(a *App, handle http.HandlerFunc) string {
+	a.modelTransport = modelConnectionTransport(func(req *http.Request) (*http.Response, error) {
+		response := httptest.NewRecorder()
+		handle.ServeHTTP(response, req)
+		return response.Result(), nil
+	})
+	return "http://127.0.0.1:8080/v1"
+}
+
 func TestEditorCredentialBindingBeforeModelRequests(t *testing.T) {
 	const base = "https://selected.fixture/v1"
 	for _, tc := range []struct {
@@ -92,7 +101,7 @@ func TestEditorCredentialBindingBeforeModelRequests(t *testing.T) {
 				case "analysis":
 					_, err = a.analyze(context.Background(), "fixture", "", nil)
 				case "exercise":
-					_, err = a.exerciseModel(context.Background(), "", "fixture")
+					_, err = a.exerciseModel(context.Background(), "", "fixture", nil)
 				}
 				if tc.wantError != "" {
 					if err == nil || !strings.Contains(err.Error(), tc.wantError) || calls != 0 {
@@ -133,7 +142,7 @@ func TestEditorCredentialNeverFallsBackToOtherKeys(t *testing.T) {
 func TestTestModelProbesExactConfiguredAPIAndSettlesBudget(t *testing.T) {
 	a, _ := fixture(t)
 	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := stubModelEndpoint(a, func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
@@ -156,10 +165,9 @@ func TestTestModelProbesExactConfiguredAPIAndSettlesBudget(t *testing.T) {
 		}
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"intentlens_connection_test\":\"ok\"}"}}],"usage":{"total_tokens":9}}`))
-	}))
-	defer server.Close()
+	})
 	t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-api-key")
-	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "explicit-fixture-model", TokenLimit: 4096}}
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: base, APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "explicit-fixture-model", TokenLimit: 4096}}
 	if err := a.Configure(cfg, true); err != nil {
 		t.Fatal(err)
 	}
@@ -176,14 +184,13 @@ func TestTestModelProbesExactConfiguredAPIAndSettlesBudget(t *testing.T) {
 func TestTestModelKeepsFailedRequestUncertainAndDoesNotRetry(t *testing.T) {
 	a, _ := fixture(t)
 	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := stubModelEndpoint(a, func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte("fixture-secret-must-not-appear"))
-	}))
-	defer server.Close()
+	})
 	t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-secret")
-	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "chosen-only", TokenLimit: 4096}}
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: base, APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "chosen-only", TokenLimit: 4096}}
 	if err := a.Configure(cfg, true); err != nil {
 		t.Fatal(err)
 	}
@@ -220,10 +227,9 @@ func TestTestModelFailsClosedWithoutExplicitProviderOrKey(t *testing.T) {
 func TestTestModelChecksBudgetBeforeRequest(t *testing.T) {
 	a, _ := fixture(t)
 	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
-	defer server.Close()
+	base := stubModelEndpoint(a, func(w http.ResponseWriter, r *http.Request) { hits.Add(1) })
 	t.Setenv("INTENTLENS_FIXTURE_KEY", "key")
-	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "chosen", TokenLimit: 500}}
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: base, APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "chosen", TokenLimit: 500}}
 	if err := a.Configure(cfg, true); err != nil {
 		t.Fatal(err)
 	}
@@ -248,13 +254,12 @@ func TestTestModelAcceptsCombinedTextPartsAcrossProviders(t *testing.T) {
 		t.Run(tc.provider, func(t *testing.T) {
 			a, _ := fixture(t)
 			hits := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			base := stubModelEndpoint(a, func(w http.ResponseWriter, r *http.Request) {
 				hits++
 				_, _ = w.Write([]byte(tc.response))
-			}))
-			defer server.Close()
+			})
 			t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-api-key")
-			cfg := Settings{Model: explain.Config{Enabled: true, Provider: tc.provider, BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
+			cfg := Settings{Model: explain.Config{Enabled: true, Provider: tc.provider, BaseURL: base, APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
 			if err := a.Configure(cfg, true); err != nil {
 				t.Fatal(err)
 			}
@@ -273,13 +278,12 @@ func TestTestModelAcceptsCombinedTextPartsAcrossProviders(t *testing.T) {
 func TestTestModelDoesNotAcceptExtraTextOrObjectFieldsAsComplete(t *testing.T) {
 	a, _ := fixture(t)
 	hits := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	base := stubModelEndpoint(a, func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"intentlens_connection_test\":\"ok\",\"extra\":\"partial\"}"}}],"usage":{"total_tokens":2}}`))
-	}))
-	defer server.Close()
+	})
 	t.Setenv("INTENTLENS_FIXTURE_KEY", "fixture-api-key")
-	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: server.URL + "/v1", APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: base, APIKeyEnv: "INTENTLENS_FIXTURE_KEY", Model: "fixture", TokenLimit: 4096}}
 	if err := a.Configure(cfg, true); err != nil {
 		t.Fatal(err)
 	}
