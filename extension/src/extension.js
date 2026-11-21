@@ -749,13 +749,13 @@ function activate(context) {
       else await openCurrent(folder, ev.file, ev.start_line);
     }, folder);
   });
-  command('enableModel', async () => {
-    const folder = await folderFor(); if (!folder) return;
+  async function configureForFolder(folder) {
     const status = await cli(folder, 'status');
-    if (await configureModel(vscode, folder, status, cli, context.secrets)) refresh();
-  });
-  command('testModel', async () => {
-    const folder = await folderFor(); if (!folder) return;
+    const saved = await configureModel(vscode, folder, status, cli, context.secrets);
+    if (saved) refresh();
+    return saved;
+  }
+  async function testModelForFolder(folder) {
     const { model, target } = await modelCredentialForCall(folder, cli, context.secrets);
     if (!model.enabled || !model.model) {
       throw new Error('请先通过“启用或调整模型分析”查询并选择 API 返回的模型 ID。');
@@ -767,10 +767,17 @@ function activate(context) {
     const result = await cli(folder, 'test-model', {}, { confirmedTarget: { ...target, model: model.model } });
     if (result?.tested !== true || result.fallback !== false || result.project_data_sent !== false) throw new Error('连接测试未确认模型返回完整且符合固定格式的单条文本；请检查 provider 的结束或截断提示。');
     vscode.window.showInformationMessage(`IntentLens：已确认模型返回完整且符合固定格式的单条文本。使用 ${result.actual_tokens} tokens；本次测试只发送固定探针，不读取项目代码。`);
+    return result;
+  }
+  command('enableModel', async () => {
+    const folder = await folderFor(); if (folder) return configureForFolder(folder);
+  });
+  command('testModel', async () => {
+    const folder = await folderFor(); if (folder) return testModelForFolder(folder);
   });
   command('configureAPI', async () => {
     const folder = await folderFor(); if (!folder) return;
-    AIConfigPanel.show(context, folder);
+    return AIConfigPanel.show(context, folder, { cli, configure: configureForFolder, testConnection: testModelForFolder });
   });
   command('viewTokenUsage', async () => {
     const activeUri = vscode.window.activeTextEditor?.document?.uri;
