@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"intentlens/internal/capture"
 	"intentlens/internal/explain"
@@ -106,5 +107,25 @@ func TestRoundHistoryDoesNotCacheUnreadableExplanation(t *testing.T) {
 	}
 	if _, err := a.List(); err == nil {
 		t.Fatal("unreadable evidence replaced by cached result")
+	}
+}
+
+func TestExplanationEvidenceLookupRechecksCurrentPolicy(t *testing.T) {
+	a, root := fixture(t)
+	put(t, root, "main.go", "package p\nfunc F() {}\n")
+	e := Explanation{ID: newID(), File: "main.go", FunctionID: "main.go:F", Evidence: []explain.Evidence{{ID: "ev-1", File: "main.go", Source: "CURRENT_PRIVATE_SOURCE", Hash: hash("CURRENT_PRIVATE_SOURCE")}}}
+	if err := a.write("explanation-"+e.ID+".json", e); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := a.ExplanationEvidenceByID(e.ID, "ev-1")
+	if err != nil || loaded.Source != "CURRENT_PRIVATE_SOURCE" {
+		t.Fatalf("allowed evidence did not load: %+v %v", loaded, err)
+	}
+	put(t, root, ".intentignore", "main.go\n")
+	if _, err := a.ExplanationEvidenceByID(e.ID, "ev-1"); err == nil {
+		t.Fatal("evidence remained readable after current policy excluded its source")
+	}
+	if _, err := os.Stat(filepath.Join(a.State, "explanation-"+e.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("revoked explanation was not invalidated: %v", err)
 	}
 }

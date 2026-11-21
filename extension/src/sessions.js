@@ -33,13 +33,30 @@ function createSessions({ workspaceState, cli, notify = {}, random = () => crypt
     busy.add(root);
     try { return await operation(); } finally { busy.delete(root); }
   }
+  async function allRoundSummaries(root) {
+    const items = [];
+    let cursor;
+    do {
+      const page = await cli(root, 'rounds', { cursor, limit: 50 });
+      if (!page || !Array.isArray(page.items)) return undefined;
+      items.push(...page.items);
+      cursor = typeof page.next_cursor === 'string' && page.next_cursor ? page.next_cursor : undefined;
+    } while (cursor);
+    return items;
+  }
   async function finished(root, session, roundID) {
     const known = completed.get(root);
     if (known?.session === session && (!roundID || known.roundID === roundID)) return known.result;
-    const rounds = await cli(root, 'rounds');
-    if (!Array.isArray(rounds)) return undefined;
+    const rounds = await allRoundSummaries(root);
+    if (!rounds) return undefined;
     const candidates = rounds.filter(round => round.session === session && (!roundID || round.id === roundID));
     return candidates.length === 1 ? candidates[0] : undefined;
+  }
+  function validReceipt(result, session, roundID) {
+    return !!result && result.id === roundID && result.session === session &&
+      typeof result.started === 'string' && typeof result.ended === 'string' &&
+      Number.isInteger(result.change_count) && result.change_count >= 0 &&
+      Number.isInteger(result.omitted_count) && result.omitted_count >= 0;
   }
   async function start(root) {
     return run(root, async () => {
@@ -101,8 +118,8 @@ function createSessions({ workspaceState, cli, notify = {}, random = () => crypt
           state = { session: state.session, roundID: active.id };
           await update(root, state);
         } else {
-          const rounds = await cli(root, 'rounds');
-          const candidates = Array.isArray(rounds) ? rounds.filter(round => round.session === state.session) : [];
+          const rounds = await allRoundSummaries(root);
+          const candidates = rounds ? rounds.filter(round => round.session === state.session) : [];
           if (candidates.length !== 1) throw new Error('旧轮次会话缺少轮次 ID，且无法唯一恢复；请从轮次视图确认后再恢复。');
           state = { session: state.session, roundID: candidates[0].id };
           await update(root, state);
@@ -112,11 +129,12 @@ function createSessions({ workspaceState, cli, notify = {}, random = () => crypt
       let result = completed.get(root)?.session === session && completed.get(root)?.roundID === roundID ? completed.get(root).result : undefined;
       try {
         if (!result) result = await cli(root, 'stop', { session, round_id: roundID });
+        if (!validReceipt(result, session, roundID)) throw new Error('结束回执无效或与当前轮次不匹配');
       } catch (cause) {
         // Reconcile only a completed round for our exact persisted random session.
         // This also recovers a response lost after the CLI already saved the round.
         try { result = await finished(root, session, roundID); } catch { /* retain original failure */ }
-        if (!result) {
+        if (!validReceipt(result, session, roundID)) {
           const message = `结束轮次失败，会话仍保留，可重试；未丢失会话（${cause.message}）。`;
           error(message);
           throw new Error(message, { cause });

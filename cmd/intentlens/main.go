@@ -64,11 +64,15 @@ type input struct {
 	Settings            app.Settings               `json:"settings"`
 	Consent             bool                       `json:"consent"`
 	RoundID             string                     `json:"round_id"`
+	EvidenceID          string                     `json:"evidence_id"`
+	Cursor              string                     `json:"cursor"`
+	Limit               int                        `json:"limit"`
+	Side                string                     `json:"side"`
 }
 
 func run(args []string, in io.Reader, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | index | inspect | call-path | explain | explain-selection | configure | status | test-model | analyze-round | hooks-config | hook")
+		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | round-detail | round-file | explanation-evidence | index | inspect | call-path | explain | explain-selection | configure | status | test-model | analyze-round | hooks-config | hook")
 		return 0
 	}
 	command := args[0]
@@ -142,6 +146,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 				// session-only behavior when no persisted association exists.
 				result, e = a.Stop(request.Session)
 			}
+			if e == nil {
+				result = app.ReceiptForRound(result.(app.Round))
+			}
 		default:
 			return fail(out, errors.New("通用事件 event 必须为 start 或 stop"))
 		}
@@ -181,6 +188,8 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		result, e = a.AdoptShared(request.ExplanationID)
 	case "explanation":
 		result, e = a.ExplanationByID(request.ExplanationID)
+	case "explanation-evidence":
+		result, e = a.ExplanationEvidenceByID(request.ExplanationID, request.EvidenceID)
 	case "revise":
 		result, e = a.Revise(context.Background(), request.ExplanationID, "")
 	case "share-prepare":
@@ -195,6 +204,9 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		result = map[string]any{"id": active.ID, "started": active.Started}
 	case "stop":
 		result, e = a.Stop(request.Session, request.RoundID)
+		if e == nil {
+			result = app.ReceiptForRound(result.(app.Round))
+		}
 	case "capture-status":
 		result, e = a.CaptureState()
 	case "capture-abort":
@@ -204,7 +216,11 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		e = a.Abort()
 		result = map[string]bool{"aborted": e == nil}
 	case "rounds":
-		result, e = a.List()
+		result, e = a.ListPage(request.Cursor, request.Limit)
+	case "round-detail":
+		result, e = a.RoundDetails(request.RoundID, request.Cursor, request.Limit)
+	case "round-file":
+		result, e = a.RoundFile(request.RoundID, request.File, request.Side)
 	case "index":
 		result, e = a.Index()
 	case "inspect":
@@ -251,9 +267,27 @@ func run(args []string, in io.Reader, out io.Writer) int {
 
 func decodeRequest(command string, in io.Reader, roundID *string) (input, error) {
 	var request input
+	if command == "rounds" {
+		if file, ok := in.(*os.File); ok {
+			if info, err := file.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
+				return request, nil
+			}
+		}
+		body, err := io.ReadAll(io.LimitReader(withoutBOM(in), 32769))
+		if err != nil || len(body) > 32768 {
+			return input{}, errors.New("轮次分页输入无效")
+		}
+		if strings.TrimSpace(string(body)) == "" {
+			return request, nil
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			return input{}, errors.New("需要有效的 JSON 输入")
+		}
+		return request, nil
+	}
 	// Read stdin only for commands that require it; never hang a background worker.
 	switch command {
-	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
+	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "explanation-evidence", "round-detail", "round-file", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
 		limit := int64(32768)
 		if command == "explain-selection" {
 			limit = 128 * 1024

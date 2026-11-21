@@ -73,8 +73,7 @@ func TestGenericCaptureEventsDoNotRequireClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := call(`{"event":"stop","session":"skill-session","round_id":"` + before["id"].(string) + `"}`)
-	changes, ok := after["changes"].([]any)
-	if !ok || len(changes) != 1 || before["id"] != after["id"] || after["source"] != "unconfirmed" {
+	if after["change_count"] != float64(1) || after["session"] != "skill-session" || before["id"] != after["id"] || after["source"] != "unconfirmed" || after["changes"] != nil {
 		t.Fatalf("invalid round: %v", after)
 	}
 	second := call(`{"event":"start","session":"skill-session"}`)

@@ -14,7 +14,7 @@ function harness(t) {
   fs.writeFileSync(path.join(root, 'main.go'), 'package main');
   fs.writeFileSync(path.join(root, 'dep.go'), 'package main');
   const uri = file => ({ scheme: 'file', fsPath: file, toString: () => file });
-  const folder = { name: 'test', uri: uri(root) }, commands = new Map(), calls = [], panels = [], watchers = [], errors = [], documents = [];
+  const folder = { name: 'test', uri: uri(root) }, commands = new Map(), calls = [], panels = [], watchers = [], errors = [], documents = [], treeViews = [];
   const target = { provider: 'openai-compatible', base_url: 'https://api.fixture/v1' };
   const modelStatus = { settings: { model: { ...target, api_key_env: SECURE_API_KEY_ENV } } };
   const key = 'privacy-fixture-key', name = workspaceSecretKey(root);
@@ -27,11 +27,11 @@ function harness(t) {
     workspace: { isTrusted: true, workspaceFolders: [folder], getWorkspaceFolder: () => folder, getConfiguration: () => ({ get: () => '' }), onDidChangeTextDocument: fn => { state.changed = fn; return d; }, onDidGrantWorkspaceTrust: () => d, onDidSaveTextDocument: () => d, onDidChangeWorkspaceFolders: () => d,
       createFileSystemWatcher: pattern => { const w = { pattern, dispose() {}, onDidCreate(fn) { this.create = fn; return d; }, onDidChange(fn) { this.change = fn; return d; }, onDidDelete(fn) { this.delete = fn; return d; } }; watchers.push(w); return w; },
       openTextDocument: async value => { documents.push(value); return value; } },
-    window: { createStatusBarItem: () => { const item = { visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }; state.indexBar ||= item; return item; }, createTreeView: () => d, showErrorMessage: text => errors.push(text), showInformationMessage: () => {}, showWarningMessage: async () => undefined, withProgress: (_, fn) => fn(), showTextDocument: async () => ({}), createWebviewPanel: () => { const p = { disposed: false, onDidDispose(fn) { this.onDispose = fn; return d; }, dispose() { this.disposed = true; this.onDispose?.(); }, webview: { html: '', onDidReceiveMessage(fn) { p.message = fn; return d; } } }; panels.push(p); return p; } },
+    window: { activeTextEditor: undefined, createStatusBarItem: () => { const item = { visible: false, show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {} }; state.indexBar ||= item; return item; }, createTreeView: (name, options) => { treeViews.push({ name, provider: options?.treeDataProvider }); return d; }, showErrorMessage: text => errors.push(text), showInformationMessage: () => {}, showWarningMessage: async () => undefined, withProgress: (_, fn) => fn(), showTextDocument: async document => ({ document }), createWebviewPanel: () => { const p = { disposed: false, onDidDispose(fn) { this.onDispose = fn; return d; }, dispose() { this.disposed = true; this.onDispose?.(); }, webview: { html: '', onDidReceiveMessage(fn) { p.message = fn; return d; } } }; panels.push(p); return p; } },
     commands: { registerCommand: (name, fn) => { commands.set(name, fn); return d; } }, languages: { registerCodeLensProvider: (_, provider) => { state.codeLensProvider = provider; return d; } },
     Range: class { constructor(line, character, endLine, endCharacter) { this.start = { line, character }; this.end = { line: endLine, character: endCharacter }; } },
     CodeLens: class { constructor(range, command) { this.range = range; this.command = command; } }, StatusBarAlignment: { Right: 2 },
-    EventEmitter: class { event = () => {}; fire() { state.refreshes++; } dispose() {} }, TreeItem: class {}, TreeItemCollapsibleState: { None: 0, Collapsed: 1 }, ViewColumn: { Beside: 2 }, ProgressLocation: { Notification: 1 }, Uri: { file: uri },
+    EventEmitter: class { event = () => {}; fire() { state.refreshes++; } dispose() {} }, TreeItem: class { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } }, TreeItemCollapsibleState: { None: 0, Collapsed: 1 }, ViewColumn: { Beside: 2 }, ProgressLocation: { Notification: 1 }, Uri: { file: uri },
   };
   const original = Module._load;
   Module._load = function(id, ...args) {
@@ -40,14 +40,21 @@ function harness(t) {
       calls.push({ command, input });
       await state.onCLI?.(command, input);
       if (command === 'inspect') return structuredClone(state.inspection);
-      if (command === 'rounds') return structuredClone(state.rounds);
+      if (command === 'rounds') return structuredClone({ items: state.rounds, next_cursor: undefined });
+      if (command === 'round-detail') return structuredClone(state.rounds.find(round => round.id === input.round_id) || { id: input.round_id, changes: [], notes: [] });
+      if (command === 'round-file') return structuredClone({ exists: false });
+      if (command === 'explanation-evidence') {
+        const current = state.inspection.history.flatMap(entry => entry.evidence || []).find(item => item.id === input.evidence_id);
+        return structuredClone(state.responses?.['explanation-evidence'] ?? current ?? { id: 'e', file: 'main.go', source: 'secret', hash: 'hash' });
+      }
+      if (command === 'stop') return { id: input.round_id, session: input.session, started: '2026-11-21T00:00:00Z', ended: '2026-11-21T00:00:01Z', change_count: 0, omitted_count: 0 };
       return structuredClone(state.responses?.[command] ?? (command === 'status' ? modelStatus : {}));
     } };
     return original.call(this, id, ...args);
   };
   try { delete require.cache[require.resolve('../src/extension')]; require('../src/extension').activate({ subscriptions: [], extensionPath: root, secrets }); }
   finally { Module._load = original; }
-  return { folder, commands, calls, panels, watchers, errors, documents, state, uri, vscode };
+  return { folder, commands, calls, panels, watchers, errors, documents, treeViews, state, uri, vscode };
 }
 test('all external ignore events dispose cached panels, refresh UI, and run privacy cleanup', async t => {
   const h = harness(t);
@@ -79,7 +86,7 @@ test('source edit while entering a question cancels generation at the old line',
 test('opening cached tree round fetches allowed current round rather than cached secret', async t => {
   const h = harness(t);
   await h.commands.get('intentlens.openRound')(h.folder, { id: 'r', changes: [{ path: 'main.go', before: { content: 'cached-secret' } }] });
-  assert.equal(h.calls[0]?.command, 'rounds');
+  assert.equal(h.calls[0]?.command, 'round-detail');
   assert.ok(!h.panels[0].webview.html.includes('cached-secret'));
 });
 test('evidence action re-inspects and refuses evidence removed by policy', async t => {
@@ -255,6 +262,71 @@ test('untrusted workspace cannot resume, cancel, or analyze rounds', async t => 
   await h.commands.get('intentlens.openRound')(h.folder, { id: 'r' });
   assert.equal(h.calls.length, 0);
   assert.equal(h.errors.length, 3);
+});
+
+function modelEvidenceNode(h) {
+  const source = 'func F() { println("policy-bound source") }';
+  h.state.inspection.history = [{
+    id: 'explanation-id',
+    created: '2026-11-21',
+    document: { claims: [{ id: 'claim', text: 'claim', evidence_ids: ['evidence-id'] }] },
+    evidence: [{ id: 'evidence-id', file: 'main.go', start_line: 1, end_line: 1, hash: 'evidence-hash', source }],
+  }];
+  const uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
+  h.vscode.window.activeTextEditor = {
+    document: { uri, languageId: 'go', isDirty: false, version: 1 },
+    selection: { active: { line: 0 } },
+  };
+  return h.treeViews.find(view => view.name === 'intentlens.modelAnswer').provider.getChildren()
+    .then(([root]) => h.treeViews.find(view => view.name === 'intentlens.modelAnswer').provider.getChildren(root))
+    .then(([version]) => h.treeViews.find(view => view.name === 'intentlens.modelAnswer').provider.getChildren(version))
+    .then(([claim]) => h.treeViews.find(view => view.name === 'intentlens.modelAnswer').provider.getChildren(claim).then(([citation]) => ({ citation, claim, source, provider: h.treeViews.find(view => view.name === 'intentlens.modelAnswer').provider })));
+}
+
+test('sidebar evidence command carries a host record ID and opens re-fetched current evidence', async t => {
+  const h = harness(t);
+  const { citation, source } = await modelEvidenceNode(h);
+  assert.equal(citation.command.command, 'intentlens.openModelEvidence');
+  assert.equal(citation.command.arguments.length, 1);
+  const recordID = citation.command.arguments[0];
+  assert.notEqual(recordID, source);
+  assert.equal(JSON.stringify(citation.command.arguments).includes(source), false);
+  await h.commands.get('intentlens.openModelEvidence')(recordID);
+  assert.equal(h.documents.length, 1);
+  assert.equal(h.documents[0].content, source);
+  assert.equal(h.calls.filter(call => call.command === 'explanation-evidence').length, 2, 'the source is revalidated immediately before display');
+});
+
+test('sidebar evidence is refused after policy revocation and when its source workspace closes', async t => {
+  const revoked = harness(t);
+  const { citation } = await modelEvidenceNode(revoked);
+  revoked.state.onCLI = command => {
+    if (command === 'explanation-evidence') throw new Error('引用证据已被当前排除策略撤销');
+  };
+  await revoked.commands.get('intentlens.openModelEvidence')(citation.command.arguments[0]);
+  assert.equal(revoked.documents.length, 0);
+  assert.match(revoked.errors.at(-1), /当前排除策略撤销/);
+
+  const closed = harness(t);
+  const old = await modelEvidenceNode(closed);
+  closed.vscode.workspace.workspaceFolders = [];
+  await closed.commands.get('intentlens.openModelEvidence')(old.citation.command.arguments[0]);
+  assert.equal(closed.documents.length, 0);
+  assert.match(closed.errors.at(-1), /来源工作区已关闭/);
+});
+
+test('sidebar refresh invalidates old evidence IDs, queued commands, and descendants', async t => {
+  const h = harness(t);
+  const { citation, claim, provider } = await modelEvidenceNode(h);
+  const oldID = citation.command.arguments[0];
+  const before = h.calls.filter(call => call.command === 'explanation-evidence').length;
+  provider.refresh();
+  const [stale] = await provider.getChildren(claim);
+  await h.commands.get('intentlens.openModelEvidence')(oldID);
+  assert.equal(h.calls.filter(call => call.command === 'explanation-evidence').length, before);
+  assert.equal(h.documents.length, 0);
+  assert.match(stale.label, /已失效/);
+  assert.match(h.errors.at(-1), /已失效/);
 });
 
 

@@ -17,7 +17,7 @@ function isAbortError(error) {
   return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
 }
 
-function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debounceMs = 150, schedule = setTimeout, cancelScheduled = clearTimeout }) {
+function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, issueEvidenceRecord, onInvalidate = () => {}, debounceMs = 150, schedule = setTimeout, cancelScheduled = clearTimeout }) {
   let currentTarget;
   let targetLoaded = false;
   let generation = 0;
@@ -37,6 +37,7 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
   function refresh() {
     if (disposed) return;
     generation++;
+    onInvalidate(generation);
     targetLoaded = false;
     currentTarget = undefined;
     cancelPending();
@@ -97,6 +98,7 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
     item.contextValue = 'intentlens.sidebar.explanation';
     item.entry = entry;
     item.active = active;
+    item.generation = generation;
     item.description = entry.freshness || '本地保存的模型回答';
     item.tooltip = '只读展示本地已保存的回答与引用证据。打开此视图不会请求模型。';
     return item;
@@ -110,20 +112,24 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
     item.claim = claim;
     item.entry = entry;
     item.active = active;
+    item.generation = generation;
     item.claimIndex = index;
     item.description = [claim.section, claim.status || claim.kind].filter(Boolean).join(' · ');
     item.tooltip = `${claim.text || ''}${citations.length ? `\n引用：${citations.join(', ')}` : '\n未附证据引用'}`;
     return item;
   }
 
-  function evidenceItem(folder, ev, id) {
+  function evidenceItem(active, entry, ev, id) {
     if (!ev) return placeholder(vscode, `未找到引用证据：${id}`);
     const item = makeItem(vscode, `${ev.file || '源码'}:${ev.start_line || '?'}–${ev.end_line || ev.start_line || '?'}`);
     item.contextValue = 'intentlens.sidebar.evidence';
     item.description = `证据 ${ev.id}`;
     item.tooltip = `打开本地保存的证据快照 · ${ev.hash || '无快照 hash'}`;
-    item.command = { command: 'intentlens.openModelEvidence', title: '打开引用证据快照', arguments: [folder, ev] };
-    item.evidence = ev;
+    item.generation = generation;
+    const recordID = issueEvidenceRecord?.({ generation, root: active?.folder?.uri?.fsPath, file: active?.file, line: active?.line, explanationID: entry.id, evidenceID: ev.id });
+    if (typeof recordID === 'string' && recordID) {
+      item.command = { command: 'intentlens.openModelEvidence', title: '打开引用证据快照', arguments: [recordID] };
+    }
     return item;
   }
 
@@ -135,12 +141,14 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
       if (disposed) return;
       disposed = true;
       generation++;
+      onInvalidate(generation);
       targetLoaded = false;
       currentTarget = undefined;
       cancelPending();
     },
     async getChildren(item) {
       if (disposed) return [];
+      if (item && item.generation !== generation) return [placeholder(vscode, '此侧栏节点已失效，请刷新后重新展开。')];
       try {
         if (!item) {
           const requestedGeneration = generation;
@@ -156,6 +164,7 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
           const root = makeItem(vscode, `模型回答 · ${fn.name || '当前函数'}`, state.Collapsed);
           root.contextValue = 'intentlens.sidebar.answerRoot';
           root.active = active;
+          root.generation = generation;
           root.history = history;
           root.description = '本地已保存 · 点击展开回答与证据';
           root.tooltip = '仅显示本地保存且仍可读取的解释历史；结论需结合引用证据核对。';
@@ -175,10 +184,9 @@ function createModelAnswerProvider({ vscode, treeChanged, getCurrentTarget, debo
         }
         if (item.contextValue === 'intentlens.sidebar.claim') {
           const entry = item.entry;
-          const folder = item.active?.folder;
           const evidence = entry.evidence || [];
           const ids = Array.isArray(item.claim.evidence_ids) ? item.claim.evidence_ids : [];
-          return ids.map(id => evidenceItem(folder, evidence.find(ev => ev.id === id), id));
+          return ids.map(id => evidenceItem(item.active, entry, evidence.find(ev => ev.id === id), id));
         }
         return [];
       } catch (error) {

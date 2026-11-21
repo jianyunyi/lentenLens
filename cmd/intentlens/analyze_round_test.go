@@ -104,12 +104,12 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	if code != 0 || result["analyzed"] != true || calls.Load() != 2 {
 		t.Fatalf("first analysis: code=%d result=%v calls=%d", code, result, calls.Load())
 	}
-	var rounds []map[string]any
+	var round app.RoundDetail
 	out.Reset()
-	if code = run([]string{"rounds", "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); code != 0 || json.Unmarshal(out.Bytes(), &rounds) != nil || len(rounds) != 1 {
-		t.Fatalf("rounds after first analysis: code=%d output=%s", code, out.String())
+	if code = run([]string{"round-detail", "--root", root, "--state", state}, bytes.NewBufferString(`{"round_id":"`+roundID+`"}`), &out); code != 0 || json.Unmarshal(out.Bytes(), &round) != nil || round.Analysis == nil {
+		t.Fatalf("round detail after first analysis: code=%d output=%s", code, out.String())
 	}
-	first := rounds[0]["analysis"].(map[string]any)["id"].(string)
+	first := round.Analysis.ID
 	// A failed opt-in attempt records a diagnostic; enabling the model and
 	// retrying this same round must remove only that round's diagnostic.
 	if configureCode := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(`{"consent": false, "settings": {"model": {"enabled": false}}}`), &out); configureCode != 0 {
@@ -142,10 +142,10 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 		t.Fatalf("diagnostic cleanup scope wrong: code=%d output=%s", code, out.String())
 	}
 	out.Reset()
-	if code = run([]string{"rounds", "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); code != 0 || json.Unmarshal(out.Bytes(), &rounds) != nil {
-		t.Fatalf("rounds after regeneration: code=%d output=%s", code, out.String())
+	if code = run([]string{"round-detail", "--root", root, "--state", state}, bytes.NewBufferString(`{"round_id":"`+roundID+`"}`), &out); code != 0 || json.Unmarshal(out.Bytes(), &round) != nil || round.Analysis == nil {
+		t.Fatalf("round detail after regeneration: code=%d output=%s", code, out.String())
 	}
-	latest := rounds[0]["analysis"].(map[string]any)["id"].(string)
+	latest := round.Analysis.ID
 	if latest == first {
 		t.Fatalf("round analysis was not regenerated: first=%s latest=%s", first, latest)
 	}
@@ -161,7 +161,7 @@ func TestAnalyzeRoundInMemoryTransportRegeneratesAndPreservesOldExplanation(t *t
 	}
 	for _, command := range []string{"rounds", "status"} {
 		out.Reset()
-		if commandCode := run([]string{command, "--root", root, "--state", state}, bytes.NewBuffer(nil), &out); commandCode != 0 || bytes.Contains(out.Bytes(), []byte("stale failure")) {
+		if commandCode := run([]string{command, "--root", root, "--state", state}, bytes.NewBufferString("{}"), &out); commandCode != 0 || bytes.Contains(out.Bytes(), []byte("stale failure")) {
 			t.Fatalf("%s retained stale failure: code=%d output=%s", command, commandCode, out.String())
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"intentlens/internal/app"
 	"io"
 	"net/http"
@@ -90,8 +91,126 @@ func TestCLIStartStopJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result["id"] == nil {
-		t.Fatal("round not returned")
+	if result["id"] == nil || result["change_count"] == nil || result["omitted_count"] == nil || result["changes"] != nil {
+		t.Fatalf("Stop must return a compact receipt: %s", out.String())
+	}
+}
+
+func TestRoundTransferContractBoundsStopPagesAndReadsFilesOnDemand(t *testing.T) {
+	root, state := t.TempDir(), t.TempDir()
+	const fileCount, fileBytes = 16, 1 << 20
+	before := strings.Repeat("a", fileBytes)
+	after := strings.Repeat("b", fileBytes)
+	for i := 0; i < fileCount; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("file-%02d.txt", i)), []byte(before), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	if code := run([]string{"start", "--root", root, "--state", state}, strings.NewReader(`{"session":"max-snapshot"}`), &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	var start struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &start); err != nil || start.ID == "" {
+		t.Fatalf("invalid start result: %v %s", err, out.String())
+	}
+	for i := 0; i < fileCount; i++ {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("file-%02d.txt", i)), []byte(after), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out.Reset()
+	stopInput, _ := json.Marshal(map[string]string{"session": "max-snapshot", "round_id": start.ID})
+	if code := run([]string{"stop", "--root", root, "--state", state}, bytes.NewReader(stopInput), &out); code != 0 {
+		t.Fatal(out.String())
+	}
+	if out.Len() >= 32*1024 || strings.Contains(out.String(), before[:128]) || strings.Contains(out.String(), after[:128]) {
+		t.Fatalf("Stop response contains large snapshot data: %d bytes", out.Len())
+	}
+	var receipt app.RoundReceipt
+	if err := json.Unmarshal(out.Bytes(), &receipt); err != nil || receipt.ID != start.ID || receipt.ChangeCount != fileCount || receipt.ModifiedCount != fileCount {
+		t.Fatalf("invalid receipt: %+v, %v", receipt, err)
+	}
+	readCommand := func(command string, input any) []byte {
+		t.Helper()
+		encoded, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.Reset()
+		if code := run([]string{command, "--root", root, "--state", state}, bytes.NewReader(encoded), &out); code != 0 {
+			t.Fatalf("%s failed: %s", command, out.String())
+		}
+		if out.Len() >= 32*1024*1024 {
+			t.Fatalf("%s unexpectedly large: %d bytes", command, out.Len())
+		}
+		return append([]byte(nil), out.Bytes()...)
+	}
+	var page app.RoundPage
+	if err := json.Unmarshal(readCommand("rounds", map[string]any{"limit": 2}), &page); err != nil || len(page.Items) != 1 || page.Items[0].ChangeCount != fileCount {
+		t.Fatalf("summary page: %+v, %v", page, err)
+	}
+	detailBytes := readCommand("round-detail", map[string]any{"round_id": start.ID, "limit": fileCount})
+	var detail app.RoundDetail
+	if err := json.Unmarshal(detailBytes, &detail); err != nil || detail.ID != start.ID || len(detail.Changes) != fileCount || detail.Changes[0].Before.Bytes != fileBytes {
+		t.Fatalf("round detail: %+v, %v", detail, err)
+	}
+	if strings.Contains(string(detailBytes), before[:128]) || strings.Contains(string(detailBytes), after[:128]) {
+		t.Fatal("round detail included snapshot content")
+	}
+	var file app.RoundFileResult
+	if err := json.Unmarshal(readCommand("round-file", map[string]string{"round_id": start.ID, "file": "file-00.txt", "side": "after"}), &file); err != nil || !file.Exists || file.File == nil || file.File.Content != after {
+		t.Fatalf("on-demand file read: exists=%v, err=%v", file.Exists, err)
+	}
+
+	opened, err := app.Open(root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		session := fmt.Sprintf("history-%d", i)
+		active, err := opened.Start(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "history.txt"), []byte(fmt.Sprintf("%d", i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := opened.Stop(session, active.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		input := map[string]any{"limit": 3}
+		if cursor != "" {
+			input["cursor"] = cursor
+		}
+		encoded, _ := json.Marshal(input)
+		out.Reset()
+		if code := run([]string{"rounds", "--root", root, "--state", state}, bytes.NewReader(encoded), &out); code != 0 {
+			t.Fatal(out.String())
+		}
+		page = app.RoundPage{}
+		if out.Len() >= 32*1024 || json.Unmarshal(out.Bytes(), &page) != nil || len(page.Items) > 3 {
+			t.Fatalf("unbounded or invalid page: bytes=%d", out.Len())
+		}
+		for _, item := range page.Items {
+			if seen[item.ID] {
+				t.Fatalf("duplicate round across pages: %s", item.ID)
+			}
+			seen[item.ID] = true
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(seen) != 9 {
+		t.Fatalf("history pages missed rounds: got %d, want 9", len(seen))
 	}
 }
 
