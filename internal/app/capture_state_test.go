@@ -111,6 +111,49 @@ func TestStopRetryWithReusedSession(t *testing.T) {
 	}
 }
 
+func TestStopRoundIdentityReturnsOnlyRequestedRoundAndProtectsActiveRound(t *testing.T) {
+	a, root := fixture(t)
+	const session = "reused-session"
+	firstActive, err := a.Start(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, "main.go", "package p\nvar value = 1\n")
+	first, err := a.Stop(session, firstActive.ID)
+	if err != nil || first.ID != firstActive.ID {
+		t.Fatalf("first stop = %#v, %v", first, err)
+	}
+
+	secondActive, err := a.Start(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondActive.ID == first.ID {
+		t.Fatal("Start reused a committed round ID")
+	}
+	put(t, root, "main.go", "package p\nvar value = 2\n")
+	got, err := a.Stop(session, first.ID)
+	if err != nil || got.ID != first.ID {
+		t.Fatalf("late stop = %#v, %v; want committed round %q", got, err, first.ID)
+	}
+	active, err := a.CaptureState()
+	if err != nil || active == nil || active.ID != secondActive.ID {
+		t.Fatalf("late Stop changed active round: %#v, %v", active, err)
+	}
+
+	if _, err := a.Stop(session, "ffffffffffffffffffffffff"); err == nil || !strings.Contains(err.Error(), "期望轮次 ID 与活动轮次不匹配") {
+		t.Fatalf("wrong round ID was not rejected explicitly: %v", err)
+	}
+	active, err = a.CaptureState()
+	if err != nil || active == nil || active.ID != secondActive.ID {
+		t.Fatalf("rejected Stop changed active round: %#v, %v", active, err)
+	}
+	second, err := a.Stop(session, secondActive.ID)
+	if err != nil || second.ID != secondActive.ID {
+		t.Fatalf("correct second stop = %#v, %v", second, err)
+	}
+}
+
 func TestCaptureStateIsMinimalAndAbortPreservesHistory(t *testing.T) {
 	a, root := fixture(t)
 	if state, err := a.CaptureState(); err != nil || state != nil {

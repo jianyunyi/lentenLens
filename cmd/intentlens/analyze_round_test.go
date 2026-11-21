@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"intentlens/internal/app"
 	"io"
 	"net/http"
@@ -208,5 +209,114 @@ func TestAnalyzeRoundDisabledOrBudgetRejectedWithoutHTTP(t *testing.T) {
 				t.Fatalf("wrong rejection or sent HTTP: code=%d result=%v calls=%d", code, result, calls.Load())
 			}
 		})
+	}
+}
+
+func TestRepeatedStopHookAutomaticallyAnalyzesOnceAcrossAppRestarts(t *testing.T) {
+	var calls atomic.Int64
+	transport := cliInMemoryTransport{handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call%2 == 1 {
+			body, _ := io.ReadAll(r.Body)
+			match := regexp.MustCompile(`id.{0,20}([a-f0-9]{20})`).FindSubmatch(body)
+			if len(match) != 2 {
+				t.Errorf("model prompt omitted evidence id: %s", body)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			content, _ := json.Marshal(map[string]any{"claims": []any{map[string]any{"id": "c1", "text": "adds F", "kind": "behavior", "evidence_ids": []string{string(match[1])}, "status": "supported"}}})
+			response, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]string{"content": string(content)}}}, "usage": map[string]int{"total_tokens": 1}})
+			_, _ = w.Write(response)
+		} else {
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":"{\"checks\":[]}"}}],"usage":{"total_tokens":1}}`))
+		}
+	})}
+	root, state := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".intentignore"), []byte(""), 0600); err != nil {
+		t.Fatal(err)
+	}
+	openCount := 0
+	previousOpen, previousLaunch := openApp, launchHookAnalysis
+	openApp = func(root, state string) (*app.App, error) {
+		openCount++
+		return app.OpenWithHTTPTransport(root, state, transport)
+	}
+	t.Cleanup(func() { openApp, launchHookAnalysis = previousOpen, previousLaunch })
+	launchHookAnalysis = func(root, state, roundID string) error {
+		var out bytes.Buffer
+		if code := run([]string{"analyze-round", "--root", root, "--state", state, "--round", roundID, "--automatic"}, bytes.NewReader(nil), &out); code != 0 {
+			return fmt.Errorf("automatic analysis failed: %s", out.String())
+		}
+		return nil
+	}
+	config := `{"consent":true,"settings":{"model":{"enabled":true,"provider":"openai-compatible","base_url":"https://model.invalid","api_key_env":"INTENTLENS_HOOK_TEST_KEY","model":"fixture","token_limit":1000000}}}`
+	t.Setenv("INTENTLENS_HOOK_TEST_KEY", "local-only-key")
+	var out bytes.Buffer
+	if code := run([]string{"configure", "--root", root, "--state", state}, bytes.NewBufferString(config), &out); code != 0 {
+		t.Fatalf("configure: %s", out.String())
+	}
+	event := func(name string) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]string{"hook_event_name": name, "session_id": "hook-session", "cwd": root})
+		if err := handleHook(bytes.NewReader(payload), state); err != nil {
+			t.Fatalf("%s hook: %v", name, err)
+		}
+	}
+	event("UserPromptSubmit")
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package p\nfunc F() int { return 1 }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	event("Stop")
+	if calls.Load() != 2 {
+		t.Fatalf("first Stop hook made %d model requests, want one two-stage analysis", calls.Load())
+	}
+	openedAfterFirstStop := openCount
+	event("Stop")
+	if calls.Load() != 2 {
+		t.Fatalf("replayed Stop hook made duplicate model requests: %d", calls.Load())
+	}
+	if openCount <= openedAfterFirstStop {
+		t.Fatal("replayed hook did not use a new App instance")
+	}
+
+	a, err := app.Open(root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rounds, err := a.List()
+	if err != nil || len(rounds) != 1 || rounds[0].Analysis == nil {
+		ids := make([]string, len(rounds))
+		for i := range rounds {
+			ids[i] = rounds[i].ID
+		}
+		t.Fatalf("round analysis missing or duplicated: rounds=%d ids=%v err=%v", len(rounds), ids, err)
+	}
+	entries, err := os.ReadDir(a.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explanations := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "explanation-") && strings.HasSuffix(entry.Name(), ".json") {
+			explanations++
+		}
+	}
+	if explanations != 1 {
+		t.Fatalf("saved %d explanations after duplicate hook, want 1", explanations)
+	}
+	markerPath := filepath.Join(a.State, "auto-analysis-round-"+rounds[0].ID+".json")
+	marker, err := os.ReadFile(markerPath)
+	var markerData map[string]string
+	if err != nil || json.Unmarshal(marker, &markerData) != nil || markerData["round_id"] != rounds[0].ID {
+		t.Fatalf("automatic analysis marker missing or not bound to the round: %v", err)
+	}
+
+	var manual bytes.Buffer
+	if code := run([]string{"analyze-round", "--root", root, "--state", state, "--round", rounds[0].ID}, bytes.NewReader(nil), &manual); code != 0 {
+		t.Fatalf("manual reanalysis was blocked: %s", manual.String())
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("manual reanalysis made %d total model requests, want 4", calls.Load())
 	}
 }

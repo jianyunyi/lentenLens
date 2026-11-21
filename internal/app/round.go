@@ -61,7 +61,14 @@ func (a *App) Start(session string) (Active, error) {
 	return active, a.write("active.json", active)
 }
 
-func (a *App) Stop(session string) (Round, error) {
+func (a *App) Stop(session string, expectedRoundIDs ...string) (Round, error) {
+	if len(expectedRoundIDs) > 1 {
+		return Round{}, errors.New("Stop 只接受一个期望轮次 ID")
+	}
+	expectedID := ""
+	if len(expectedRoundIDs) == 1 {
+		expectedID = expectedRoundIDs[0]
+	}
 	unlock, e := a.lock("capture")
 	if e != nil {
 		return Round{}, e
@@ -70,9 +77,22 @@ func (a *App) Stop(session string) (Round, error) {
 	var active Active
 	e = a.read("active.json", &active)
 	if errors.Is(e, os.ErrNotExist) && session != "" {
-		committed, err := a.retryRound(session)
-		if !errors.Is(err, os.ErrNotExist) {
-			return committed, err
+		if expectedID != "" {
+			committed, err := a.committedRound(session, expectedID)
+			if err == nil {
+				if err = a.scrubCommittedRound(&committed); err != nil {
+					return Round{}, err
+				}
+				return committed, nil
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return Round{}, err
+			}
+		} else {
+			committed, err := a.retryRound(session)
+			if !errors.Is(err, os.ErrNotExist) {
+				return committed, err
+			}
 		}
 	}
 	if e != nil {
@@ -80,6 +100,16 @@ func (a *App) Stop(session string) (Round, error) {
 	}
 	if session == "" || active.Session != session {
 		return Round{}, errors.New("会话与开始基线不匹配")
+	}
+	if expectedID != "" && expectedID != active.ID {
+		committed, err := a.committedRound(session, expectedID)
+		if err == nil {
+			if err = a.scrubCommittedRound(&committed); err != nil {
+				return Round{}, err
+			}
+			return committed, nil
+		}
+		return Round{}, errors.New("期望轮次 ID 与活动轮次不匹配")
 	}
 	committed, e := a.committedRound(active.Session, active.ID)
 	if e == nil {
@@ -107,6 +137,31 @@ func (a *App) Stop(session string) (Round, error) {
 		return Round{}, removeErr
 	}
 	return round, nil
+}
+
+// CaptureRoundID returns the round currently associated with a session. Start
+// persists this reference so independent adapters can include it in Stop.
+func (a *App) CaptureRoundID(session string) (string, error) {
+	if strings.TrimSpace(session) == "" {
+		return "", errors.New("缺少 session_id")
+	}
+	var id string
+	err := a.read(captureRefName(session), &id)
+	if err == nil && validID(id) {
+		return id, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	var active Active
+	activeErr := a.read("active.json", &active)
+	if activeErr == nil && active.Session == session && validID(active.ID) {
+		return active.ID, nil
+	}
+	if activeErr != nil && !errors.Is(activeErr, os.ErrNotExist) {
+		return "", activeErr
+	}
+	return "", os.ErrNotExist
 }
 
 func (a *App) buildRound(active Active, after capture.Snapshot, policy capture.Policy) (Round, error) {

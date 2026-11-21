@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"intentlens/internal/app"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,10 +72,27 @@ func TestGenericCaptureEventsDoNotRequireClaude(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package p\nfunc F() {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	after := call(`{"event":"stop","session":"skill-session"}`)
+	after := call(`{"event":"stop","session":"skill-session","round_id":"` + before["id"].(string) + `"}`)
 	changes, ok := after["changes"].([]any)
 	if !ok || len(changes) != 1 || before["id"] != after["id"] || after["source"] != "unconfirmed" {
 		t.Fatalf("invalid round: %v", after)
+	}
+	second := call(`{"event":"start","session":"skill-session"}`)
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package p\nfunc F() { println(2) }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	late := call(`{"event":"stop","session":"skill-session","round_id":"` + before["id"].(string) + `"}`)
+	if late["id"] != before["id"] {
+		t.Fatalf("late generic Stop returned %v, want first round %v", late["id"], before["id"])
+	}
+	var active app.CaptureState
+	var status bytes.Buffer
+	if code := run([]string{"capture-status", "--root", root, "--state", state}, bytes.NewReader(nil), &status); code != 0 || json.Unmarshal(status.Bytes(), &active) != nil || active.ID != second["id"] {
+		t.Fatalf("late generic Stop changed the second baseline: code=%d status=%s", code, status.String())
+	}
+	secondResult := call(`{"event":"stop","session":"skill-session","round_id":"` + second["id"].(string) + `"}`)
+	if secondResult["id"] != second["id"] {
+		t.Fatalf("second generic Stop returned %v, want %v", secondResult["id"], second["id"])
 	}
 	if err := filepath.WalkDir(state, func(p string, d os.DirEntry, err error) error {
 		if err != nil {

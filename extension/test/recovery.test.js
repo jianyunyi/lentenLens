@@ -12,7 +12,7 @@ function harness() {
     h.active = null; return { aborted: true };
   };
   h.sessions = {
-    adopt: async (root, session) => { h.adopted.push({ root, session }); h.afterAdopt?.(); return { session }; },
+    adopt: async (root, session, roundID) => { h.adopted.push({ root, session, roundID }); h.afterAdopt?.(); return { session, roundID }; },
     release: async (root, session) => { h.released.push({ root, session }); return { released: true }; },
   };
   const vscode = { window: {
@@ -32,7 +32,7 @@ test('canceling recovery confirmation never adopts or aborts a round', async () 
 test('recovery explicitly confirms and validates identity before and after association', async () => {
   const h = harness(); h.answer = true;
   await h.ui.resume(h.folder);
-  assert.deepEqual(h.adopted, [{ root: '/fixture', session: 'skill-session' }]);
+  assert.deepEqual(h.adopted, [{ root: '/fixture', session: 'skill-session', roundID: 'round-a' }]);
   assert.equal(h.calls.filter(c => c.command === 'capture-status').length, 3);
   assert.equal(h.prompts[0].options.modal, true);
   assert.ok(!h.calls.some(c => c.command === 'capture-abort' || c.command === 'analyze-round'));

@@ -12,6 +12,9 @@ function harness(initial = {}) {
     calls.push({ root, command, input });
     if (release) await release;
     if (failCLI) throw new Error('cli down');
+    if (command === 'capture-status') return null;
+    if (command === 'start') return { id: `${input.session}-round`, session: input.session };
+    if (command === 'stop') return { id: input.round_id, session: input.session };
     return { ok: true, command };
   };
   const workspaceState = {
@@ -26,12 +29,13 @@ test('starts with a random persisted session and stops without model work', asyn
   const notices = [];
   const s = createSessions({ workspaceState: h.workspaceState, cli: h.cli, random: () => 'session-a', notify: { info: x => notices.push(x) } });
   await s.start('A');
-  assert.equal(h.values.get(rootKey('A')), 'session-a');
+  assert.deepEqual(JSON.parse(h.values.get(rootKey('A'))), { session: 'session-a', round_id: 'session-a-round' });
   assert.deepEqual(h.calls[0], { root: 'A', command: 'start', input: { session: 'session-a' } });
   const stopped = await s.stop('A');
   assert.equal(stopped.session, 'session-a');
   assert.equal(h.values.has(rootKey('A')), false);
   assert.deepEqual(h.calls.map(x => x.command), ['start', 'stop']);
+  assert.deepEqual(h.calls[1].input, { session: 'session-a', round_id: 'session-a-round' });
   assert.equal(notices.length, 2);
 });
 
@@ -92,8 +96,8 @@ test('successful stop with failed cleanup retries cleanup without stopping twice
   assert.equal(await s.get('A'), undefined);
 });
 
-test('reload reconciles a completed round only for its own persisted session', async () => {
-  const h = harness({ [rootKey('A')]: 'own-session' });
+test('reload reconciles a completed round only for its own persisted identity', async () => {
+  const h = harness({ [rootKey('A')]: JSON.stringify({ session: 'own-session', round_id: 'done' }) });
   const round = { id: 'done', session: 'own-session' };
   const calls = [];
   const s = createSessions({ workspaceState: h.workspaceState, cli: async (_, command) => {
@@ -124,7 +128,7 @@ test('unrelated completed rounds cannot hide a stop failure', async () => {
     if (command === 'stop') throw new Error('mismatched baseline');
     return [{ id: 'other', session: 'someone-else' }];
   } });
-  await assert.rejects(s.stop('A'), /会话仍保留/);
+  await assert.rejects(s.stop('A'), /缺少轮次 ID/);
   assert.equal(await s.get('A'), 'own-session');
 });
 

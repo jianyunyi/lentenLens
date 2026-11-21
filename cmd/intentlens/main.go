@@ -21,6 +21,21 @@ import (
 func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout)) }
 
 var openApp = app.Open
+var launchHookAnalysis = func(root, state, roundID string) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(executable, "analyze-round", "--root", root, "--state", state, "--round", roundID, "--automatic") // #nosec G702 G204 -- runs this program directly with argv; exec.Command does not invoke a shell.
+	hideWindow(cmd)
+	if err = cmd.Start(); err != nil {
+		return err
+	}
+	if err = cmd.Process.Release(); err != nil {
+		return fmt.Errorf("解释后台进程句柄释放失败: %w", err)
+	}
+	return nil
+}
 
 type input struct {
 	ExerciseID          string                     `json:"exercise_id"`
@@ -62,6 +77,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	root := flags.String("root", ".", "project root")
 	state := flags.String("state", "", "external local state directory")
 	roundID := flags.String("round", "", "round id")
+	automaticAnalysis := flags.Bool("automatic", false, "deduplicate lifecycle-triggered round analysis")
 	editorModelTarget := flags.String("editor-model-target", "", "VS Code credential's bound provider, base URL, and model")
 	if e := flags.Parse(args[1:]); e != nil {
 		return fail(out, e)
@@ -116,7 +132,16 @@ func run(args []string, in io.Reader, out io.Writer) int {
 			active, e = a.Start(request.Session)
 			result = map[string]any{"id": active.ID, "started": active.Started}
 		case "stop":
-			result, e = a.Stop(request.Session)
+			roundID := request.RoundID
+			if roundID != "" {
+				result, e = a.Stop(request.Session, roundID)
+			} else if roundID, e = a.CaptureRoundID(request.Session); e == nil {
+				result, e = a.Stop(request.Session, roundID)
+			} else if errors.Is(e, os.ErrNotExist) {
+				// Older generic-event clients may predate round IDs. Preserve their
+				// session-only behavior when no persisted association exists.
+				result, e = a.Stop(request.Session)
+			}
 		default:
 			return fail(out, errors.New("通用事件 event 必须为 start 或 stop"))
 		}
@@ -169,7 +194,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		active, e = a.Start(request.Session)
 		result = map[string]any{"id": active.ID, "started": active.Started}
 	case "stop":
-		result, e = a.Stop(request.Session)
+		result, e = a.Stop(request.Session, request.RoundID)
 	case "capture-status":
 		result, e = a.CaptureState()
 	case "capture-abort":
@@ -213,7 +238,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		if strings.TrimSpace(*roundID) == "" {
 			return fail(out, errors.New("需要非空 round_id（可通过 --round 或 JSON 输入提供）"))
 		}
-		e = analyzeRound(a, *roundID)
+		e = analyzeRound(a, *roundID, *automaticAnalysis)
 		result = map[string]bool{"analyzed": e == nil}
 	default:
 		e = fmt.Errorf("未知命令：%s", command)
@@ -297,6 +322,7 @@ func handleHook(in io.Reader, state string) error {
 	var event struct {
 		Event   string `json:"hook_event_name"`
 		Session string `json:"session_id"`
+		RoundID string `json:"round_id"`
 		Root    string `json:"cwd"`
 		Agent   string `json:"agent_id"`
 	}
@@ -306,7 +332,7 @@ func handleHook(in io.Reader, state string) error {
 	if event.Agent != "" || event.Root == "" {
 		return nil
 	}
-	a, e := app.Open(event.Root, state)
+	a, e := openApp(event.Root, state)
 	if e != nil {
 		return nil
 	}
@@ -315,21 +341,21 @@ func handleHook(in io.Reader, state string) error {
 		_, e = a.Start(event.Session)
 	case "Stop":
 		var r app.Round
-		r, e = a.Stop(event.Session)
+		roundID := event.RoundID
+		if roundID != "" {
+			r, e = a.Stop(event.Session, roundID)
+		} else if roundID, e = a.CaptureRoundID(event.Session); e == nil {
+			r, e = a.Stop(event.Session, roundID)
+		} else if errors.Is(e, os.ErrNotExist) {
+			// Existing hook installations can finish a pre-upgrade baseline;
+			// every Start handled by this binary writes a round-ID association.
+			r, e = a.Stop(event.Session)
+		}
 		if e == nil && len(r.Changes) > 0 {
 			cfg, err := a.Config()
 			if err == nil && cfg.Model.Enabled {
-				executable, err := os.Executable()
-				if err == nil {
-					cmd := exec.Command(executable, "analyze-round", "--root", a.Root, "--state", filepath.Dir(a.State), "--round", r.ID) // #nosec G702 G204 -- runs this program directly with argv; exec.Command does not invoke a shell.
-					hideWindow(cmd)
-					if err = cmd.Start(); err == nil {
-						if releaseErr := cmd.Process.Release(); releaseErr != nil {
-							e = fmt.Errorf("解释后台进程句柄释放失败: %w", releaseErr)
-						}
-					} else {
-						e = errors.New("解释后台进程启动失败")
-					}
+				if err = launchHookAnalysis(a.Root, filepath.Dir(a.State), r.ID); err != nil {
+					e = errors.New("解释后台进程启动失败: " + err.Error())
 				}
 			}
 		}
@@ -348,7 +374,22 @@ func handleHook(in io.Reader, state string) error {
 	return nil
 }
 
-func analyzeRound(a *app.App, id string) error {
+func analyzeRound(a *app.App, id string, automatic bool) error {
+	if automatic {
+		_, err := a.AnalyzeRoundAutomatically(context.Background(), id)
+		if err != nil {
+			b, marshalErr := json.Marshal(map[string]string{"round": id, "error": err.Error()})
+			if marshalErr != nil {
+				return errors.Join(err, marshalErr)
+			}
+			if writeErr := writeStateDiagnostic(a.State, "analysis-diagnostic.json", b); writeErr != nil {
+				return errors.Join(err, writeErr)
+			}
+		} else if diagnosticErr := removeRoundDiagnostic(a.State, id); diagnosticErr != nil {
+			return diagnosticErr
+		}
+		return err
+	}
 	rounds, e := a.List()
 	if e != nil {
 		return e

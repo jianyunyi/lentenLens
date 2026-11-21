@@ -74,11 +74,16 @@ func TestCLIStartStopJSON(t *testing.T) {
 	if code := run([]string{"start", "--root", root, "--state", state}, bytes.NewBufferString(`{"session":"s"}`), &out); code != 0 {
 		t.Fatal(out.String())
 	}
+	var started map[string]any
+	if err := json.Unmarshal(out.Bytes(), &started); err != nil || started["id"] == nil {
+		t.Fatalf("start did not return round ID: %s", out.String())
+	}
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package p\nfunc A() {}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if code := run([]string{"stop", "--root", root, "--state", state}, bytes.NewBufferString(`{"session":"s"}`), &out); code != 0 {
+	stopInput, _ := json.Marshal(map[string]string{"session": "s", "round_id": started["id"].(string)})
+	if code := run([]string{"stop", "--root", root, "--state", state}, bytes.NewReader(stopInput), &out); code != 0 {
 		t.Fatal(out.String())
 	}
 	var result map[string]any

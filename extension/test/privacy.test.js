@@ -241,7 +241,7 @@ test('registered recovery commands adopt CLI session and cancel only confirmed b
   h.vscode.window.showWarningMessage = async (_, __, action) => action;
   await h.commands.get('intentlens.resumeRound')();
   await h.commands.get('intentlens.stopRound')();
-  assert.deepEqual(h.calls.find(c => c.command === 'stop').input, { session: 'from-skill' });
+  assert.deepEqual(h.calls.find(c => c.command === 'stop').input, { session: 'from-skill', round_id: 'active-id' });
   await h.commands.get('intentlens.cancelRound')();
   assert.deepEqual(h.calls.find(c => c.command === 'capture-abort').input, { session: 'from-skill', round_id: 'active-id', confirm: true });
   assert.deepEqual(h.errors, []);
