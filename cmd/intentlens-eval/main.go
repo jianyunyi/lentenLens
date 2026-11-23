@@ -35,7 +35,7 @@ func main() {
 	cases := flag.String("cases", "eval/explain/cases", "case directory")
 	out := flag.String("out", "eval-out", "output directory")
 	provider := flag.String("provider", "openai-compatible", "anthropic | openai | openai-compatible | gemini")
-	baseURL := flag.String("base-url", "https://openrouter.ai/api/v1", "API base URL")
+	baseURL := flag.String("base-url", "", "API base URL (default: the provider's own; OpenRouter for openai-compatible)")
 	model := flag.String("model", "", "model ID (required)")
 	keyEnv := flag.String("key-env", "INTENTLENS_API_KEY", "environment variable holding the API key")
 	mode := flag.String("mode", explain.ModeLight, "verification mode: light | fast | strict")
@@ -43,6 +43,9 @@ func main() {
 	only := flag.String("only", "", "comma-separated case names to run")
 	timeout := flag.Duration("timeout", 5*time.Minute, "timeout per case")
 	flag.Parse()
+	if *baseURL == "" && *provider == "openai-compatible" {
+		*baseURL = "https://openrouter.ai/api/v1"
+	}
 	if err := run(*cases, *out, *only, explain.Config{
 		Provider: *provider, BaseURL: *baseURL, Model: *model, APIKeyEnv: *keyEnv,
 		Enabled: true, TokenLimit: *tokens, VerificationMode: *mode,
@@ -56,6 +59,10 @@ func run(casesDir, outDir, only string, cfg explain.Config, timeout time.Duratio
 	if cfg.Model == "" {
 		return errors.New("-model is required")
 	}
+	cfg, err := cfg.Resolved()
+	if err != nil {
+		return err
+	}
 	key := os.Getenv(cfg.APIKeyEnv)
 	if key == "" {
 		return fmt.Errorf("environment variable %s is empty", cfg.APIKeyEnv)
@@ -67,12 +74,19 @@ func run(casesDir, outDir, only string, cfg explain.Config, timeout time.Duratio
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
+	for _, f := range []string{"report.json", "review.csv", "summary.md"} {
+		if _, err := os.Stat(filepath.Join(outDir, f)); err == nil {
+			return fmt.Errorf("%s already exists; choose a new -out so earlier review scores are kept", filepath.Join(outDir, f))
+		}
+	}
 	var results []result
+	failed := 0
 	for _, name := range names {
 		fmt.Fprintf(os.Stderr, "case %s ... ", name)
 		r := runCase(filepath.Join(casesDir, name), cfg, key, timeout)
 		r.Case = name
 		if r.Error != "" {
+			failed++
 			fmt.Fprintln(os.Stderr, "error:", r.Error)
 		} else {
 			fmt.Fprintf(os.Stderr, "%d claims, expect %d/%d, forbidden %d\n", r.Score.Claims,
@@ -89,7 +103,13 @@ func run(casesDir, outDir, only string, cfg explain.Config, timeout time.Duratio
 	if err := writeSheet(filepath.Join(outDir, "review.csv"), results); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(outDir, "summary.md"), []byte(summary(cfg, results)), 0o644)
+	if err := os.WriteFile(filepath.Join(outDir, "summary.md"), []byte(summary(cfg, results)), 0o644); err != nil {
+		return err
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d cases failed; see %s", failed, len(results), outDir)
+	}
+	return nil
 }
 
 func caseNames(dir, only string) ([]string, error) {
@@ -104,14 +124,17 @@ func caseNames(dir, only string) ([]string, error) {
 		}
 	}
 	var names []string
+	found := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() && (len(want) == 0 || want[e.Name()]) {
 			names = append(names, e.Name())
-			delete(want, e.Name())
+			found[e.Name()] = true
 		}
 	}
 	for n := range want {
-		return nil, fmt.Errorf("unknown case %q", n)
+		if !found[n] {
+			return nil, fmt.Errorf("unknown case %q", n)
+		}
 	}
 	sort.Strings(names)
 	return names, nil
@@ -127,6 +150,10 @@ func runCase(dir string, cfg explain.Config, key string, timeout time.Duration) 
 	}
 	if err != nil {
 		r.Error = "case.json: " + err.Error()
+		return r
+	}
+	if !filepath.IsLocal(c.File) {
+		r.Error = fmt.Sprintf("case file %q must be a relative path inside the case", c.File)
 		return r
 	}
 	work, err := os.MkdirTemp("", "intentlens-eval-")
@@ -193,6 +220,9 @@ func copyTree(from, to string) error {
 		if d.IsDir() {
 			return os.MkdirAll(dst, 0o755)
 		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("case contains a non-regular file: %s", p)
+		}
 		if rel == "case.json" {
 			return nil
 		}
@@ -227,15 +257,25 @@ func writeSheet(path string, results []result) error {
 		"correct (0-2)", "grounded (y/n)", "useful (0-2)", "notes"})
 	for _, r := range results {
 		for _, cl := range r.Document.Claims {
-			_ = w.Write([]string{r.Case, cl.ID, cl.Section, cl.Kind, cl.Status, cl.Text,
-				evidenceRefs(cl.EvidenceIDs, r.Evidence), "", "", "", ""})
+			_ = w.Write(cells(r.Case, cl.ID, cl.Section, cl.Kind, cl.Status, cl.Text,
+				evidenceRefs(cl.EvidenceIDs, r.Evidence), "", "", "", ""))
 		}
 		for i, u := range r.Document.Unknowns {
-			_ = w.Write([]string{r.Case, fmt.Sprintf("unknown-%d", i+1), "unknowns", "", "", u, "", "", "", "", ""})
+			_ = w.Write(cells(r.Case, fmt.Sprintf("unknown-%d", i+1), "unknowns", "", "", u, "", "", "", "", ""))
 		}
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// cells keeps spreadsheet apps from evaluating model text as formulas.
+func cells(values ...string) []string {
+	for i, v := range values {
+		if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+			values[i] = "'" + v
+		}
+	}
+	return values
 }
 
 func summary(cfg explain.Config, results []result) string {

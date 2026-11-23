@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -43,5 +45,29 @@ func TestFunctionLine(t *testing.T) {
 	}
 	if n := functionLine(src, "Missing"); n != 0 {
 		t.Fatalf("Missing line = %d", n)
+	}
+}
+
+func TestCells(t *testing.T) {
+	got := cells("=HYPERLINK(1)", "+1", "-x", "@a", "ok", "")
+	want := []string{"'=HYPERLINK(1)", "'+1", "'-x", "'@a", "ok", ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cells = %q", got)
+	}
+}
+
+func TestCaseNamesOnly(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b", "c"} {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := caseNames(dir, "c,a")
+	if err != nil || !reflect.DeepEqual(got, []string{"a", "c"}) {
+		t.Fatalf("caseNames = %q, %v", got, err)
+	}
+	if _, err := caseNames(dir, "a,zz"); err == nil {
+		t.Fatal("unknown case accepted")
 	}
 }
