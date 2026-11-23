@@ -27,3 +27,4 @@ intentlens.exe
 # PR-TEMPLATE.md
 extension/coverage/
 extension/.vscode-test/
+/eval-out/

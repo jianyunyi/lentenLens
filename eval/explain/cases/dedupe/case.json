@@ -1,0 +1,13 @@
+{
+  "file": "dedupe.go",
+  "function": "Dedupe",
+  "expect": [
+    {"id": "keeps-first-order", "any": ["顺序", "首次", "第一次", "order"]},
+    {"id": "seen-set", "any": ["map", "集合", "seen"]},
+    {"id": "reuses-input-backing-array", "any": ["in[:0]", "底层数组", "原切片", "原地", "复用", "修改输入", "in place"]}
+  ],
+  "forbid": [
+    {"id": "invented-sorting", "any": ["排序", "sort"]},
+    {"id": "invented-copy-safety", "any": ["不修改输入", "不会修改", "新切片", "副本"]}
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "file": "withdraw.go",
+  "function": "Withdraw",
+  "expect": [
+    {"id": "rejects-non-positive", "any": ["非正", "小于等于", "<= 0", "正数", "ErrInvalidAmount"]},
+    {"id": "insufficient-funds", "any": ["余额不足", "ErrInsufficientFunds", "insufficient"]},
+    {"id": "unit-cents", "any": ["单位为分", "以分", "美分", "cents"]},
+    {"id": "unchanged-on-error", "any": ["不变", "不修改", "不会扣", "unchanged"]}
+  ],
+  "forbid": [
+    {"id": "concurrency-claim", "any": ["并发安全", "线程安全", "原子", "加锁"]},
+    {"id": "invented-logging", "any": ["日志", "log.Print"]},
+    {"id": "invented-overdraft", "any": ["透支", "overdraft"]}
+  ]
+}

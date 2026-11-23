@@ -1,0 +1,15 @@
+{
+  "file": "config.go",
+  "function": "Parse",
+  "expect": [
+    {"id": "skips-comments-blank", "any": ["注释", "#", "空行"]},
+    {"id": "error-with-line-number", "any": ["行号", "第几行", "line %d", "line number"]},
+    {"id": "split-on-first-equals", "any": ["strings.Cut", "第一个 =", "第一个等号", "首个等号", "首个 ="]},
+    {"id": "scanner-error", "any": ["s.Err", "Err()", "扫描错误", "读取错误"]}
+  ],
+  "forbid": [
+    {"id": "invented-format", "any": ["YAML", "TOML", "JSON", "INI"]},
+    {"id": "invented-env", "any": ["环境变量", "os.Getenv"]},
+    {"id": "invented-quotes", "any": ["引号", "转义", "quote"]}
+  ]
+}
