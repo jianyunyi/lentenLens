@@ -41,7 +41,7 @@ go build -trimpath -o bin/intentlens.exe ./cmd/intentlens
 
 按[本地打包说明](docs/release.md)生成并校验新 VSIX，再执行 **Extensions: Install from VSIX…** 手动安装。
 
-当前打包目标仅为 Windows x64。可复现打包要求 Go 1.25.0、Node.js 22+，并使用锁文件固定的 `@vscode/vsce` 4.0.0：
+可选打包目标：Windows x64/arm64、Linux x64/arm64、macOS x64/arm64（Windows x64 以外的包尚未在对应平台实机验证）。可复现打包要求 Go 1.26.3（源码最低 1.25.0）、Node.js 22+，并使用锁文件固定的 `@vscode/vsce` 4.1.0：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `

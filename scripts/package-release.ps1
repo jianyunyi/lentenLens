@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
-    [ValidateSet('win32-x64')]
+    [ValidateSet('win32-x64', 'win32-arm64', 'linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64')]
     [string]$Target = 'win32-x64',
 
     [switch]$Offline
@@ -46,8 +46,12 @@ $extensionPackage = Get-Content -LiteralPath $extensionPackagePath -Raw | Conver
 $extensionLock = Get-Content -LiteralPath (Join-Path $extensionRoot 'package-lock.json') -Raw | ConvertFrom-Json -AsHashtable
 $extensionLockRoot = $extensionLock.packages['']
 
-if ($Target -ne $config.target.vscode) {
-    throw "Target mismatch: configured $($config.target.vscode), requested $Target."
+if ($config.schema -ne 2) {
+    throw "Unsupported release-config.json schema: $($config.schema)"
+}
+$targetConfig = $config.targets.$Target
+if ($null -eq $targetConfig -or [string]::IsNullOrWhiteSpace($targetConfig.goos) -or [string]::IsNullOrWhiteSpace($targetConfig.goarch)) {
+    throw "Target $Target is not configured in release-config.json."
 }
 if ($toolsPackage.devDependencies.'@vscode/vsce' -ne $config.vsceVersion) {
     throw "release-tools/package.json must pin @vscode/vsce exactly to $($config.vsceVersion)."
@@ -99,13 +103,14 @@ if ([int]$Matches[1] -lt [int]$config.nodeMajor) {
     throw "Node.js $nodeOutput is below the required major version $($config.nodeMajor)."
 }
 
-$npmCache = Join-Path $repoRoot '.work\tools\npm-cache'
+$npmCache = [System.IO.Path]::Combine($repoRoot, '.work', 'tools', 'npm-cache')
 $npmArgs = @('ci', '--prefix', $toolsRoot, '--ignore-scripts', '--no-audit', '--no-fund', '--cache', $npmCache)
 if ($Offline) { $npmArgs += '--offline' }
-& npm.cmd @npmArgs
+$npmCommand = if ($env:OS -eq 'Windows_NT') { 'npm.cmd' } else { 'npm' }
+& $npmCommand @npmArgs
 if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." }
 
-$vsceEntry = Join-Path $toolsRoot 'node_modules\@vscode\vsce\vsce'
+$vsceEntry = [System.IO.Path]::Combine($toolsRoot, 'node_modules', '@vscode', 'vsce', 'vsce')
 if (-not (Test-Path -LiteralPath $vsceEntry -PathType Leaf)) {
     throw "Pinned vsce entry point not found: $vsceEntry"
 }
@@ -125,7 +130,8 @@ if (Test-Path -LiteralPath $vsixPath) {
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("intentlens-release-" + [guid]::NewGuid().ToString('N'))
 $stageRoot = Join-Path $tempRoot 'extension'
-$cliPath = Join-Path $stageRoot 'bin\intentlens.exe'
+$cliName = if ($targetConfig.goos -eq 'windows') { 'intentlens.exe' } else { 'intentlens' }
+$cliPath = [System.IO.Path]::Combine($stageRoot, 'bin', $cliName)
 $packageCreated = $false
 New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
 try {
@@ -140,8 +146,8 @@ try {
     $oldCgo = $env:CGO_ENABLED
     $oldGoToolchain = $env:GOTOOLCHAIN
     try {
-        $env:GOOS = $config.target.goos
-        $env:GOARCH = $config.target.goarch
+        $env:GOOS = $targetConfig.goos
+        $env:GOARCH = $targetConfig.goarch
         $env:CGO_ENABLED = '0'
         $env:GOTOOLCHAIN = 'local'
         Push-Location $repoRoot
@@ -162,7 +168,7 @@ try {
 
     $binaryInfo = (& go version -m $cliPath 2>&1 | Out-String)
     $versionPattern = "(?m):\s+go$([regex]::Escape($actualGoVersion))\s*$"
-    if ($LASTEXITCODE -ne 0 -or $binaryInfo -notmatch "build\s+GOOS=$($config.target.goos)" -or $binaryInfo -notmatch "build\s+GOARCH=$($config.target.goarch)" -or $binaryInfo -notmatch $versionPattern) {
+    if ($LASTEXITCODE -ne 0 -or $binaryInfo -notmatch "build\s+GOOS=$($targetConfig.goos)" -or $binaryInfo -notmatch "build\s+GOARCH=$($targetConfig.goarch)" -or $binaryInfo -notmatch $versionPattern) {
         throw "Built CLI does not report the expected Go version/target:`n$binaryInfo"
     }
 
@@ -192,6 +198,7 @@ try {
                 $relative -ne 'release-manifest.json' -and
                 -not $relative.StartsWith('test/') -and
                 -not $relative.StartsWith('node_modules/') -and
+                -not $relative.StartsWith('coverage/') -and
                 $relative -ne 'package-lock.json' -and
                 $relative -ne '.ds_store' -and
                 $relative -ne 'error-analysis.md' -and
@@ -220,7 +227,7 @@ try {
         version = $extensionPackage.version
         publisher = $extensionPackage.publisher
         license = $extensionPackage.license
-        target = "$($config.target.goos)/$($config.target.goarch)"
+        target = "$($targetConfig.goos)/$($targetConfig.goarch)"
         marketplacePublisherVerified = $false
         marketplaceReady = $false
         blockers = @($blockers)
@@ -232,7 +239,7 @@ try {
         }
         packaging = [ordered]@{
             nodeVersion = $nodeOutput
-            npmVersion = ((& npm.cmd --version 2>&1 | Out-String).Trim())
+            npmVersion = ((& $npmCommand --version 2>&1 | Out-String).Trim())
             vsceVersion = $vsceOutput
             vsceLockSha256 = (Get-Sha256 $toolsLockPath)
             vsceLockfileVersion = $lockInfo.version

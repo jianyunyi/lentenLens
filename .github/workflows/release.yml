@@ -1,4 +1,4 @@
-name: Local VSIX candidate
+name: Local VSIX candidates
 
 on:
   workflow_dispatch:
@@ -12,8 +12,19 @@ concurrency:
 
 jobs:
   candidate:
-    name: Verify and package local VSIX
-    runs-on: windows-latest
+    name: Package ${{ matrix.target }} VSIX
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Unix targets build on Linux so the bundled CLI keeps its executable bit.
+          - { target: win32-x64, os: windows-latest }
+          - { target: win32-arm64, os: windows-latest }
+          - { target: linux-x64, os: ubuntu-latest }
+          - { target: linux-arm64, os: ubuntu-latest }
+          - { target: darwin-x64, os: ubuntu-latest }
+          - { target: darwin-arm64, os: ubuntu-latest }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -25,6 +36,7 @@ jobs:
         with:
           node-version: '22'
       - name: Go verification
+        shell: pwsh
         run: |
           go test ./... -count=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -32,6 +44,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Extension verification
         working-directory: extension
+        shell: pwsh
         run: |
           npm test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -40,7 +53,7 @@ jobs:
       - name: Package and verify candidate
         shell: pwsh
         run: |
-          ./scripts/package-release.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'intentlens-candidate')
+          ./scripts/package-release.ps1 -Target ${{ matrix.target }} -OutputDirectory (Join-Path $env:RUNNER_TEMP 'intentlens-candidate')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $candidates = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'intentlens-candidate') -Filter '*.vsix')
           if ($candidates.Count -ne 1) { throw 'Expected exactly one candidate VSIX.' }
@@ -48,7 +61,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: windows-x64-local-vsix-candidate
+          name: ${{ matrix.target }}-local-vsix-candidate
           path: ${{ runner.temp }}/intentlens-candidate/*.vsix
           if-no-files-found: error
           retention-days: 7
