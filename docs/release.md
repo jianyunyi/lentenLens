@@ -29,7 +29,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-vsix.ps1 `
 
 ## 当前发行状态与后续公开发布条件
 
-当前 `extension/package.json` 的版本为 `0.7.1`、publisher 为 `intentlens-local`、许可证为 MIT；`extension/package-lock.json` 与扩展清单版本一致，根目录 `LICENSE` 为 MIT。当前发行目标是手动安装 VSIX；Marketplace publisher 尚未选定或验证。所有 `manual-vsix` 清单都会固定记录 `marketplacePublisherVerified=false`、`marketplaceReady=false` 和 `publisher_ownership_unverified` 阻断代码；即使 publisher 字符串改变，打包器也不会推断其所有权。校验器拒绝任何声称已验证或已就绪的手动 VSIX 清单。`.github/workflows/release.yml` 只能由手动触发，按平台矩阵生成 6 个保留 7 天的候选 VSIX 工作流制品（Windows 目标在 Windows runner，其它在 Linux runner 交叉编译），不创建 GitHub Release、不发布 Marketplace。`intentlens.intentlens` 已被一个功能不同的公开扩展使用，因此不可把 `intentlens` 当作本项目的 Marketplace publisher。若以后公开发布，须新增可独立核验的账户所有权流程；哈希通过只代表包内内容与清单一致，不代表可以公开发布或满足生产验收。Linux/macOS/arm64 包目前只做过打包和完整性校验，未在对应平台的 VS Code 中实测；macOS CLI 未经过 Apple 公证。
+当前 `extension/package.json` 的版本为 `0.7.1`、publisher 为 `intentlens-local`、许可证为 MIT；`extension/package-lock.json` 与扩展清单版本一致，根目录 `LICENSE` 为 MIT。当前发行目标是手动安装 VSIX；Marketplace publisher 尚未选定或验证。所有 `manual-vsix` 清单都会固定记录 `marketplacePublisherVerified=false`、`marketplaceReady=false` 和 `publisher_ownership_unverified` 阻断代码；即使 publisher 字符串改变，打包器也不会推断其所有权。校验器拒绝任何声称已验证或已就绪的手动 VSIX 清单。`.github/workflows/release.yml` 只能由手动触发，按平台矩阵生成 6 个保留 7 天的候选 VSIX 工作流制品（Windows 目标在 Windows runner，其它在 Linux runner 交叉编译），不创建 GitHub Release、不发布 Marketplace。`intentlens.intentlens` 已被一个功能不同的公开扩展使用，因此不可把 `intentlens` 当作本项目的 Marketplace publisher。若以后公开发布，须新增可独立核验的账户所有权流程；哈希通过只代表包内内容与清单一致，不代表可以公开发布或满足生产验收。Linux/macOS/arm64 包目前只做过打包和完整性校验，未在对应平台的 VS Code 中实测；macOS CLI 未经过 Apple 公证。签名策略：只依赖 Marketplace 发布时的服务端签名（VS Code 安装时校验），不另做 Authenticode 或 Apple 签名；手动安装的 VSIX 没有签名。
 
 ## 自动化候选包门禁
 
