@@ -1,0 +1,14 @@
+{
+  "file": "cache.go",
+  "function": "Put",
+  "expect": [
+    {"id": "mutex", "any": ["互斥", "锁", "mutex", "Lock"]},
+    {"id": "evicts-oldest-inserted", "any": ["最早", "最旧", "oldest", "FIFO", "先进先出"]},
+    {"id": "update-keeps-order", "any": ["已存在", "已有", "更新", "覆盖", "existing"]},
+    {"id": "non-positive-limit-unbounded", "any": ["limit", "上限", "不限", "无限"]}
+  ],
+  "forbid": [
+    {"id": "invented-lru", "any": ["LRU", "最近最少使用", "最近使用"]},
+    {"id": "invented-ttl", "any": ["TTL", "过期", "expire"]}
+  ]
+}

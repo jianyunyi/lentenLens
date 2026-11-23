@@ -1,0 +1,15 @@
+{
+  "file": "retry.go",
+  "function": "Retry",
+  "expect": [
+    {"id": "bounded-attempts", "any": ["次数", "attempts", "最多", "上限"]},
+    {"id": "doubling-backoff", "any": ["翻倍", "加倍", "两倍", "2 倍", "指数", "double", "exponential"]},
+    {"id": "no-sleep-after-last", "any": ["最后一次", "最后一轮", "last attempt"]},
+    {"id": "joins-last-error", "any": ["errors.Join", "ErrGiveUp", "最后一次错误", "最后的错误"]}
+  ],
+  "forbid": [
+    {"id": "invented-jitter", "any": ["抖动", "jitter", "随机"]},
+    {"id": "invented-context", "any": ["context", "上下文取消", "ctx"]},
+    {"id": "concurrency-claim", "any": ["并发安全", "线程安全", "concurrency-safe", "thread-safe"]}
+  ]
+}
