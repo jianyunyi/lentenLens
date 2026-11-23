@@ -135,17 +135,6 @@ func hasSeccomp() bool {
 	return errno == 0
 }
 
-// setupCgroup is a placeholder for cgroup v2 resource limits; it currently does nothing.
-func (s *Sandbox) setupCgroup(pid int) error {
-	// TODO: Create cgroup for the process
-	// TODO: Set memory limit
-	// TODO: Set CPU limit
-	// TODO: Set PID limit
-	// TODO: Add process to cgroup
-
-	return nil
-}
-
 // filteredEnvironment returns a filtered environment with only allowed variables.
 func (s *Sandbox) filteredEnvironment() []string {
 	whitelist := map[string]bool{
@@ -176,18 +165,4 @@ func (s *Sandbox) filteredEnvironment() []string {
 	}
 
 	return filtered
-}
-
-// seccompFilter is a placeholder; it currently returns no filter and is not applied.
-func (s *Sandbox) seccompFilter() []byte {
-	// TODO: Generate seccomp-bpf bytecode
-	// This should:
-	// - Allow read, write, open, stat, etc. for workDir
-	// - Block socket, connect, execve (except initial process)
-	// - Block ptrace, mount, and other privileged syscalls
-	//
-	// Consider using libseccomp Go bindings:
-	// https://github.com/seccomp/libseccomp-golang
-
-	return []byte{}
 }

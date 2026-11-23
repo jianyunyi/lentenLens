@@ -197,8 +197,6 @@ try {
                 $relative -ne 'error-analysis.md' -and
                 $relative -ne 'test-errors.log' -and
                 $relative -ne 'src/extension-part1.txt' -and
-                $relative -ne 'src/taskmanagement.js' -and
-                $relative -ne 'src/taskpanel.js' -and
                 -not $relative.EndsWith('.backup') -and
                 -not $relative.EndsWith('.phase1') -and
                 -not $relative.EndsWith('.vsix')
