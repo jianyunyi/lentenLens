@@ -70,11 +70,17 @@ function activate(context) {
     const chosen = await vscode.window.showQuickPick(folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })), { placeHolder: '选择本次操作的工作区根目录' });
     return chosen?.folder;
   }
+  // VSIX archives built on Windows carry no Unix mode bits for the bundled CLI.
+  function ensureExecutable(file) {
+    if (process.platform === 'win32') return file;
+    try { fs.accessSync(file, fs.constants.X_OK); } catch { fs.chmodSync(file, 0o755); }
+    return file;
+  }
   async function cli(folder, command, input, options = {}) {
     trusted();
     const configured = vscode.workspace.getConfiguration('intentlens', folder.uri).get('binaryPath', '');
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
-    const binary = configured || (fs.existsSync(bundled) ? bundled : 'intentlens');
+    const binary = configured || (fs.existsSync(bundled) ? ensureExecutable(bundled) : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
     const runOptions = { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal };
     if (modelCommands.has(command)) {

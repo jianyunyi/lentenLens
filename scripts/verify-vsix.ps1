@@ -77,7 +77,13 @@ try {
         @($manifest.blockers) -notcontains 'publisher_ownership_unverified') {
         throw 'Manual VSIX manifests cannot attest Marketplace publisher ownership or readiness.'
     }
-    if ($manifest.target -ne 'windows/amd64') { throw "Unexpected binary target in manifest: $($manifest.target)" }
+    $platforms = @{
+        'windows/amd64' = 'win32-x64'; 'windows/arm64' = 'win32-arm64'
+        'linux/amd64' = 'linux-x64'; 'linux/arm64' = 'linux-arm64'
+        'darwin/amd64' = 'darwin-x64'; 'darwin/arm64' = 'darwin-arm64'
+    }
+    if (-not $platforms.ContainsKey([string]$manifest.target)) { throw "Unexpected binary target in manifest: $($manifest.target)" }
+    $cliEntry = if ($manifest.target.StartsWith('windows/')) { 'bin/intentlens.exe' } else { 'bin/intentlens' }
     if (-not $entryMap.ContainsKey('extension.vsixmanifest')) { throw 'VSIX is missing extension.vsixmanifest.' }
 
     $vsixManifestText = Read-ZipText $entryMap['extension.vsixmanifest']
@@ -147,6 +153,12 @@ try {
     if ($identity.GetAttribute('Id') -cne $package.name) {
         $errors.Add('VSIX manifest extension ID does not match package.json name.')
     }
+    if ($identity.GetAttribute('TargetPlatform') -cne $platforms[[string]$manifest.target]) {
+        $errors.Add("VSIX TargetPlatform '$($identity.GetAttribute('TargetPlatform'))' does not match CLI target $($manifest.target).")
+    }
+    if (-not $entryMap.ContainsKey("extension/$cliEntry") -or @($manifest.files | Where-Object { $_.path -eq $cliEntry }).Count -ne 1) {
+        $errors.Add("VSIX is missing the $($manifest.target) CLI at extension/$cliEntry.")
+    }
     if ($identity.GetAttribute('Version') -cne $package.version) {
         $errors.Add('VSIX manifest version does not match package.json.')
     }
@@ -160,14 +172,21 @@ try {
 
     if (-not [string]::IsNullOrWhiteSpace($SourceExtension)) {
         $sourceRoot = [System.IO.Path]::GetFullPath($SourceExtension)
+        # Manifest paths are lower-cased; resolve them case-insensitively so the
+        # check also works on case-sensitive file systems.
+        $sourceIndex = @{}
+        foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Force) {
+            $key = $file.FullName.Substring($sourceRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar).Length).TrimStart('\', '/').Replace('\', '/').ToLowerInvariant()
+            $sourceIndex[$key] = $file.FullName
+        }
         foreach ($record in $manifest.files) {
-            $relative = ([string]$record.path).Replace('/', '\')
-            if ($relative -ieq 'bin\intentlens.exe') { continue }
-            $sourcePath = Join-Path $sourceRoot $relative
-            if ($relative -ieq 'license.txt' -and -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-                $sourcePath = Join-Path $sourceRoot 'LICENSE'
+            $relative = ([string]$record.path).Replace('\', '/').ToLowerInvariant()
+            if ($relative -eq $cliEntry) { continue }
+            $sourcePath = $sourceIndex[$relative]
+            if ($relative -eq 'license.txt' -and -not $sourcePath) {
+                $sourcePath = $sourceIndex['license']
             }
-            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            if (-not $sourcePath) {
                 $errors.Add("Source file missing: $relative")
                 continue
             }
@@ -188,7 +207,7 @@ try {
             $errors.Add('Go source tree aggregate hash does not match the release manifest.')
         }
         foreach ($record in $goRecords) {
-            $relative = ([string]$record.path).Replace('/', '\')
+            $relative = ([string]$record.path).Replace('/', [System.IO.Path]::DirectorySeparatorChar)
             $sourcePath = Join-Path $repoRoot $relative
             if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
                 $errors.Add("Go source missing: $relative")
@@ -200,7 +219,7 @@ try {
             }
             else { $goSourcesVerified++ }
         }
-        $lockPath = Join-Path $repoRoot 'scripts\release-tools\package-lock.json'
+        $lockPath = [System.IO.Path]::Combine($repoRoot, 'scripts', 'release-tools', 'package-lock.json')
         if (Test-Path -LiteralPath $lockPath -PathType Leaf) {
             $lockHash = Get-FileSha256 $lockPath
             if ($lockHash -ne ([string]$manifest.packaging.vsceLockSha256).ToLowerInvariant()) {
