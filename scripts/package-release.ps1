@@ -140,6 +140,8 @@ try {
     }
     $binDirectory = Split-Path -Parent $cliPath
     New-Item -ItemType Directory -Path $binDirectory -Force | Out-Null
+    # Drop local development builds so each VSIX carries only its target CLI.
+    Get-ChildItem -LiteralPath $binDirectory -Force | Remove-Item -Recurse -Force
 
     $oldGoos = $env:GOOS
     $oldGoarch = $env:GOARCH
