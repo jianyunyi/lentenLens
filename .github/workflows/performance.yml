@@ -11,132 +11,30 @@ permissions:
   contents: read
 
 jobs:
-  benchmark:
-    name: Go Benchmarks
+  budget:
+    name: Performance Budget
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
+
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24.x'
-      
-      - name: Run benchmarks
+          go-version: '1.25.x'
+
+      - name: Enforce budgets (docs/production/performance-slo.md)
+        env:
+          INTENTLENS_PERF_GATE: '1'
+        run: go test -run '^TestPerformanceBudget$' -count=1 -v ./internal/app
+
+      - name: Record benchmarks
         run: |
-          go test -bench=. -benchmem -benchtime=5s ./... | tee benchmark.txt
-      
-      - name: Compare with base branch
-        if: github.event_name == 'pull_request'
-        run: |
-          git checkout ${{ github.base_ref }}
-          go test -bench=. -benchmem -benchtime=5s ./... | tee benchmark-base.txt
-          git checkout -
-          
-          echo "## Benchmark Comparison" >> $GITHUB_STEP_SUMMARY
-          echo "### Current PR" >> $GITHUB_STEP_SUMMARY
+          go test -run '^$' -bench . -benchtime=3x -benchmem ./internal/app ./internal/capture | tee benchmark.txt
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat benchmark.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "### Base Branch" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat benchmark-base.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-      
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+
+      - uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmark*.txt
-          retention-days: 30
-
-  capture-performance:
-    name: Capture Performance Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-      
-      - name: Run synthetic capture benchmark
-        run: |
-          echo "## Capture Performance" >> $GITHUB_STEP_SUMMARY
-          go test -run '^$' -bench '^BenchmarkTakeGoSynthetic$' -benchtime=1x -benchmem ./internal/capture | tee capture-perf.txt
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat capture-perf.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-      
-      - name: Check performance regression
-        run: |
-          # Extract ns/op from benchmark
-          NS_PER_OP=$(grep BenchmarkTakeGoSynthetic capture-perf.txt | awk '{print $3}')
-          echo "Current performance: $NS_PER_OP ns/op"
-          
-          # Define threshold (adjust as needed)
-          # This is a placeholder - you should set realistic thresholds
-          echo "✅ Performance test completed" >> $GITHUB_STEP_SUMMARY
-
-  memory-profile:
-    name: Memory Profiling
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-      
-      - name: Run memory profiling
-        run: |
-          go test -memprofile=mem.prof -bench=. -benchtime=1s ./internal/capture
-          go tool pprof -text mem.prof > mem-profile.txt
-      
-      - name: Check for memory leaks
-        run: |
-          echo "## Memory Profile" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          head -n 20 mem-profile.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-      
-      - name: Upload memory profile
-        uses: actions/upload-artifact@v4
-        with:
-          name: memory-profile
-          path: |
-            mem.prof
-            mem-profile.txt
-          retention-days: 30
-
-  cpu-profile:
-    name: CPU Profiling
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.x'
-      
-      - name: Run CPU profiling
-        run: |
-          go test -cpuprofile=cpu.prof -bench=. -benchtime=1s ./internal/capture
-          go tool pprof -text cpu.prof > cpu-profile.txt
-      
-      - name: Analyze CPU usage
-        run: |
-          echo "## CPU Profile" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          head -n 20 cpu-profile.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-      
-      - name: Upload CPU profile
-        uses: actions/upload-artifact@v4
-        with:
-          name: cpu-profile
-          path: |
-            cpu.prof
-            cpu-profile.txt
+          path: benchmark.txt
           retention-days: 30

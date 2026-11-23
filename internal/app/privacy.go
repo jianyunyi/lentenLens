@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"intentlens/internal/capture"
 	"os"
 	"path/filepath"
@@ -24,6 +25,42 @@ func (a *App) scrubExcluded() error {
 	if e != nil {
 		return e
 	}
+	// One CLI process scrubs in Open and again in most commands; skip the repeat
+	// pass while the policy and every record's name, size and mtime are unchanged.
+	before, e := scrubSignature(policy, entries)
+	if e != nil {
+		return e
+	}
+	if before == a.scrubbedState {
+		return nil
+	}
+	if e = a.scrubEntries(policy, entries); e != nil {
+		return e
+	}
+	if entries, e = os.ReadDir(a.State); e != nil {
+		return e
+	}
+	a.scrubbedState, e = scrubSignature(policy, entries)
+	return e
+}
+
+func scrubSignature(policy capture.Policy, entries []os.DirEntry) (string, error) {
+	var b strings.Builder
+	b.WriteString(policy.Hash())
+	for _, ent := range entries {
+		info, err := ent.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "\x00%s\x00%d\x00%d", ent.Name(), info.Size(), info.ModTime().UnixNano())
+	}
+	return hash(b.String()), nil
+}
+
+func (a *App) scrubEntries(policy capture.Policy, entries []os.DirEntry) error {
 	for _, ent := range entries {
 		name := ent.Name()
 		switch {

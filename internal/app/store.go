@@ -26,6 +26,7 @@ type App struct {
 	exerciseRun       func(context.Context, explain.Config, explain.Usage, string, string) (string, explain.Usage, error)
 	Root              string
 	State             string
+	scrubbedState     string // Policy and record listing last scrubbed by this process.
 
 	// EditorModelTarget is set only for a key supplied by the VS Code extension.
 	EditorModelTarget *EditorModelTarget
