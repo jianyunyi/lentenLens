@@ -24,20 +24,16 @@ jobs:
       fail-fast: false
       matrix:
         language: [ 'go', 'javascript' ]
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           queries: +security-and-quality
-      
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
-      
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
@@ -51,7 +47,7 @@ jobs:
           {
             echo "## GitHub Code Scanning upload: skipped"
             echo
-            echo "CodeQL analysis runs locally in this workflow. Uploading SARIF to the GitHub Security tab is not available for this repository, so no Code Scanning upload was attempted. The SARIF artifact is retained below when produced. This is not a successful GitHub Security-tab scan."
+            echo "CodeQL analysis runs locally in this workflow. Uploading SARIF to the GitHub Security tab is not available for this repository, so no Code Scanning upload was attempted. The SARIF artifact is retained below when produced. High/critical findings fail this job."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve CodeQL SARIF as workflow artifact
         if: always()
@@ -63,29 +59,53 @@ jobs:
             codeql-processed-sarif/
           if-no-files-found: warn
           retention-days: 14
+      - name: Fail on high/critical CodeQL findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(codeql-results/*.sarif)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No CodeQL SARIF produced; failing closed."
+            exit 1
+          fi
+          total=0
+          for f in "${files[@]}"; do
+            count=$(jq '[.runs[] as $r
+              | $r.results[]? as $res
+              | ([$r.tool.driver.rules[]?, ($r.tool.extensions[]?.rules[]?)]
+                  | map(select(.id == $res.ruleId)) | first
+                  | (.properties["security-severity"] // "0") | tonumber)
+              | select(. >= 7.0)] | length' "$f")
+            echo "$f: $count high/critical finding(s)"
+            total=$((total + count))
+          done
+          echo "### CodeQL high/critical findings: $total" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$total" -gt 0 ]; then
+            jq -r '.runs[].results[]? | "\(.ruleId): \(.message.text) @ \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)"' "${files[@]}" | head -50
+            exit 1
+          fi
 
   gosec:
     name: Go Security Scan (gosec)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.0'
-      
       - name: Run Gosec Security Scanner
         uses: securego/gosec@244f1f6f4d1d0d14f89e79a73dab1219eabb5228 # pin of master @ 2026-11-20
         with:
-          args: '-fmt sarif -out gosec-results.sarif ./...'
-      
+          # 只有 high 严重度（且至少 medium 置信度）的问题会让作业失败
+          args: '-severity high -confidence medium -fmt sarif -out gosec-results.sarif ./...'
       - name: Explain skipped GitHub Security upload
         if: always()
         run: |
           {
             echo "## GitHub Security upload: skipped"
             echo
-            echo "Gosec SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+            echo "Gosec SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. High-severity findings fail this job; the SARIF is retained as a workflow artifact."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Gosec SARIF as workflow artifact
         if: always()
@@ -96,30 +116,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  nancy:
-    name: Go Dependency Vulnerability Scan (nancy)
+  govulncheck:
+    name: Go Vulnerability Scan (govulncheck)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25.0'
-      
-      - name: Install nancy
-        run: go install github.com/sonatype-nexus-community/nancy@latest
-      
-      - name: Run nancy
+          # 与 scripts/release-config.json 的 goVersion 保持一致：扫描实际发布二进制所用的标准库
+          go-version: '1.26.3'
+          cache: false
+      - name: Install govulncheck (pinned)
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - name: Run govulncheck
         shell: bash
         run: |
           set -o pipefail
-          go list -json -deps ./... | nancy sleuth 2>&1 | tee nancy-results.txt
-      - name: Preserve nancy scan output
+          # 发现可达漏洞时退出码为 3，作业失败
+          govulncheck -show verbose ./... 2>&1 | tee govulncheck-results.txt
+      - name: Preserve govulncheck output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nancy-results
-          path: nancy-results.txt
+          name: govulncheck-results
+          path: govulncheck-results.txt
           if-no-files-found: warn
           retention-days: 14
 
@@ -131,11 +151,9 @@ jobs:
         directory: ['extension', 'scripts/release-tools']
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      
       - name: Run npm audit (${{ matrix.directory }})
         working-directory: ${{ matrix.directory }}
         run: |
@@ -146,7 +164,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - name: Run Trivy vulnerability scanner in repo mode
         uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # pin of master @ 2026-11-20
         with:
@@ -155,14 +172,15 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-      
+          ignore-unfixed: true
+          exit-code: '1'
       - name: Explain skipped GitHub Security upload
         if: always()
         run: |
           {
             echo "## GitHub Security upload: skipped"
             echo
-            echo "Trivy SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+            echo "Trivy SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. CRITICAL/HIGH findings with an available fix fail this job; the SARIF is retained as a workflow artifact."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Trivy SARIF as workflow artifact
         if: always()
@@ -180,9 +198,9 @@ jobs:
       image: returntocorp/semgrep
     steps:
       - uses: actions/checkout@v4
-      
       - name: Run Semgrep
-        run: semgrep scan --sarif --output=semgrep-results.sarif --config=auto
+        # --error：有发现时非 0 退出；--severity ERROR：仅 ERROR 级规则参与阻断
+        run: semgrep scan --sarif --output=semgrep-results.sarif --config=auto --error --severity ERROR
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
       - name: Explain skipped GitHub Security upload
@@ -191,7 +209,7 @@ jobs:
           {
             echo "## GitHub Security upload: skipped"
             echo
-            echo "Semgrep SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. The scan still runs; its SARIF is retained as a workflow artifact when produced. This is not a successful Security-tab scan."
+            echo "Semgrep SARIF is not uploaded to the GitHub Security tab because that feature is unavailable for this repository. ERROR-severity findings fail this job; the SARIF is retained as a workflow artifact."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Semgrep SARIF as workflow artifact
         if: always()
@@ -207,14 +225,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.0'
-      
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
-      
+        run: go install github.com/google/go-licenses@v1.6.0
       - name: Check licenses
         run: go-licenses check ./...
 
@@ -228,7 +243,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:

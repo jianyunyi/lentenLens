@@ -25,3 +25,5 @@ intentlens.exe
 
 # PR 模板应该在 .github 目录
 # PR-TEMPLATE.md
+extension/coverage/
+extension/.vscode-test/

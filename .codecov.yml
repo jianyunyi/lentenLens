@@ -13,10 +13,29 @@ coverage:
         target: 70%
         threshold: 2%
         base: auto
+      go:
+        flags: [go]
+        target: 70%
+        threshold: 2%
+      extension:
+        flags: [extension]
+        target: auto
+        threshold: 2%
     patch:
       default:
         target: 75%
         threshold: 5%
+
+flags:
+  go:
+    paths:
+      - cmd/
+      - internal/
+    carryforward: true
+  extension:
+    paths:
+      - extension/src/
+    carryforward: true
 
 comment:
   layout: "reach,diff,flags,tree"
@@ -27,7 +46,11 @@ comment:
 
 ignore:
   - "**/*_test.go"
-  - "extension/**"
+  - "extension/test/**"
+  - "extension/src/*.backup"
+  - "extension/src/*.phase1"
+  - "extension/src/taskmanagement.js"
+  - "extension/src/taskpanel.js"
   - "scripts/**"
   - ".work/**"
   - "docs/**"

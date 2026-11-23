@@ -26,6 +26,8 @@ linters:
       check-blank: true
     govet:
       enable-all: true
+      disable:
+        - fieldalignment # 结构体字段排序建议，噪音大、与正确性无关
     gocyclo:
       min-complexity: 15
     dupl:
@@ -80,6 +82,10 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false
+  # 已启用（2026-11-23 落地时实测全量约 130 条历史问题：gocritic 50、gocyclo 45、
+  # govet 26、errcheck 4、gosec 2、unused 2、staticcheck 1、prealloc 1）：
+  # 先只阻断新引入的问题，历史问题逐步清理后去掉这行恢复全量阻断。
+  new-from-merge-base: main
 
 formatters:
   enable:
