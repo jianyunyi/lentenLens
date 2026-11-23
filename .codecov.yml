@@ -49,8 +49,6 @@ ignore:
   - "extension/test/**"
   - "extension/src/*.backup"
   - "extension/src/*.phase1"
-  - "extension/src/taskmanagement.js"
-  - "extension/src/taskpanel.js"
   - "scripts/**"
   - ".work/**"
   - "docs/**"

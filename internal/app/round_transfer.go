@@ -62,7 +62,7 @@ type RoundPage struct {
 
 func summaryForRound(round Round) RoundSummary {
 	receipt := ReceiptForRound(round)
-	return RoundSummary{ID: receipt.ID, Session: receipt.Session, Started: receipt.Started, Ended: receipt.Ended, ChangeCount: receipt.ChangeCount, AddedCount: receipt.AddedCount, ModifiedCount: receipt.ModifiedCount, DeletedCount: receipt.DeletedCount, OmittedCount: receipt.OmittedCount, Source: receipt.Source}
+	return RoundSummary(receipt)
 }
 
 // ListPage returns compact summaries. The decimal cursor is an opaque offset

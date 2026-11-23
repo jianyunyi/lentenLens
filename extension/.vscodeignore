@@ -8,6 +8,4 @@ test-errors.log
 src/*.backup
 src/*.phase1
 src/extension-part1.txt
-src/taskmanagement.js
-src/taskpanel.js
 coverage/**
