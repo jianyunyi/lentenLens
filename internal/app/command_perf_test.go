@@ -88,6 +88,29 @@ func TestScrubMemoRescrubsAfterPolicyChange(t *testing.T) {
 	}
 }
 
+func TestScrubMemoRescrubsAfterEvidenceBecomesLink(t *testing.T) {
+	root, state := seedCommandHistory(t, 2)
+	a, err := Open(root, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "f0000.go")
+	target := filepath.Join(t.TempDir(), "outside.go")
+	if err := os.Rename(file, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, file); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	id := fmt.Sprintf("%024x", 1)
+	if _, err := a.ExplanationByID(id); err == nil {
+		t.Fatal("explanation citing a linked file was still returned")
+	}
+	if _, err := os.Stat(filepath.Join(a.State, "explanation-"+id+".json")); !os.IsNotExist(err) {
+		t.Fatalf("explanation citing a linked file kept: %v", err)
+	}
+}
+
 // TestPerformanceBudget enforces docs/production/performance-slo.md. It is
 // opt-in because shared CI runners are noisy; the budgets carry 3x headroom
 // over the Linux reference measurement.

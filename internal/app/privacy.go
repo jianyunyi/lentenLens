@@ -32,8 +32,24 @@ func (a *App) scrubExcluded() error {
 		return e
 	}
 	if before == a.scrubbedState {
-		return nil
+		// Evidence admission also depends on project link state, which the
+		// signature cannot see; re-check every cited path.
+		unchanged := true
+		for p := range a.scrubbedEvidence {
+			ok, err := capture.Allowed(a.Root, p)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				unchanged = false
+				break
+			}
+		}
+		if unchanged {
+			return nil
+		}
 	}
+	a.scrubbedState, a.scrubbedEvidence = "", map[string]struct{}{}
 	if e = a.scrubEntries(policy, entries); e != nil {
 		return e
 	}
@@ -108,6 +124,9 @@ func (a *App) scrubEntries(policy capture.Policy, entries []os.DirEntry) error {
 				allowed, err := a.evidenceAllowed(saved.Evidence[i])
 				if err != nil {
 					return err
+				}
+				if saved.Evidence[i].File != "" || codeEvidence(saved.Evidence[i]) {
+					a.scrubbedEvidence[saved.Evidence[i].File] = struct{}{}
 				}
 				if !allowed {
 					if removeErr := os.Remove(filepath.Join(a.State, name)); removeErr != nil {
