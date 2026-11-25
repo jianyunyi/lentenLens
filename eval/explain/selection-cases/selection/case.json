@@ -1,0 +1,411 @@
+{
+  "file": "selection.go",
+  "question": "Explain only the selected expression and intersecting diagnostics.",
+  "expect": [],
+  "forbid": [],
+  "selection": {
+    "mode": "selection_only",
+    "freshness": "missing",
+    "persist_result": false,
+    "prescan_cache": {
+      "retained": false,
+      "separate_authorization_required": true,
+      "authorized": false
+    },
+    "range": {
+      "start_line": 3,
+      "start_column": 1,
+      "end_line": 3,
+      "end_column": 17
+    },
+    "diagnostics": [
+      {
+        "severity": "error",
+        "message": "fixture diagnostic intersects the selected return expression",
+        "range": {
+          "start_line": 3,
+          "start_column": 8,
+          "end_line": 3,
+          "end_column": 17
+        }
+      },
+      {
+        "severity": "error",
+        "message": "non-intersecting diagnostic must be omitted",
+        "range": {
+          "start_line": 0,
+          "start_column": 0,
+          "end_line": 0,
+          "end_column": 14
+        }
+      }
+    ],
+    "expected_evidence": [
+      {
+        "id": "selected-code",
+        "type": "selected_code",
+        "provenance": {
+          "file": "selection.go",
+          "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+          "start_line": 4,
+          "end_line": 4
+        }
+      },
+      {
+        "id": "selected-diagnostics",
+        "type": "diagnostic",
+        "provenance": {
+          "file": "selection.go",
+          "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+          "start_line": 4,
+          "end_line": 4
+        }
+      }
+    ],
+    "forbid": [
+      {
+        "id": "unselected-full-text",
+        "kind": "unselected_full_text",
+        "canary": "UNSELECTED_FILE_FULL_TEXT_CANARY"
+      },
+      {
+        "id": "unselected-same-file-content",
+        "kind": "unselected_full_text",
+        "canary": "SAME_FILE_UNSELECTED_CANARY"
+      },
+      {
+        "id": "absolute-path",
+        "kind": "absolute_path"
+      },
+      {
+        "id": "excluded-file-content",
+        "kind": "excluded_content",
+        "canary": "EXCLUDED_FILE_CONTENT_CANARY"
+      },
+      {
+        "id": "prescan-relation-in-default-mode",
+        "kind": "prescan_relation",
+        "canary": "PRESCAN_RELATION_CANARY"
+      },
+      {
+        "id": "candidate-not-fact",
+        "kind": "candidate_as_fact",
+        "canary": "NAME_CANDIDATE_AS_RESOLVED_CALLER_CANARY"
+      }
+    ],
+    "pending_variants": [
+      {
+        "name": "related-unknown",
+        "mode": "related",
+        "freshness": "unknown",
+        "freshness_label": "freshness_unverified",
+        "refresh_hint": "explicit_refresh",
+        "refresh_hint_required": true,
+        "persist_result": false,
+        "prescan_cache": {
+          "retained": true,
+          "separate_authorization_required": true,
+          "authorized": true
+        },
+        "expected_evidence": [
+          {
+            "id": "selected-code",
+            "type": "selected_code",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "selected-diagnostics",
+            "type": "diagnostic",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "snapshot-direct-edge",
+            "type": "code_relation",
+            "support_tier": "resolved_direct",
+            "claim_status": "uncertain",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "related.go",
+              "hash": "b367a7f83122df1beee78d0303a68b5d46977d0c76a8d2bd8319e3bbc9f90203",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "document-name-mention",
+            "type": "documentation",
+            "support_tier": "doc_mention",
+            "claim_status": "uncertain",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "design.md",
+              "hash": "6f6304df44e9c3a06601a1b49391bb7d566f794d045f16302a1aab296a28a1fc",
+              "start_line": 3,
+              "end_line": 3
+            }
+          }
+        ],
+        "forbid": [
+          {
+            "id": "candidate-as-fact",
+            "kind": "candidate_as_fact",
+            "canary": "NAME_CANDIDATE_AS_RESOLVED_CALLER_CANARY"
+          },
+          {
+            "id": "unapproved-evidence",
+            "kind": "unapproved_evidence"
+          }
+        ],
+        "authorized_evidence_types": [
+          "code_relation",
+          "documentation"
+        ],
+        "authorization": {
+          "related_send_authorized": true,
+          "provider": "openai-compatible",
+          "base_url": "https://model.invalid/v1",
+          "version": "fixture-consent-v1"
+        }
+      },
+      {
+        "name": "related-unknown-insufficient-anchor",
+        "mode": "related",
+        "freshness": "unknown",
+        "freshness_label": "freshness_unverified",
+        "refresh_hint": "explicit_refresh",
+        "code_anchor_status": "insufficient",
+        "refresh_hint_required": true,
+        "persist_result": false,
+        "prescan_cache": {
+          "retained": true,
+          "separate_authorization_required": true,
+          "authorized": true
+        },
+        "expected_evidence": [
+          {
+            "id": "selected-code",
+            "type": "selected_code",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "selected-diagnostics",
+            "type": "diagnostic",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "safe-document-name-mention",
+            "type": "documentation",
+            "support_tier": "doc_mention",
+            "claim_status": "uncertain",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "design.md",
+              "hash": "6f6304df44e9c3a06601a1b49391bb7d566f794d045f16302a1aab296a28a1fc",
+              "start_line": 3,
+              "end_line": 3
+            }
+          }
+        ],
+        "forbid": [
+          {
+            "id": "unanchored-code-relation",
+            "kind": "unanchored_code_relation"
+          },
+          {
+            "id": "unapproved-evidence",
+            "kind": "unapproved_evidence"
+          }
+        ],
+        "authorized_evidence_types": [
+          "code_relation",
+          "documentation"
+        ],
+        "authorization": {
+          "related_send_authorized": true,
+          "provider": "openai-compatible",
+          "base_url": "https://model.invalid/v1",
+          "version": "fixture-consent-v1"
+        }
+      },
+      {
+        "name": "related-hit-support-tiers",
+        "mode": "related",
+        "freshness": "hit",
+        "freshness_label": "verified_at_snapshot",
+        "refresh_hint": "none",
+        "refresh_hint_required": false,
+        "persist_result": false,
+        "prescan_cache": {
+          "retained": true,
+          "separate_authorization_required": true,
+          "authorized": true
+        },
+        "expected_evidence": [
+          {
+            "id": "selected-code",
+            "type": "selected_code",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "selected-diagnostics",
+            "type": "diagnostic",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "snapshot-direct-edge",
+            "type": "code_relation",
+            "support_tier": "resolved_direct",
+            "claim_status": "supported",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "related.go",
+              "hash": "b367a7f83122df1beee78d0303a68b5d46977d0c76a8d2bd8319e3bbc9f90203",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "document-name-mention",
+            "type": "documentation",
+            "support_tier": "doc_mention",
+            "claim_status": "uncertain",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "design.md",
+              "hash": "6f6304df44e9c3a06601a1b49391bb7d566f794d045f16302a1aab296a28a1fc",
+              "start_line": 3,
+              "end_line": 3
+            }
+          },
+          {
+            "id": "document-explicit-decision",
+            "type": "documentation",
+            "support_tier": "doc_decision",
+            "claim_status": "supported",
+            "snapshot_temporal": true,
+            "provenance": {
+              "file": "design.md",
+              "hash": "6f6304df44e9c3a06601a1b49391bb7d566f794d045f16302a1aab296a28a1fc",
+              "start_line": 7,
+              "end_line": 7
+            }
+          }
+        ],
+        "forbid": [
+          {
+            "id": "candidate-as-fact",
+            "kind": "candidate_as_fact",
+            "canary": "NAME_CANDIDATE_AS_RESOLVED_CALLER_CANARY",
+            "support_tier": "name_candidate",
+            "claim_status": "supported"
+          },
+          {
+            "id": "unapproved-evidence",
+            "kind": "unapproved_evidence"
+          }
+        ],
+        "authorized_evidence_types": [
+          "code_relation",
+          "documentation"
+        ],
+        "authorization": {
+          "related_send_authorized": true,
+          "provider": "openai-compatible",
+          "base_url": "https://model.invalid/v1",
+          "version": "fixture-consent-v1"
+        }
+      },
+      {
+        "name": "related-stale",
+        "mode": "related",
+        "freshness": "stale",
+        "freshness_label": "stale",
+        "refresh_hint": "explicit_refresh",
+        "refresh_hint_required": true,
+        "persist_result": false,
+        "prescan_cache": {
+          "retained": true,
+          "separate_authorization_required": true,
+          "authorized": true
+        },
+        "expected_evidence": [
+          {
+            "id": "selected-code",
+            "type": "selected_code",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          },
+          {
+            "id": "selected-diagnostics",
+            "type": "diagnostic",
+            "provenance": {
+              "file": "selection.go",
+              "hash": "0e185139ac65b0d42fd45963ddca435e5a192e3576d3396a403fcf375634e06d",
+              "start_line": 4,
+              "end_line": 4
+            }
+          }
+        ],
+        "forbid": [
+          {
+            "id": "old-association",
+            "kind": "prescan_relation"
+          }
+        ],
+        "authorized_evidence_types": [
+          "code_relation",
+          "documentation"
+        ],
+        "authorization": {
+          "related_send_authorized": true,
+          "provider": "openai-compatible",
+          "base_url": "https://model.invalid/v1",
+          "version": "fixture-consent-v1"
+        }
+      }
+    ],
+    "freshness_label": "missing",
+    "refresh_hint": "prescan_required",
+    "authorized_evidence_types": [],
+    "authorization": {
+      "related_send_authorized": false,
+      "provider": "",
+      "base_url": "",
+      "version": ""
+    }
+  }
+}
