@@ -12,18 +12,18 @@ import (
 	"syscall"
 	"time"
 
-	"intentlens/internal/sandbox"
+	"intentlens/internal/noisolation"
 )
 
-// Sandbox implements sandbox.Sandbox for Linux without process isolation.
+// Sandbox implements noisolation.Sandbox for Linux without process isolation.
 type Sandbox struct {
-	cfg        sandbox.Config
+	cfg        noisolation.Config
 	cgroupPath string
 }
 
 // Run executes the tool with a timeout and filtered environment, without isolation.
-func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*sandbox.Result, error) {
-	result := &sandbox.Result{
+func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*noisolation.Result, error) {
+	result := &noisolation.Result{
 		StartTime: time.Now(),
 	}
 
@@ -94,10 +94,10 @@ func (s *Sandbox) Capabilities() []string {
 }
 
 // NewLinuxSandbox creates a new Linux sandbox.
-func NewLinuxSandbox(cfg sandbox.Config) (sandbox.Sandbox, error) {
+func NewLinuxSandbox(cfg noisolation.Config) (noisolation.Sandbox, error) {
 	// Check if running on Linux
 	if runtime.GOOS != "linux" {
-		return nil, sandbox.NotImplementedError{
+		return nil, noisolation.NotImplementedError{
 			Platform: runtime.GOOS,
 			Feature:  "Linux sandbox",
 		}
@@ -105,14 +105,14 @@ func NewLinuxSandbox(cfg sandbox.Config) (sandbox.Sandbox, error) {
 
 	// Check for cgroup v2
 	if !hasCgroupV2() {
-		return nil, sandbox.UnsupportedError{
+		return nil, noisolation.UnsupportedError{
 			Reason: "cgroup v2 not available; requires Linux 5.8+ or cgroup v2 explicitly enabled",
 		}
 	}
 
 	// Check for seccomp support
 	if !hasSeccomp() {
-		return nil, sandbox.UnsupportedError{
+		return nil, noisolation.UnsupportedError{
 			Reason: "seccomp-bpf not available",
 		}
 	}

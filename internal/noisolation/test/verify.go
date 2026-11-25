@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"intentlens/internal/sandbox"
+	"intentlens/internal/noisolation"
 )
 
 // VerifyResult contains the result of a sandbox verification test.
@@ -25,7 +25,7 @@ func NewVerifier() *Verifier {
 }
 
 // VerifyExecutionSuccess checks that code executed successfully.
-func (v *Verifier) VerifyExecutionSuccess(result *sandbox.Result) VerifyResult {
+func (v *Verifier) VerifyExecutionSuccess(result *noisolation.Result) VerifyResult {
 	if result.ExitCode != 0 {
 		return VerifyResult{
 			Passed:           false,
@@ -45,7 +45,7 @@ func (v *Verifier) VerifyExecutionSuccess(result *sandbox.Result) VerifyResult {
 }
 
 // VerifyNoTimeout checks that execution did not timeout.
-func (v *Verifier) VerifyNoTimeout(result *sandbox.Result) VerifyResult {
+func (v *Verifier) VerifyNoTimeout(result *noisolation.Result) VerifyResult {
 	if result.Timeout {
 		return VerifyResult{
 			Passed:           false,
@@ -65,7 +65,7 @@ func (v *Verifier) VerifyNoTimeout(result *sandbox.Result) VerifyResult {
 }
 
 // VerifyMemoryLimit checks that memory limit was not exceeded.
-func (v *Verifier) VerifyMemoryLimit(result *sandbox.Result) VerifyResult {
+func (v *Verifier) VerifyMemoryLimit(result *noisolation.Result) VerifyResult {
 	if result.MemoryExceeded {
 		return VerifyResult{
 			Passed:           false,
@@ -85,7 +85,7 @@ func (v *Verifier) VerifyMemoryLimit(result *sandbox.Result) VerifyResult {
 }
 
 // VerifyResourceLimits checks that resource limits were enforced.
-func (v *Verifier) VerifyResourceLimits(result *sandbox.Result) VerifyResult {
+func (v *Verifier) VerifyResourceLimits(result *noisolation.Result) VerifyResult {
 	if result.ResourceLimitExceeded {
 		return VerifyResult{
 			Passed:           false,
@@ -105,7 +105,7 @@ func (v *Verifier) VerifyResourceLimits(result *sandbox.Result) VerifyResult {
 }
 
 // VerifyOutputContains checks that output contains expected text.
-func (v *Verifier) VerifyOutputContains(result *sandbox.Result, expected string) VerifyResult {
+func (v *Verifier) VerifyOutputContains(result *noisolation.Result, expected string) VerifyResult {
 	if !strings.Contains(result.Stdout, expected) {
 		return VerifyResult{
 			Passed:           false,
@@ -124,7 +124,7 @@ func (v *Verifier) VerifyOutputContains(result *sandbox.Result, expected string)
 }
 
 // VerifyOutputExcludes checks that output does NOT contain text.
-func (v *Verifier) VerifyOutputExcludes(result *sandbox.Result, forbidden string) VerifyResult {
+func (v *Verifier) VerifyOutputExcludes(result *noisolation.Result, forbidden string) VerifyResult {
 	if strings.Contains(result.Stdout, forbidden) {
 		return VerifyResult{
 			Passed:           false,
@@ -143,7 +143,7 @@ func (v *Verifier) VerifyOutputExcludes(result *sandbox.Result, forbidden string
 }
 
 // VerifyStderrExcludes checks that stderr does NOT contain text.
-func (v *Verifier) VerifyStderrExcludes(result *sandbox.Result, forbidden string) VerifyResult {
+func (v *Verifier) VerifyStderrExcludes(result *noisolation.Result, forbidden string) VerifyResult {
 	if strings.Contains(result.Stderr, forbidden) {
 		return VerifyResult{
 			Passed:           false,
@@ -162,7 +162,7 @@ func (v *Verifier) VerifyStderrExcludes(result *sandbox.Result, forbidden string
 }
 
 // VerifyBlocked checks that an operation was blocked (error in output or stderr).
-func (v *Verifier) VerifyBlocked(result *sandbox.Result, operationName string) VerifyResult {
+func (v *Verifier) VerifyBlocked(result *noisolation.Result, operationName string) VerifyResult {
 	blockedIndicators := []string{"Blocked", "Permission denied", "not allowed", "EACCES", "EPERM"}
 
 	found := false
@@ -191,7 +191,7 @@ func (v *Verifier) VerifyBlocked(result *sandbox.Result, operationName string) V
 }
 
 // VerifyDurationWithin checks that execution completed within time window.
-func (v *Verifier) VerifyDurationWithin(result *sandbox.Result, minMs, maxMs int64) VerifyResult {
+func (v *Verifier) VerifyDurationWithin(result *noisolation.Result, minMs, maxMs int64) VerifyResult {
 	if result.DurationMS < minMs || result.DurationMS > maxMs {
 		return VerifyResult{
 			Passed:           false,

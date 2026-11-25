@@ -9,18 +9,18 @@ import (
 	"strings"
 	"time"
 
-	"intentlens/internal/sandbox"
+	"intentlens/internal/noisolation"
 )
 
-// Sandbox implements sandbox.Sandbox for Windows using AppContainer.
+// Sandbox implements noisolation.Sandbox for Windows using AppContainer.
 type Sandbox struct {
-	cfg sandbox.Config
+	cfg noisolation.Config
 	// TODO: AppContainer-specific fields
 }
 
 // Run executes the tool in a sandboxed Windows AppContainer environment.
-func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*sandbox.Result, error) {
-	result := &sandbox.Result{
+func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*noisolation.Result, error) {
+	result := &noisolation.Result{
 		StartTime: time.Now(),
 	}
 
@@ -55,17 +55,17 @@ func (s *Sandbox) Capabilities() []string {
 }
 
 // NewWindowsSandbox creates a new Windows sandbox.
-func NewWindowsSandbox(cfg sandbox.Config) (sandbox.Sandbox, error) {
+func NewWindowsSandbox(cfg noisolation.Config) (noisolation.Sandbox, error) {
 	// Check Windows version
 	if !isWindowsVersionSupported() {
-		return nil, sandbox.UnsupportedError{
+		return nil, noisolation.UnsupportedError{
 			Reason: "Windows 10 1809 or later required for AppContainer",
 		}
 	}
 
 	// Verify admin privileges
 	if !isRunningAsAdmin() {
-		return nil, sandbox.UnsupportedError{
+		return nil, noisolation.UnsupportedError{
 			Reason: "Administrator privileges required for AppContainer",
 		}
 	}

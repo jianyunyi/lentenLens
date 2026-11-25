@@ -1,5 +1,6 @@
-// Package sandbox provides OS-level sandboxing for exercise execution.
-package sandbox
+// Package noisolation runs exercise tools WITHOUT any OS-level isolation.
+// It is not a security boundary and must not be wired into an execution path.
+package noisolation
 
 import (
 	"context"
