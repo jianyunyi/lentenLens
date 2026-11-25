@@ -92,13 +92,7 @@ jobs:
       - name: Install extension dev dependencies
         working-directory: extension
         run: npm ci
-      - name: Extension tests (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: extension
-        run: npm.cmd test
-      - name: Extension tests with coverage gate (Unix)
-        if: runner.os != 'Windows'
+      - name: Extension tests with coverage gate
         working-directory: extension
         run: npm run test:coverage
       - name: Extension syntax checks (Windows)
