@@ -152,6 +152,12 @@ func runCase(dir string, cfg explain.Config, key string, timeout time.Duration) 
 		r.Error = "case.json: " + err.Error()
 		return r
 	}
+	// Selection cases have a separate contract and must be routed before the
+	// legacy functionLine path. Their runner and scorer are intentionally pending 8b.
+	if c.Selection != nil {
+		r.Error = "selection case recognized; execution is not implemented (pending step 8b)"
+		return r
+	}
 	if !filepath.IsLocal(c.File) {
 		r.Error = fmt.Sprintf("case file %q must be a relative path inside the case", c.File)
 		return r

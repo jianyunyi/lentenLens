@@ -87,6 +87,56 @@ func TestExplainSelectionCombinesOnlyOverlappingErrorsWithPositionsAndDoesNotPer
 	}
 }
 
+// D12: response claims and diagnostics are transient; usage accounting remains separate.
+func TestExplainSelectionDefaultModeCanaryDoesNotPersistResultOrRound(t *testing.T) {
+	a, _ := fixture(t)
+	const source = "const selected = 1"
+	const diagnosticMessage = "TS2000: selected expression diagnostic canary"
+	const resultCanary = "SELECTION_RESULT_CANARY_DO_NOT_PERSIST"
+	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid/v1", APIKeyEnv: "INTENTLENS_SELECTION_TEST_KEY", Model: "fixture-model", TokenLimit: 200000, VerificationMode: explain.ModeFast}}
+	if err := a.Configure(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	a.selectionRun = func(_ context.Context, _ explain.Config, usage explain.Usage, _, _ string, evidence []explain.Evidence) (explain.Document, explain.Usage, error) {
+		if len(evidence) != 2 || evidence[0].Kind != "selection" || evidence[0].Source != source || evidence[0].File != "" || evidence[1].Kind != "diagnostics" || evidence[1].File != "" || !strings.Contains(evidence[1].Source, diagnosticMessage) {
+			t.Fatalf("default request must contain selection and intersecting diagnostic only: %+v", evidence)
+		}
+		return explain.Document{Claims: []explain.Claim{{ID: "c1", Text: resultCanary, Kind: "behavior", EvidenceIDs: []string{"selected-code"}}}}, usage, nil
+	}
+	rangeValue := explain.EditorRange{Start: explain.EditorPosition{}, End: explain.EditorPosition{Character: len(source)}}
+	diagnostic := explain.EditorDiagnostic{Severity: "error", Message: diagnosticMessage, Range: explain.EditorRange{Start: explain.EditorPosition{}, End: explain.EditorPosition{Character: 6}}}
+	result, err := a.ExplainSelection(context.Background(), "main.ts", source, "typescript", 1, 1, 1, rangeValue, []explain.EditorDiagnostic{diagnostic}, "mock-only-key")
+	if err != nil || len(result.Claims) != 1 || result.Claims[0].Text != resultCanary {
+		t.Fatalf("unexpected transient selection response: result=%+v err=%v", result, err)
+	}
+	entries, err := os.ReadDir(a.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "explanation-") || strings.HasPrefix(entry.Name(), "round-") {
+			t.Fatalf("selection created persisted history or round storage %q", entry.Name())
+		}
+		body, readErr := os.ReadFile(filepath.Join(a.State, entry.Name()))
+		if readErr == nil && (strings.Contains(string(body), source) || strings.Contains(string(body), diagnosticMessage) || strings.Contains(string(body), resultCanary)) {
+			t.Fatalf("selection, diagnostic, or result persisted in %q", entry.Name())
+		}
+	}
+}
+
+// PENDING: execute only after steps 1–6 add authorized association lookup and its
+// provenance-bearing evidence contract. D01/D02/D03/D08/D12; do not weaken these
+// assertions to match the current selection API.
+func TestExplainSelectionRelatedModeContractPendingSteps1Through6(t *testing.T) {
+	t.Skip("PENDING steps 1–6: related mode must send selection, intersecting diagnostics, and only authorized relation evidence with source/hash/support tier; exclude unapproved evidence; keep result transient and prescan retention separately authorized")
+}
+
+// PENDING: step 4 cache/freshness work must supply explicit snapshot time and anchor
+// status before these D04 assertions can execute.
+func TestExplainSelectionUnknownAndStaleFreshnessContractPendingSteps1Through6(t *testing.T) {
+	t.Skip("PENDING steps 1–6: unknown may return snapshot-marked associations labeled freshness-unverified, omits code relations with insufficient anchors, and stale returns no old association while retaining selection/diagnostics and prompting explicit refresh")
+}
+
 func TestExplainSelectionReturnsClearNoErrorsStatus(t *testing.T) {
 	a, _ := fixture(t)
 	cfg := Settings{Model: explain.Config{Enabled: true, Provider: "openai-compatible", BaseURL: "https://model.invalid/v1", APIKeyEnv: "INTENTLENS_SELECTION_TEST_KEY", Model: "fixture-model", TokenLimit: 200000, VerificationMode: explain.ModeFast}}
