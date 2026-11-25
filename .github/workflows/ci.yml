@@ -31,6 +31,24 @@ jobs:
             gofmt -l .
             exit 1
           fi
+      - name: Go version policy check
+        # Policy: go.mod = minimum source version (tested by reliability.yml minimum-go);
+        # release-config goVersion = release toolchain (tested by reliability.yml test,
+        # scanned by govulncheck). Every workflow go-version must be one of the two.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mod=$(awk '$1=="go"{print $2; exit}' go.mod)
+          cfg_mod=$(node -p "require('./scripts/release-config.json').goModVersion")
+          cfg_rel=$(node -p "require('./scripts/release-config.json').goVersion")
+          echo "go.mod=$mod goModVersion=$cfg_mod goVersion=$cfg_rel"
+          if [ "$mod" != "$cfg_mod" ]; then
+            echo "go.mod ($mod) != release-config goModVersion ($cfg_mod)"; exit 1
+          fi
+          bad=$(grep -rnE "go-version: *'[^']+'" .github/workflows | grep -vE "go-version: *'($mod|$cfg_rel)'" || true)
+          if [ -n "$bad" ]; then
+            echo "Workflow go-version must be $mod (minimum) or $cfg_rel (release):"; echo "$bad"; exit 1
+          fi
       - name: Go vet
         run: go vet ./...
       - name: Install staticcheck
