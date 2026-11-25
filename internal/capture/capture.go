@@ -4,6 +4,7 @@ package capture
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/format"
@@ -18,6 +19,8 @@ import (
 
 const MaxFileBytes = 1 << 20
 const MaxSnapshotBytes = 16 << 20
+const MaxGoFiles = 10_000
+const MaxDocsFiles = 2_000
 
 type File struct {
 	Content string `json:"content"`
@@ -33,6 +36,28 @@ type CoverageOmission struct {
 	Reason string `json:"reason"`
 }
 type Coverage struct {
+	Complete        bool                `json:"complete"`
+	Scope           string              `json:"scope"`
+	BudgetBytes     int                 `json:"budget_bytes"`
+	CapturedBytes   int                 `json:"captured_bytes"`
+	OmittedCount    int                 `json:"omitted_count"`
+	ExcludedCount   int                 `json:"excluded_count"`
+	Omitted         []CoverageOmission  `json:"omitted"`
+	Excluded        []CoverageOmission  `json:"excluded,omitempty"`
+	Truncated       bool                `json:"truncated"`
+	OmissionReasons map[string]string   `json:"-"`
+	Components      *CoverageComponents `json:"components,omitempty"`
+}
+
+// CoverageComponents keeps Go and Markdown accounting independent when both
+// snapshots are captured together.
+type CoverageComponents struct {
+	Go   CoverageDetail `json:"go"`
+	Docs CoverageDetail `json:"docs"`
+}
+
+// CoverageDetail is one independently budgeted component of a combined scan.
+type CoverageDetail struct {
 	Complete        bool               `json:"complete"`
 	Scope           string             `json:"scope"`
 	BudgetBytes     int                `json:"budget_bytes"`
@@ -40,6 +65,7 @@ type Coverage struct {
 	OmittedCount    int                `json:"omitted_count"`
 	ExcludedCount   int                `json:"excluded_count"`
 	Omitted         []CoverageOmission `json:"omitted"`
+	Excluded        []CoverageOmission `json:"excluded"`
 	Truncated       bool               `json:"truncated"`
 	OmissionReasons map[string]string  `json:"-"`
 }
@@ -49,6 +75,20 @@ type Change struct {
 	Before *File  `json:"before,omitempty"`
 	After  *File  `json:"after,omitempty"`
 	Folded bool   `json:"folded"`
+}
+
+// MarshalJSON keeps the combined report free of misleading aggregate byte and
+// omission totals. Its Go and docs components are the independent reports.
+func (c Coverage) MarshalJSON() ([]byte, error) {
+	if c.Scope != "go+docs" {
+		type coverageAlias Coverage
+		return json.Marshal(coverageAlias(c))
+	}
+	return json.Marshal(struct {
+		Complete   bool                `json:"complete"`
+		Scope      string              `json:"scope"`
+		Components *CoverageComponents `json:"components"`
+	}{Complete: c.Complete, Scope: c.Scope, Components: c.Components})
 }
 
 func NewFile(content string) File {
@@ -67,24 +107,42 @@ func TakeWithPolicy(root string) (Snapshot, Policy, error) {
 type walkDirFunc func(string, fs.WalkDirFunc) error
 
 func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) {
+	s, p, _, err := takeWithPolicyScope(root, walkDir, captureScope{
+		includesPath: func(string) bool { return true },
+		includesDir:  func(string) bool { return true },
+	}, "")
+	return s, p, err
+}
+
+type captureScope struct {
+	// includesPath is checked before policy, metadata inspection, or file reads.
+	includesPath func(string) bool
+	// includesDir controls traversal and is also checked before policy for dirs.
+	includesDir func(string) bool
+	maxFiles    int
+}
+
+func takeWithPolicyScope(root string, walkDir walkDirFunc, scope captureScope, coverageScope string) (Snapshot, Policy, Coverage, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return Snapshot{}, Policy{}, err
+		return Snapshot{}, Policy{}, Coverage{}, err
 	}
 	if safeOK, safeErr := safePath(root, ""); safeErr != nil || !safeOK {
-		return Snapshot{}, Policy{}, fmt.Errorf("capture root must not traverse links")
+		return Snapshot{}, Policy{}, Coverage{}, fmt.Errorf("capture root must not traverse links")
 	}
 	policy, err := LoadPolicy(root)
 	if err != nil {
-		return Snapshot{}, Policy{}, err
+		return Snapshot{}, Policy{}, Coverage{}, err
 	}
 	s := Snapshot{Files: map[string]File{}, Omitted: []string{}, PolicyHash: policy.Hash()}
+	c := Coverage{Complete: true, Scope: coverageScope, BudgetBytes: MaxSnapshotBytes, Omitted: []CoverageOmission{}, Excluded: []CoverageOmission{}, OmissionReasons: map[string]string{}}
 	total := 0
 	confined, err := os.OpenRoot(root)
 	if err != nil {
-		return Snapshot{}, Policy{}, err
+		return Snapshot{}, Policy{}, Coverage{}, err
 	}
 	defer confined.Close()
+	selectedFiles := 0
 	err = walkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if p == root {
 			return walkErr
@@ -94,8 +152,25 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 			return e
 		}
 		rel = filepath.ToSlash(rel)
+		isDir := d != nil && d.IsDir()
+		if d != nil && isDir {
+			if !scope.includesDir(rel) {
+				return filepath.SkipDir
+			}
+		} else if d != nil {
+			inScope := scope.includesPath(rel)
+			unsafeEntry := d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0
+			if !inScope && !(unsafeEntry && scope.includesDir(rel)) {
+				return nil
+			}
+		} else if d == nil && !scope.includesPath(rel) && !scope.includesDir(rel) {
+			return nil
+		}
 		if !policy.Allows(rel) {
-			if d != nil && d.IsDir() {
+			if coverageScope != "" {
+				addCoverageExclusion(&c, rel, "policy_excluded")
+			}
+			if isDir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -103,23 +178,42 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 		if walkErr != nil {
 			if errors.Is(walkErr, fs.ErrNotExist) {
 				s.Omitted = append(s.Omitted, rel)
+				if coverageScope != "" {
+					addCoverageOmission(&c, rel, "file_changed")
+				}
 				return filepath.SkipDir
 			}
 			return fmt.Errorf("cannot inspect capture path %q", rel)
 		}
 		if d.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				addCoverageOmission(&c, rel, "unsafe_path")
+			}
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.IsDir() {
+		if isDir {
 			return nil
+		}
+		if scope.includesPath(rel) && scope.maxFiles > 0 {
+			if selectedFiles >= scope.maxFiles {
+				s.Omitted = append(s.Omitted, rel)
+				if coverageScope != "" {
+					addCoverageOmission(&c, rel, "file_count_limit")
+				}
+				return nil
+			}
+			selectedFiles++
 		}
 		info, e := d.Info()
 		if errors.Is(e, fs.ErrNotExist) {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				addCoverageOmission(&c, rel, "file_changed")
+			}
 			return nil
 		}
 		if e != nil {
@@ -127,11 +221,23 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 		}
 		if !info.Mode().IsRegular() || info.Size() > MaxFileBytes || info.Size() > int64(MaxSnapshotBytes-total) {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				reason := "unsafe_path"
+				if info.Mode().IsRegular() && info.Size() > MaxFileBytes {
+					reason = "file_too_large"
+				} else if info.Mode().IsRegular() && info.Size() > int64(MaxSnapshotBytes-total) {
+					reason = "snapshot_budget"
+				}
+				addCoverageOmission(&c, rel, reason)
+			}
 			return nil
 		}
 		ok, e := safePath(root, rel)
 		if errors.Is(e, fs.ErrNotExist) {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				addCoverageOmission(&c, rel, "file_changed")
+			}
 			return nil
 		}
 		if e != nil {
@@ -139,11 +245,17 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 		}
 		if !ok {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				addCoverageOmission(&c, rel, "unsafe_path")
+			}
 			return nil
 		}
 		data, e := readCaptureFile(confined, rel, info)
 		if e == errFileChanged {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				addCoverageOmission(&c, rel, "file_changed")
+			}
 			return nil
 		}
 		if e != nil {
@@ -151,6 +263,15 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 		}
 		if len(data) > MaxFileBytes || len(data) > MaxSnapshotBytes-total || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 			s.Omitted = append(s.Omitted, rel)
+			if coverageScope != "" {
+				reason := "binary_or_invalid_utf8"
+				if len(data) > MaxFileBytes {
+					reason = "file_too_large"
+				} else if len(data) > MaxSnapshotBytes-total {
+					reason = "snapshot_budget"
+				}
+				addCoverageOmission(&c, rel, reason)
+			}
 			return nil
 		}
 		total += len(data)
@@ -158,10 +279,113 @@ func takeWithPolicy(root string, walkDir walkDirFunc) (Snapshot, Policy, error) 
 		return nil
 	})
 	if err != nil {
-		return Snapshot{}, Policy{}, err
+		return Snapshot{}, Policy{}, Coverage{}, err
 	}
 	sort.Strings(s.Omitted)
-	return s, policy, nil
+	sort.Slice(c.Omitted, func(i, j int) bool { return c.Omitted[i].File < c.Omitted[j].File })
+	sort.Slice(c.Excluded, func(i, j int) bool { return c.Excluded[i].File < c.Excluded[j].File })
+	c.CapturedBytes = total
+	c.Complete = c.OmittedCount == 0 && c.ExcludedCount == 0
+	return s, policy, c, nil
+}
+
+// TakeDocs captures Markdown in the approved initial scope: root-level *.md
+// files and Markdown below docs/. Policy exclusions take precedence.
+func TakeDocs(root string) (Snapshot, Coverage, error) {
+	return takeDocs(root, filepath.WalkDir)
+}
+
+func takeDocs(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
+	scope := captureScope{
+		includesPath: docsMarkdownPath,
+		maxFiles:     MaxDocsFiles,
+		includesDir: func(rel string) bool {
+			if rel == "docs" {
+				return true
+			}
+			if !strings.HasPrefix(rel, "docs/") {
+				return false
+			}
+			for _, part := range strings.Split(rel, "/") {
+				if strings.HasPrefix(part, ".") {
+					return false
+				}
+			}
+			return true
+		},
+	}
+	s, _, c, err := takeWithPolicyScope(root, walkDir, scope, "docs-only")
+	return s, c, err
+}
+
+func docsMarkdownPath(rel string) bool {
+	if !strings.HasSuffix(rel, ".md") {
+		return false
+	}
+	if strings.IndexByte(rel, '/') < 0 {
+		return true
+	}
+	if !strings.HasPrefix(rel, "docs/") {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(rel, "docs/"), "/")
+	for _, part := range parts[:len(parts)-1] {
+		if strings.HasPrefix(part, ".") {
+			return false
+		}
+	}
+	return true
+}
+
+// TakeGoAndDocs combines two independently captured snapshots. Each component
+// has its own 16 MiB budget and its own coverage and omission report.
+func TakeGoAndDocs(root string) (Snapshot, Coverage, error) {
+	goSnapshot, goCoverage, err := takeGoInternal(root, filepath.WalkDir, true, MaxGoFiles)
+	if err != nil {
+		return Snapshot{}, Coverage{}, err
+	}
+	docSnapshot, docsCoverage, err := TakeDocs(root)
+	if err != nil {
+		return Snapshot{}, Coverage{}, err
+	}
+	if goSnapshot.PolicyHash != docSnapshot.PolicyHash {
+		return Snapshot{}, Coverage{}, fmt.Errorf("capture policy changed between Go and docs scans")
+	}
+	combined := Snapshot{Files: make(map[string]File, len(goSnapshot.Files)+len(docSnapshot.Files)), Omitted: append([]string{}, goSnapshot.Omitted...), PolicyHash: goSnapshot.PolicyHash}
+	for name, file := range goSnapshot.Files {
+		combined.Files[name] = file
+	}
+	for name, file := range docSnapshot.Files {
+		if _, exists := combined.Files[name]; exists {
+			return Snapshot{}, Coverage{}, fmt.Errorf("overlapping Go and docs capture path %q", name)
+		}
+		combined.Files[name] = file
+	}
+	combined.Omitted = append(combined.Omitted, docSnapshot.Omitted...)
+	sort.Strings(combined.Omitted)
+	coverage := Coverage{
+		Complete: goCoverage.Complete && docsCoverage.Complete,
+		Scope:    "go+docs",
+		Components: &CoverageComponents{
+			Go:   coverageDetail(goCoverage),
+			Docs: coverageDetail(docsCoverage),
+		},
+	}
+	return combined, coverage, nil
+}
+
+func coverageDetail(c Coverage) CoverageDetail {
+	excluded := c.Excluded
+	if excluded == nil {
+		excluded = []CoverageOmission{}
+	}
+	return CoverageDetail{
+		Complete: c.Complete, Scope: c.Scope, BudgetBytes: c.BudgetBytes,
+		CapturedBytes: c.CapturedBytes, OmittedCount: c.OmittedCount,
+		ExcludedCount: c.ExcludedCount, Omitted: c.Omitted,
+		Excluded: excluded, Truncated: c.Truncated,
+		OmissionReasons: c.OmissionReasons,
+	}
 }
 
 // TakeGo captures only Go source for indexing. Non-Go files never consume the
@@ -171,6 +395,10 @@ func TakeGo(root string) (Snapshot, Coverage, error) {
 }
 
 func takeGo(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
+	return takeGoInternal(root, walkDir, false, 0)
+}
+
+func takeGoInternal(root string, walkDir walkDirFunc, scopedCoverage bool, maxFiles int) (Snapshot, Coverage, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
@@ -188,12 +416,17 @@ func takeGo(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
 		s.Omitted = append(s.Omitted, rel)
 		addCoverageOmission(&c, rel, "file_changed")
 	}
+	omitFileLimit := func(rel string) {
+		s.Omitted = append(s.Omitted, rel)
+		addCoverageOmission(&c, rel, "file_count_limit")
+	}
 	total := 0
 	confined, err := os.OpenRoot(root)
 	if err != nil {
 		return Snapshot{}, Coverage{}, err
 	}
 	defer confined.Close()
+	selectedFiles := 0
 	err = walkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 		if p == root {
 			return walkErr
@@ -204,7 +437,11 @@ func takeGo(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if !policy.Allows(rel) {
-			c.ExcludedCount++
+			if !scopedCoverage {
+				c.ExcludedCount++
+			} else if (d != nil && d.IsDir()) || strings.HasSuffix(rel, ".go") {
+				addCoverageExclusion(&c, rel, "policy_excluded")
+			}
 			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -239,6 +476,13 @@ func takeGo(root string, walkDir walkDirFunc) (Snapshot, Coverage, error) {
 		}
 		if d.IsDir() || !strings.HasSuffix(rel, ".go") {
 			return nil
+		}
+		if maxFiles > 0 {
+			if selectedFiles >= maxFiles {
+				omitFileLimit(rel)
+				return nil
+			}
+			selectedFiles++
 		}
 		info, e := d.Info()
 		if errors.Is(e, fs.ErrNotExist) {
@@ -361,6 +605,15 @@ func addCoverageOmission(c *Coverage, file, reason string) {
 		c.Omitted = append(c.Omitted, CoverageOmission{File: file, Reason: reason})
 	} else {
 		// truncated describes the public omission sample, not source-budget use.
+		c.Truncated = true
+	}
+}
+
+func addCoverageExclusion(c *Coverage, file, reason string) {
+	c.ExcludedCount++
+	if len(c.Excluded) < 20 {
+		c.Excluded = append(c.Excluded, CoverageOmission{File: file, Reason: reason})
+	} else {
 		c.Truncated = true
 	}
 }
