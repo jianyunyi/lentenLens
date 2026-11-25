@@ -211,4 +211,4 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 冒烟脚本使用新建的独立 fixture，不修改真实项目，不调用模型。VS Code 宿主集成入口位于 `scripts/vscode-*-integration.cjs`；应使用独立测试工作区、user-data-dir 和 extensions-dir，不能把普通单元测试通过当作宿主集成通过。
 
-代码主要分布在 `internal/capture`、`internal/codeindex`、`internal/explain`、`internal/app`、`internal/exercise`、`cmd/intentlens` 与 `extension`。较早的 `internal/project`、`internal/gonav` 实现仍保留，当前 CLI 不依赖它们.
+代码主要分布在 `internal/capture`、`internal/codeindex`、`internal/explain`、`internal/app`、`internal/exercise`、`cmd/intentlens` 与 `extension`。较早的 `internal/gonav` 实现仍保留，当前 CLI 不依赖它.
