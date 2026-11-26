@@ -12,7 +12,7 @@ exports.run = async function () {
   assert.ok(marker && stub, 'marker and stub paths provided');
   assert.equal(vscode.workspace.isTrusted, false, 'workspace must start untrusted (Restricted Mode)');
 
-  const extension = vscode.extensions.getExtension('intentlens-local.intentlens');
+  const extension = vscode.extensions.getExtension('lentenlens.intentlens');
   assert.ok(extension, 'extension discovered');
   await extension.activate();
 
