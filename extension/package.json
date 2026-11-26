@@ -70,7 +70,7 @@
                     "test":  "node --test test/*.test.js",
                     "test:coverage":  "c8 --all --src src --include \"src/**/*.js\" --reporter=text --reporter=lcov --report-dir coverage --check-coverage --lines 85 --functions 86 --branches 75 node --test test/*.test.js",
                     "test:integration":  "node ../scripts/run-vscode-integration.cjs",
-                    "check":  "node --check src/aiConfigPanel.js && node --check src/callpath.js && node --check src/core.js && node --check src/coverage.js && node --check src/exercises.js && node --check src/extension.js && node --check src/inline.js && node --check src/providers.js && node --check src/recovery.js && node --check src/restrictionDetailPanel.js && node --check src/restrictionView.js && node --check src/sessions.js && node --check src/sidebar.js && node --check src/tokenUsagePanel.js"
+                    "check":  "node --check src/aiConfigPanel.js && node --check src/callpath.js && node --check src/core.js && node --check src/coverage.js && node --check src/exercises.js && node --check src/extension.js && node --check src/inline.js && node --check src/log.js && node --check src/providers.js && node --check src/recovery.js && node --check src/restrictionDetailPanel.js && node --check src/restrictionView.js && node --check src/sessions.js && node --check src/sidebar.js && node --check src/tokenUsagePanel.js"
                 },
     "devDependencies":  {
                             "c8":  "10.1.3",

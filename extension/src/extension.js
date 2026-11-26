@@ -16,10 +16,13 @@ const { RestrictionTreeProvider } = require('./restrictionView');
 const { RestrictionDetailPanel } = require('./restrictionDetailPanel');
 const { AIConfigPanel } = require('./aiConfigPanel');
 const { TokenUsagePanel } = require('./tokenUsagePanel');
+const { createOutputLogger } = require('./log');
 
 const modelCommands = new Set(['explain', 'explain-selection', 'analyze-round', 'revise', 'share-prepare', 'exercise-generate', 'exercise-feedback', 'test-model']);
 
 function activate(context) {
+  const log = createOutputLogger(context.subscriptions);
+  log.activated();
   const treeChanged = new vscode.EventEmitter(), lensesChanged = new vscode.EventEmitter();
   const panels = new Map(), policyVersions = new Map(), roundPages = new Map();
   let callPathProvider;
@@ -94,7 +97,14 @@ function activate(context) {
       const editorTarget = command === 'test-model' ? { ...target, model: model.model } : target;
       runOptions.args = ['--editor-model-target', JSON.stringify(editorTarget)];
     }
-    const result = await runCLI(binary, folder.uri.fsPath, command, input, runOptions);
+    log.cliInvoked(command);
+    let result;
+    try {
+      result = await runCLI(binary, folder.uri.fsPath, command, input, runOptions);
+    } catch (error) {
+      log.cliFailed(command, error);
+      throw error;
+    }
     if (version !== (policyVersions.get(folder.uri.fsPath) || 0)) throw new Error('排除规则已变化，请重新打开视图。');
     return result;
   }
