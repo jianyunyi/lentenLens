@@ -7,7 +7,7 @@ const vscode = require('vscode');
 
 // May write only to the explicitly marked disposable test workspace.
 exports.run = async function () {
-  const extension = vscode.extensions.getExtension('intentlens-local.intentlens');
+  const extension = vscode.extensions.getExtension('lentenlens.intentlens');
   assert.ok(extension, 'extension discovered');
   await extension.activate();
   assert.ok(vscode.workspace.isTrusted);

@@ -9,3 +9,4 @@ src/*.backup
 src/*.phase1
 src/extension-part1.txt
 coverage/**
+release-notes-*.md

@@ -1,7 +1,7 @@
 # Privacy Policy
 
-**Effective Date**: 2026-10-30  
-**Version**: 0.5.2
+**Effective Date**: 2026-11-26  
+**Version**: 0.7.1
 
 IntentLens ("we", "us", or "the extension") is committed to protecting your privacy. This policy explains what data IntentLens collects, how it is used, stored, and shared.
 
@@ -20,7 +20,7 @@ IntentLens ("we", "us", or "the extension") is committed to protecting your priv
 IntentLens stores analysis data locally in the following locations:
 
 **Windows**: `%APPDATA%\IntentLens\projects\<project-hash>\`  
-**Linux/macOS**: `~/.config/IntentLens/projects/<project-hash>/` (planned)
+**Linux/macOS**: `~/.config/IntentLens/projects/<project-hash>/`
 
 This local storage includes:
 

@@ -7,7 +7,7 @@ const vscode = require('vscode');
 
 // Run only with a disposable fixture workspace and isolated user/extension data.
 exports.run = async function () {
-  const extension = vscode.extensions.getExtension('intentlens-local.intentlens');
+  const extension = vscode.extensions.getExtension('lentenlens.intentlens');
   assert.ok(extension, 'development extension discovered');
   await extension.activate();
   assert.ok(vscode.workspace.isTrusted, 'fixture workspace trusted');

@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 
 exports.run = async function () {
-  const extension = vscode.extensions.getExtension('intentlens-local.intentlens');
+  const extension = vscode.extensions.getExtension('lentenlens.intentlens');
   assert.ok(extension, 'extension discovered');
   await extension.activate();
   assert.ok(vscode.workspace.isTrusted, 'test workspace trusted');
