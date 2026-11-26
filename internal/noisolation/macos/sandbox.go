@@ -11,18 +11,18 @@ import (
 	"strings"
 	"time"
 
-	"intentlens/internal/sandbox"
+	"intentlens/internal/noisolation"
 )
 
-// Sandbox implements sandbox.Sandbox for macOS using Sandbox.
+// Sandbox implements noisolation.Sandbox for macOS using Sandbox.
 type Sandbox struct {
-	cfg       sandbox.Config
+	cfg       noisolation.Config
 	sandboxID string
 }
 
 // Run executes the tool in a sandboxed macOS Sandbox environment.
-func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*sandbox.Result, error) {
-	result := &sandbox.Result{
+func (s *Sandbox) Run(ctx context.Context, tool string, args []string, workDir string) (*noisolation.Result, error) {
+	result := &noisolation.Result{
 		StartTime: time.Now(),
 	}
 
@@ -78,10 +78,10 @@ func (s *Sandbox) Capabilities() []string {
 }
 
 // NewMacOSSandbox creates a new macOS sandbox.
-func NewMacOSSandbox(cfg sandbox.Config) (sandbox.Sandbox, error) {
+func NewMacOSSandbox(cfg noisolation.Config) (noisolation.Sandbox, error) {
 	// Check macOS version
 	if !isMacOSVersionSupported() {
-		return nil, sandbox.UnsupportedError{
+		return nil, noisolation.UnsupportedError{
 			Reason: "macOS 10.14 or later required for Sandbox",
 		}
 	}

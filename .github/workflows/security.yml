@@ -26,16 +26,16 @@ jobs:
         language: [ 'go', 'javascript' ]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
         with:
           languages: ${{ matrix.language }}
           queries: +security-and-quality
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6 # v3
         with:
           category: "/language:${{ matrix.language }}"
           output: codeql-results
@@ -51,7 +51,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve CodeQL SARIF as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: codeql-${{ matrix.language }}-sarif
           path: |
@@ -90,8 +90,8 @@ jobs:
     name: Go Security Scan (gosec)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       - name: Run Gosec Security Scanner
@@ -109,7 +109,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Gosec SARIF as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gosec-sarif
           path: gosec-results.sarif
@@ -120,8 +120,8 @@ jobs:
     name: Go Vulnerability Scan (govulncheck)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # 与 scripts/release-config.json 的 goVersion 保持一致：扫描实际发布二进制所用的标准库
           go-version: '1.26.3'
@@ -136,7 +136,7 @@ jobs:
           govulncheck -show verbose ./... 2>&1 | tee govulncheck-results.txt
       - name: Preserve govulncheck output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: govulncheck-results
           path: govulncheck-results.txt
@@ -150,8 +150,8 @@ jobs:
       matrix:
         directory: ['extension', 'scripts/release-tools']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - name: Run npm audit (${{ matrix.directory }})
@@ -163,7 +163,7 @@ jobs:
     name: Trivy Vulnerability Scanner
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Run Trivy vulnerability scanner in repo mode
         uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec # pin of master @ 2026-11-20
         with:
@@ -184,7 +184,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Trivy SARIF as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: trivy-sarif
           path: trivy-results.sarif
@@ -195,9 +195,9 @@ jobs:
     name: Semgrep Security Scan
     runs-on: ubuntu-latest
     container:
-      image: returntocorp/semgrep
+      image: returntocorp/semgrep:1.187.0@sha256:0c8dfa7aa1ca8c50233ec9110e8cd88d139dedd603d56507493f74c6f4b3e062
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Run Semgrep
         # --error：有发现时非 0 退出；--severity ERROR：仅 ERROR 级规则参与阻断
         run: semgrep scan --sarif --output=semgrep-results.sarif --config=auto --error --severity ERROR
@@ -213,7 +213,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve Semgrep SARIF as workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: semgrep-sarif
           path: semgrep-results.sarif
@@ -224,8 +224,8 @@ jobs:
     name: License Compliance Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       - name: Install go-licenses
@@ -240,11 +240,11 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

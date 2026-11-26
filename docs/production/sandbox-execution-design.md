@@ -5,7 +5,7 @@
 ## 当前证据
 
 - `internal/exercise/run.go` 的 `Run` 永久失败关闭，`verifiedOSSandboxAvailable` 为 false。
-- `internal/sandbox/windows/sandbox.go`、`linux/sandbox.go`、`macos/sandbox.go` 均有未完成的隔离步骤。它们不能提供安全边界；不得接入执行入口。
+- `internal/noisolation/windows/sandbox.go`、`linux/sandbox.go`、`macos/sandbox.go` 均有未完成的隔离步骤。它们不能提供安全边界；不得接入执行入口。
 - 当前发行 target 为 Windows x64；此主机为 Windows 10 Home。Linux 和 macOS 暂不开放可执行练习。
 
 ## 冻结实现

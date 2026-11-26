@@ -19,8 +19,8 @@ jobs:
     name: Lint and Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       - name: Go format check
@@ -30,6 +30,24 @@ jobs:
             echo "Go files are not formatted:"
             gofmt -l .
             exit 1
+          fi
+      - name: Go version policy check
+        # Policy: go.mod = minimum source version (tested by reliability.yml minimum-go);
+        # release-config goVersion = release toolchain (tested by reliability.yml test,
+        # scanned by govulncheck). Every workflow go-version must be one of the two.
+        shell: bash
+        run: |
+          set -euo pipefail
+          mod=$(awk '$1=="go"{print $2; exit}' go.mod)
+          cfg_mod=$(node -p "require('./scripts/release-config.json').goModVersion")
+          cfg_rel=$(node -p "require('./scripts/release-config.json').goVersion")
+          echo "go.mod=$mod goModVersion=$cfg_mod goVersion=$cfg_rel"
+          if [ "$mod" != "$cfg_mod" ]; then
+            echo "go.mod ($mod) != release-config goModVersion ($cfg_mod)"; exit 1
+          fi
+          bad=$(grep -rnE "go-version: *'[^']+'" .github/workflows | grep -vE "go-version: *'($mod|$cfg_rel)'" || true)
+          if [ -n "$bad" ]; then
+            echo "Workflow go-version must be $mod (minimum) or $cfg_rel (release):"; echo "$bad"; exit 1
           fi
       - name: Go vet
         run: go vet ./...
@@ -46,11 +64,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -74,13 +92,7 @@ jobs:
       - name: Install extension dev dependencies
         working-directory: extension
         run: npm ci
-      - name: Extension tests (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: extension
-        run: npm.cmd test
-      - name: Extension tests with coverage gate (Unix)
-        if: runner.os != 'Windows'
+      - name: Extension tests with coverage gate
         working-directory: extension
         run: npm run test:coverage
       - name: Extension syntax checks (Windows)
@@ -102,7 +114,7 @@ jobs:
           go tool cover -html=coverage.out -o coverage.html
       - name: Upload Go coverage to Codecov (Ubuntu)
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: ./coverage.out
           flags: go
@@ -111,7 +123,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload extension coverage to Codecov (Ubuntu)
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: ./extension/coverage/lcov.info
           flags: extension
@@ -120,7 +132,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload coverage artifacts (Ubuntu)
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: |
@@ -135,11 +147,11 @@ jobs:
     needs: test
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm

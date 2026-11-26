@@ -20,14 +20,14 @@ jobs:
     name: Code Complexity Analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
       - name: Install gocyclo
-        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
       
       - name: Check cyclomatic complexity
         run: |
@@ -46,14 +46,14 @@ jobs:
     name: Code Duplication Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
       - name: Install dupl
-        run: go install github.com/mibk/dupl@latest
+        run: go install github.com/mibk/dupl@v1.1.0
       
       - name: Check for duplicated code
         run: |
@@ -73,14 +73,14 @@ jobs:
     name: Ineffectual Assignment Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
       - name: Install ineffassign
-        run: go install github.com/gordonklaus/ineffassign@latest
+        run: go install github.com/gordonklaus/ineffassign@v0.2.0
       
       - name: Check for ineffectual assignments
         run: ineffassign ./...
@@ -89,14 +89,14 @@ jobs:
     name: Spelling Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
       - name: Install misspell
-        run: go install github.com/client9/misspell/cmd/misspell@latest
+        run: go install github.com/client9/misspell/cmd/misspell@v0.3.4
       
       - name: Check for misspellings
         run: |
@@ -106,14 +106,16 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.13
           args: --timeout=10m
@@ -122,9 +124,9 @@ jobs:
     name: Test Coverage Analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.25.0'
       
@@ -154,7 +156,7 @@ jobs:
           fi
       
       - name: Generate coverage badge
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: ./coverage.out
           flags: unittests
@@ -165,7 +167,7 @@ jobs:
     name: Documentation Quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
       - name: Check for missing documentation
         run: |
@@ -184,7 +186,7 @@ jobs:
           fi
       
       - name: Check markdown links
-        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        uses: gaurav-nelson/github-action-markdown-link-check@5c5dfc0ac2e225883c0e5f03a85311ec2830d368 # v1
         with:
           use-quiet-mode: 'yes'
           config-file: '.github/markdown-link-check-config.json'
@@ -194,7 +196,7 @@ jobs:
     name: Code Metrics
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       
       - name: Install cloc
         run: sudo apt-get install -y cloc
