@@ -3,7 +3,7 @@
     "displayName":  "IntentLens",
     "description":  "Go explanations tied to local source evidence, plus selected-code explanations.",
     "version":  "0.7.1",
-    "publisher":  "intentlens-local",
+    "publisher":  "lentenlens",
     "license":  "MIT",
     "author":  {
                    "name":  "IntentLens Contributors",
@@ -33,8 +33,14 @@
                     "vscode":  "^1.90.0"
                 },
     "categories":  [
+                       "Programming Languages",
+                       "Machine Learning",
                        "Other"
                    ],
+    "icon":  "icon.png",
+    "extensionKind":  [
+                          "workspace"
+                      ],
     "main":  "./src/extension.js",
     "activationEvents":  [
                              "onLanguage:go",
