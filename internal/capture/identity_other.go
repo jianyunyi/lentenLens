@@ -12,9 +12,11 @@ import (
 type fileIdentity struct{}
 
 func walkedIdentity(_ *os.Root, _ string, walked fs.FileInfo) capturedStat {
-	return capturedStat{FileInfo: walked}
+	return capturedStat{FileInfo: walked, id: fileIdentity{}}
 }
 
-func sameIdentity(capturedStat, *os.File) bool {
-	return true
+func sameIdentity(walked capturedStat, _ *os.File) bool {
+	// Off Windows there is no handle identity to compare: the caller's
+	// os.SameFile check on the embedded FileInfo does the work.
+	return walked.id == fileIdentity{}
 }
