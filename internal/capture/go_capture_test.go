@@ -69,6 +69,12 @@ func TestReadCaptureFileRejectsReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	walked := walkedIdentity(root, name, info)
 	// Keep the original inode alive and give the replacement the same size and mtime.
 	if err := os.Rename(filepath.Join(dir, name), filepath.Join(dir, "original.go")); err != nil {
 		t.Fatal(err)
@@ -77,12 +83,7 @@ func TestReadCaptureFileRejectsReplacement(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(dir, name), info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.Close()
-	if data, err := readCaptureFile(root, name, info); err != errFileChanged || data != nil {
+	if data, err := readCaptureFile(root, name, walked); err != errFileChanged || data != nil {
 		t.Fatalf("readCaptureFile = %q, %v, want no data and errFileChanged", data, err)
 	}
 }

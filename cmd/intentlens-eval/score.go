@@ -51,7 +51,7 @@ const (
 type SelectionRefreshHint string
 
 const (
-	SelectionHintNone             SelectionRefreshHint = "none"
+	SelectionHintNone            SelectionRefreshHint = "none"
 	SelectionHintPrescanRequired SelectionRefreshHint = "prescan_required"
 	SelectionHintExplicitRefresh SelectionRefreshHint = "explicit_refresh"
 )
@@ -69,8 +69,8 @@ type SelectionEvidenceType string
 const (
 	SelectionEvidenceCode       SelectionEvidenceType = "selected_code"
 	SelectionEvidenceDiagnostic SelectionEvidenceType = "diagnostic"
-	SelectionEvidenceRelation  SelectionEvidenceType = "code_relation"
-	SelectionEvidenceDocument  SelectionEvidenceType = "documentation"
+	SelectionEvidenceRelation   SelectionEvidenceType = "code_relation"
+	SelectionEvidenceDocument   SelectionEvidenceType = "documentation"
 )
 
 // D08 evidence tiers are separate from a model claim's support status.
@@ -113,45 +113,45 @@ const (
 // are review metrics only until step 8b; current CSV scoring remains
 // function-case-only.
 type SelectionCase struct {
-	Mode             SelectionMode         `json:"mode"`
-	Freshness        SelectionFreshness    `json:"freshness"`
-	FreshnessLabel   SelectionFreshnessLabel `json:"freshness_label"`
-	RefreshHint      SelectionRefreshHint    `json:"refresh_hint"`
-	Authorization    SelectionAuthorization `json:"authorization"`
-	Range            SelectionRange        `json:"range"`
-	Diagnostics      []SelectionDiagnostic `json:"diagnostics,omitempty"`
+	Mode                    SelectionMode           `json:"mode"`
+	Freshness               SelectionFreshness      `json:"freshness"`
+	FreshnessLabel          SelectionFreshnessLabel `json:"freshness_label"`
+	RefreshHint             SelectionRefreshHint    `json:"refresh_hint"`
+	Authorization           SelectionAuthorization  `json:"authorization"`
+	Range                   SelectionRange          `json:"range"`
+	Diagnostics             []SelectionDiagnostic   `json:"diagnostics,omitempty"`
 	AuthorizedEvidenceTypes []SelectionEvidenceType `json:"authorized_evidence_types"`
-	ExpectedEvidence []SelectionEvidence   `json:"expected_evidence"`
-	Forbid           []SelectionForbid     `json:"forbid"`
-	PersistResult    bool                  `json:"persist_result"`
-	PrescanCache     SelectionPrescanCache `json:"prescan_cache"`
-	PendingVariants  []SelectionVariant    `json:"pending_variants,omitempty"`
+	ExpectedEvidence        []SelectionEvidence     `json:"expected_evidence"`
+	Forbid                  []SelectionForbid       `json:"forbid"`
+	PersistResult           bool                    `json:"persist_result"`
+	PrescanCache            SelectionPrescanCache   `json:"prescan_cache"`
+	PendingVariants         []SelectionVariant      `json:"pending_variants,omitempty"`
 }
 
 // SelectionVariant reserves executable related/unknown/stale contracts for 8b.
 type SelectionVariant struct {
-	Name                string                   `json:"name"`
-	Mode                SelectionMode            `json:"mode"`
-	Freshness           SelectionFreshness       `json:"freshness"`
-	FreshnessLabel      SelectionFreshnessLabel  `json:"freshness_label"`
-	RefreshHint         SelectionRefreshHint     `json:"refresh_hint"`
-	Authorization       SelectionAuthorization  `json:"authorization"`
-	CodeAnchorStatus    SelectionCodeAnchorStatus `json:"code_anchor_status,omitempty"`
-	RefreshHintRequired bool                     `json:"refresh_hint_required"`
-	AuthorizedEvidenceTypes []SelectionEvidenceType `json:"authorized_evidence_types"`
-	ExpectedEvidence    []SelectionEvidence      `json:"expected_evidence"`
-	Forbid              []SelectionForbid        `json:"forbid"`
-	PersistResult       bool                     `json:"persist_result"`
-	PrescanCache        SelectionPrescanCache    `json:"prescan_cache"`
+	Name                    string                    `json:"name"`
+	Mode                    SelectionMode             `json:"mode"`
+	Freshness               SelectionFreshness        `json:"freshness"`
+	FreshnessLabel          SelectionFreshnessLabel   `json:"freshness_label"`
+	RefreshHint             SelectionRefreshHint      `json:"refresh_hint"`
+	Authorization           SelectionAuthorization    `json:"authorization"`
+	CodeAnchorStatus        SelectionCodeAnchorStatus `json:"code_anchor_status,omitempty"`
+	RefreshHintRequired     bool                      `json:"refresh_hint_required"`
+	AuthorizedEvidenceTypes []SelectionEvidenceType   `json:"authorized_evidence_types"`
+	ExpectedEvidence        []SelectionEvidence       `json:"expected_evidence"`
+	Forbid                  []SelectionForbid         `json:"forbid"`
+	PersistResult           bool                      `json:"persist_result"`
+	PrescanCache            SelectionPrescanCache     `json:"prescan_cache"`
 }
 
 // SelectionAuthorization keeps relationship-send consent and its recipient
 // binding separate from local prescan-retention consent.
 type SelectionAuthorization struct {
 	RelatedSendAuthorized bool   `json:"related_send_authorized"`
-	Provider             string `json:"provider"`
-	BaseURL              string `json:"base_url"`
-	Version              string `json:"version"`
+	Provider              string `json:"provider"`
+	BaseURL               string `json:"base_url"`
+	Version               string `json:"version"`
 }
 
 // Prescan retention is a separate data category from transient explanation results.
@@ -163,10 +163,10 @@ type SelectionPrescanCache struct {
 
 // SelectionRange uses zero-based, end-exclusive UTF-16 editor coordinates.
 type SelectionRange struct {
-	StartLine      int `json:"start_line"`
-	StartColumn    int `json:"start_column"`
-	EndLine        int `json:"end_line"`
-	EndColumn      int `json:"end_column"`
+	StartLine   int `json:"start_line"`
+	StartColumn int `json:"start_column"`
+	EndLine     int `json:"end_line"`
+	EndColumn   int `json:"end_column"`
 }
 
 // SelectionDiagnostic is a fixture diagnostic at editor coordinates; only

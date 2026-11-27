@@ -250,7 +250,7 @@ func takeWithPolicyScope(root string, walkDir walkDirFunc, scope captureScope, c
 			}
 			return nil
 		}
-		data, e := readCaptureFile(confined, rel, info)
+		data, e := readCaptureFile(confined, rel, walkedIdentity(confined, rel, info))
 		if e == errFileChanged {
 			s.Omitted = append(s.Omitted, rel)
 			if coverageScope != "" {
@@ -516,7 +516,7 @@ func takeGoInternal(root string, walkDir walkDirFunc, scopedCoverage bool, maxFi
 			addCoverageOmission(&c, rel, "unsafe_path")
 			return nil
 		}
-		data, e := readCaptureFile(confined, rel, info)
+		data, e := readCaptureFile(confined, rel, walkedIdentity(confined, rel, info))
 		if e == errFileChanged {
 			omitChanged(rel)
 			return nil
@@ -551,7 +551,7 @@ func takeGoInternal(root string, walkDir walkDirFunc, scopedCoverage bool, maxFi
 
 var errFileChanged = errors.New("file changed during capture")
 
-func readCaptureFile(root *os.Root, relative string, walked fs.FileInfo) (data []byte, err error) {
+func readCaptureFile(root *os.Root, relative string, walked capturedStat) (data []byte, err error) {
 	f, err := root.Open(filepath.FromSlash(relative))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, errFileChanged
@@ -574,7 +574,7 @@ func readCaptureFile(root *os.Root, relative string, walked fs.FileInfo) (data [
 	if err != nil {
 		return nil, err
 	}
-	if !before.Mode().IsRegular() || !os.SameFile(walked, before) || !sameFileVersion(walked, before) {
+	if !before.Mode().IsRegular() || !os.SameFile(walked.FileInfo, before) || !sameFileVersion(walked, before) || !sameIdentity(walked, f) {
 		return nil, errFileChanged
 	}
 	data, err = io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
