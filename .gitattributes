@@ -1,0 +1,7 @@
+# Provenance fixtures hash source files byte-for-byte (sha256 of the
+# checked-out bytes). Pin LF so hashes recorded on Linux stay valid on
+# CRLF-default checkouts such as Windows.
+eval/explain/selection-cases/** text eol=lf
+
+# Go sources are gofmt-normalized LF; keep them identical on every platform.
+*.go text eol=lf
