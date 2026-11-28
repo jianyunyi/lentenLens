@@ -7,12 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // scrubExcluded irreversibly removes revoked source material from local records.
 // It runs before data is returned and does not contact a model or read excluded content.
 func (a *App) scrubExcluded() error {
-	unlock, e := a.lock("capture")
+	a.scrubMu.Lock()
+	defer a.scrubMu.Unlock()
+	unlock, e := a.prescanAwareCaptureLock()
 	if e != nil {
 		return e
 	}
@@ -31,7 +34,7 @@ func (a *App) scrubExcluded() error {
 	if e != nil {
 		return e
 	}
-	if before == a.scrubbedState {
+	if before == a.scrubbedState && (a.prescanExpiry == nil || time.Now().Before(a.prescanExpires)) {
 		// Evidence admission also depends on project link state, which the
 		// signature cannot see; re-check every cited path.
 		unchanged := true
@@ -77,6 +80,9 @@ func scrubSignature(policy capture.Policy, entries []os.DirEntry) (string, error
 }
 
 func (a *App) scrubEntries(policy capture.Policy, entries []os.DirEntry) error {
+	if err := a.scrubPrescans(policy, entries); err != nil {
+		return err
+	}
 	for _, ent := range entries {
 		name := ent.Name()
 		switch {

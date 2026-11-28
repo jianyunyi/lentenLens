@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"intentlens/internal/capture"
 	"intentlens/internal/explain"
 	"io"
 	"net/http"
@@ -14,9 +15,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 type App struct {
+	prescanBeforePublish    func() error // Test seam before atomic replacement; never serialized.
+	prescanExpiry           *time.Timer  // Guarded by scrubMu.
+	prescanExpires          time.Time
+	prescanExpiryGeneration string
+
+	scrubMu        sync.Mutex
+	prescanTake    func(bool) (capture.Snapshot, capture.Coverage, error) // Test seam; never serialized.
+	prescanTimeout time.Duration                                          // Test seam, may only shorten the hard deadline.
+
 	applyStageFault   func() error    // Test seam before a source rename.
 	applyFault        func(int) error // In-process failure injection; never serialized.
 	afterModelReserve func()          // Test seam after usage is reserved on disk.
@@ -86,7 +98,7 @@ func Open(root, state string) (*App, error) {
 		return nil, errors.New("项目私有状态目录不能是链接")
 	}
 	a := &App{Root: root, State: state}
-	if recoverErr := a.recoverState(); recoverErr != nil {
+	if recoverErr := a.recoverWithPrescan(); recoverErr != nil {
 		return nil, recoverErr
 	}
 	if scrubErr := a.scrubExcluded(); scrubErr != nil {
@@ -137,7 +149,7 @@ func readStateRecord(root *os.Root, name string, v any, open func(string) (*os.F
 		if !info.Mode().IsRegular() {
 			return errors.New("本地记录必须是普通文件")
 		}
-		if info.Size() > maxStateRecordBytes {
+		if info.Size() > maxStateRecordBytes || (isPrescanManifest(name) && info.Size() > maxPrescanBytes) {
 			return errors.New("本地记录超过读取范围")
 		}
 		f, err := open(name)
@@ -163,11 +175,15 @@ func readStateRecord(root *os.Root, name string, v any, open func(string) (*os.F
 }
 
 func decodeStateRecord(f *os.File, name string, v any) error {
-	b, e := io.ReadAll(io.LimitReader(f, maxStateRecordBytes+1))
+	limit := int64(maxStateRecordBytes)
+	if isPrescanManifest(name) {
+		limit = maxPrescanBytes
+	}
+	b, e := io.ReadAll(io.LimitReader(f, limit+1))
 	if e != nil {
 		return e
 	}
-	if int64(len(b)) > maxStateRecordBytes {
+	if int64(len(b)) > limit {
 		return errors.New("本地记录超过读取范围")
 	}
 	if name == "usage.json" || name == "settings.json" {
@@ -176,6 +192,9 @@ func decodeStateRecord(f *os.File, name string, v any) error {
 	return json.Unmarshal(b, v)
 }
 func (a *App) write(name string, v any) error {
+	return a.writeContext(context.Background(), name, v)
+}
+func (a *App) writeContext(ctx context.Context, name string, v any) error {
 	release, err := a.lock("state")
 	if err != nil {
 		return err
@@ -185,10 +204,52 @@ func (a *App) write(name string, v any) error {
 	if err != nil {
 		return err
 	}
+	if isPrescanManifest(name) {
+		if len(b) > maxPrescanBytes {
+			return errors.New("预扫构建失败：缓存编码超过64 MiB")
+		}
+		// Include the old published slot while its replacement is staged. The
+		// temporary second generation does not silently double the disk budget.
+		total := int64(len(b))
+		entries, err := os.ReadDir(a.State)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if isPrescanManifest(entry.Name()) {
+				info, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				total += info.Size()
+			}
+		}
+		if total > maxPrescanBytes {
+			return errors.New("预扫构建失败：新旧代际及暂存总编码超过64 MiB")
+		}
+		m, ok := v.(*prescanManifest)
+		if !ok {
+			return errors.New("预扫记录必须使用内部manifest")
+		}
+		if err := validatePrescan(m); err != nil {
+			return err
+		}
+	}
 	root, err := os.OpenRoot(a.State)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
+	if isPrescanManifest(name) {
+		return atomicReplaceStaged(root, name, b, 0o600, nil, "", func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if a.prescanBeforePublish != nil {
+				return a.prescanBeforePublish()
+			}
+			return nil
+		})
+	}
 	return atomicReplace(root, name, b, 0o600, nil)
 }

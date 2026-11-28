@@ -32,18 +32,19 @@ function activate(context) {
   const modelEvidenceRecords = new Map();
   let modelAnswerGeneration = 0;
   const indexDiagnostics = new Map();
+  const knownStalePrescans = new Set();
   const sourcePanels = new Set();
   const indexBar = vscode.window.createStatusBarItem?.(vscode.StatusBarAlignment?.Right, 90);
   if (indexBar) context.subscriptions.push(indexBar);
   function invalidateIndex() { indexDiagnostics.clear(); indexBar?.hide(); }
   function reportIndex(folder, file, data, error) {
-    const detail = { root: folder.uri.fsPath, file, coverage: data?.coverage, error: error?.message };
+    const detail = { root: folder.uri.fsPath, file, coverage: data?.coverage, prescan: data?.prescan, error: error?.message };
     indexDiagnostics.set(folder.uri.fsPath, detail);
     if (indexBar) {
-      indexBar.text = error ? 'IntentLens: 索引失败' : 'IntentLens: 索引范围不完整';
-      indexBar.tooltip = error ? `索引失败：${error.message}；点击查看原因。` : coverageSummary(data?.coverage);
+      indexBar.text = error ? 'IntentLens: 索引失败' : data?.prescan ? `IntentLens: ${data.prescan.message}` : 'IntentLens: 索引范围不完整';
+      indexBar.tooltip = error ? `索引失败：${error.message}；点击查看原因。` : data?.prescan?.message || coverageSummary(data?.coverage);
       indexBar.command = { command: 'intentlens.indexStatus', title: '查看索引范围与遗漏原因', arguments: [folder.uri] };
-      if (error || !data?.coverage || limitedCoverage(data.coverage)) indexBar.show(); else indexBar.hide();
+      if (error || (data?.prescan && data.prescan.state !== 'hit') || !data?.coverage || limitedCoverage(data.coverage)) indexBar.show(); else indexBar.hide();
     }
   }
   const guard = fn => async (...args) => { try { return await fn(...args); } catch (error) { vscode.window.showErrorMessage(`IntentLens: ${error.message}`); } };
@@ -85,7 +86,7 @@ function activate(context) {
     const bundled = path.join(context.extensionPath, 'bin', process.platform === 'win32' ? 'intentlens.exe' : 'intentlens');
     const binary = configured || (fs.existsSync(bundled) ? ensureExecutable(bundled) : 'intentlens');
     const version = policyVersions.get(folder.uri.fsPath) || 0;
-    const runOptions = { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal };
+    const runOptions = { timeout: command === 'exercise-run' ? 240000 : 180000, signal: options.signal, args: options.args };
     if (modelCommands.has(command)) {
       const { key, target, model } = await modelCredentialForCall(folder, cli, context.secrets);
       assertModelSaveIdle(folder);
@@ -612,10 +613,14 @@ function activate(context) {
       const epoch = documentEpoch;
       const diagnosticLens = title => new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), { title, command: 'intentlens.indexStatus', arguments: [document.uri] });
       try {
-        const data = await cli(folder, 'index');
+        const data = knownStalePrescans.has(folder.uri.fsPath)
+          ? { functions: [], prescan: { state: 'stale', message: '索引过期；已观察到来源变化，请显式刷新预扫。' } }
+          : await cli(folder, 'prescan-index');
         if (token.isCancellationRequested || epoch !== documentEpoch) return [];
         reportIndex(folder, file, data);
+        if (data.prescan && !['unknown', 'hit'].includes(data.prescan.state)) return [diagnosticLens(`IntentLens · ${data.prescan.message}`)];
         const lenses = (data.functions || []).filter(fn => fn.file === file).map(fn => new vscode.CodeLens(new vscode.Range(fn.start_line - 1, 0, fn.start_line - 1, 0), { title: 'IntentLens · 在函数下方展开解释', command: 'intentlens.inspect', arguments: [document.uri, fn.start_line] }));
+        if (data.prescan?.state === 'unknown') lenses.unshift(diagnosticLens(`IntentLens · ${data.prescan.message}`));
         if (limitedCoverage(data.coverage)) lenses.unshift(diagnosticLens('IntentLens · 索引范围不完整（查看遗漏与排除原因）'));
         else if (!data.coverage) lenses.unshift(diagnosticLens('IntentLens · 索引覆盖范围未知（检查 CLI 版本）'));
         return lenses;
@@ -640,7 +645,10 @@ function activate(context) {
     const line = editor.selection.active.line + 1;
     const version = editor.document.version;
     const epoch = documentEpoch;
-    const info = await cli(folder, 'inspect', { file, line }, { signal });
+    if (knownStalePrescans.has(folder.uri.fsPath)) return { message: '索引过期；请显式刷新预扫。' };
+    const info = await cli(folder, 'prescan-inspect', { file, line }, { signal });
+    if (info.prescan && !['unknown', 'hit'].includes(info.prescan.state)) return { message: info.prescan.message };
+    if (info.prescan && !info.function?.id) return { message: '预扫快照中当前位置没有函数；请显式刷新预扫。' };
     const active = vscode.window.activeTextEditor;
     if (epoch !== documentEpoch || !active || active.document.uri.toString() !== editor.document.uri.toString() || active.selection.active.line + 1 !== line || active.document.version !== version || active.document.isDirty) {
       return { message: '当前文件或光标已变化；请重新展开侧栏查看最新本地回答。' };
@@ -675,6 +683,20 @@ function activate(context) {
   }
   command('callPath', loadCallPath);
   command('refreshCallPath', loadCallPath);
+  command('prescan', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    const answer = await vscode.window.showWarningMessage('预扫将读取此工作区获准的 Go 与根目录/docs 下 Markdown，在仓库外私有目录保留原文索引最多七天；单文件1 MiB、Go/docs各16 MiB。不调用模型。', { modal: true }, '授权本地预扫并刷新');
+    if (answer !== '授权本地预扫并刷新') return;
+    const result = await cli(folder, 'prescan-refresh', {}, { args: ['--consent'] });
+    knownStalePrescans.delete(folder.uri.fsPath);
+    refresh();
+    vscode.window.showInformationMessage(result.prescan?.message || '预扫完成。');
+  });
+  command('clearPrescan', async () => {
+    const folder = await folderFor(); if (!folder) return;
+    await cli(folder, 'prescan-clear'); knownStalePrescans.delete(folder.uri.fsPath); refresh();
+    vscode.window.showInformationMessage('本地预扫保留许可已撤销，预扫索引已清除。');
+  });
   command('refreshModelAnswer', () => modelAnswerProvider?.refresh());
 
   command('showRestrictionDetails', id => showRestrictionDetails(id));
@@ -790,7 +812,9 @@ function activate(context) {
       const file = uri ? path.relative(folder.uri.fsPath, uri.fsPath).split(path.sep).join('/') : '';
       const epoch = documentEpoch;
       try {
-        const data = await cli(folder, 'index');
+        const data = knownStalePrescans.has(folder.uri.fsPath)
+          ? { functions: [], prescan: { state: 'stale', message: '索引过期；已观察到来源变化，请显式刷新预扫。' } }
+          : await cli(folder, 'prescan-index');
         if (epoch !== documentEpoch) return;
         reportIndex(folder, file, data);
       } catch (error) {
@@ -799,7 +823,7 @@ function activate(context) {
       }
       detail = indexDiagnostics.get(folder.uri.fsPath);
     }
-    panel('IntentLens · 索引范围与遗漏原因', nonce => renderIndexStatus(detail, nonce), async () => {}, folder, true);
+    panel('IntentLens · 索引范围与遗漏原因', nonce => renderIndexStatus(detail, nonce), async message => { if (message.action === 'prescan') await vscode.commands.executeCommand('intentlens.prescan'); }, folder, true);
   });
   const exerciseUI = createExerciseUI({ vscode, cli, panel, folderFor });
   command('exercises', () => exerciseUI.list());
@@ -917,7 +941,16 @@ function activate(context) {
     apiBar.show();
     context.subscriptions.push(apiBar);
   }
-  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(refresh), vscode.workspace.onDidChangeWorkspaceFolders(() => {
+  const observedSourceChange = guard(async uri => {
+    clearInline();
+    const folder = vscode.workspace.getWorkspaceFolder(uri);
+    if (!folder || !vscode.workspace.isTrusted) return;
+    knownStalePrescans.add(folder.uri.fsPath);
+    await cli(folder, 'prescan-invalidate');
+  });
+  context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(document => {
+    refresh(); if (/\.(go|md)$/.test(document.uri.fsPath)) return observedSourceChange(document.uri);
+  }), vscode.workspace.onDidChangeWorkspaceFolders(() => {
     if (restrictionResult && !openFolder(restrictionResult.root)) clearRestrictions();
     clearInline(); refresh();
   }), vscode.workspace.onDidGrantWorkspaceTrust(refresh));
@@ -927,7 +960,13 @@ function activate(context) {
   if (vscode.window.onDidChangeActiveTextEditor) context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => modelAnswerProvider?.refresh()));
   if (vscode.window.onDidChangeTextEditorSelection) context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(() => modelAnswerProvider?.refresh()));
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
-    if (event.document.uri.scheme === 'file' && event.contentChanges.length) clearInline();
+    if (event.document.uri.scheme === 'file' && event.contentChanges.length) {
+      clearInline();
+      if (/\.(go|md)$/.test(event.document.uri.fsPath)) {
+        const folder = vscode.workspace.getWorkspaceFolder(event.document.uri);
+        if (folder) knownStalePrescans.add(folder.uri.fsPath);
+      }
+    }
   }));
   const policyWatcher = vscode.workspace.createFileSystemWatcher('**/.intentignore');
   const policyChanged = guard(async uri => {
@@ -942,7 +981,9 @@ function activate(context) {
     if (vscode.workspace.isTrusted) await cli(folder, 'status');
   });
   context.subscriptions.push(policyWatcher, policyWatcher.onDidCreate(policyChanged), policyWatcher.onDidChange(policyChanged), policyWatcher.onDidDelete(policyChanged));
+  const docsWatcher = vscode.workspace.createFileSystemWatcher('**/*.md');
+  context.subscriptions.push(docsWatcher, docsWatcher.onDidCreate(observedSourceChange), docsWatcher.onDidChange(observedSourceChange), docsWatcher.onDidDelete(observedSourceChange));
   const sourceWatcher = vscode.workspace.createFileSystemWatcher('**/*.go');
-  context.subscriptions.push(sourceWatcher, sourceWatcher.onDidCreate(clearInline), sourceWatcher.onDidChange(clearInline), sourceWatcher.onDidDelete(clearInline));
+  context.subscriptions.push(sourceWatcher, sourceWatcher.onDidCreate(observedSourceChange), sourceWatcher.onDidChange(observedSourceChange), sourceWatcher.onDidDelete(observedSourceChange));
 }
 module.exports = { activate };

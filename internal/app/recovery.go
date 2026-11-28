@@ -17,7 +17,14 @@ import (
 const maxStateRecordBytes = 256 << 20
 
 func recordTarget(name string) any {
+	if isPrescanManifest(name) {
+		return &prescanManifest{}
+	}
 	switch name {
+	case prescanPermissionName:
+		return &prescanPermission{}
+	case prescanStatusName:
+		return &PrescanState{}
 	case "active.json":
 		return &Active{}
 	case "settings.json":
@@ -162,24 +169,37 @@ func (a *App) isolateRecords() error {
 			return statErr
 		}
 		if !info.Mode().IsRegular() {
+			if isPrescanManifest(entry.Name()) && info.Mode()&os.ModeSymlink != 0 {
+				if err := root.Remove(entry.Name()); err != nil {
+					return err
+				}
+				if err := a.write(prescanStatusName, prescanState("missing", "不安全缓存已清除")); err != nil {
+					return err
+				}
+				continue
+			}
 			return errors.New("本地记录不是普通文件")
 		}
 		// Historical records have a finite read bound. Never reset a corrupt budget
 		// or consent file: those remain fail-closed until explicitly repaired.
 		var parseErr error
-		if info.Size() > maxStateRecordBytes {
+		if info.Size() > maxStateRecordBytes || (isPrescanManifest(entry.Name()) && info.Size() > maxPrescanBytes) {
 			parseErr = errors.New("记录超过恢复范围")
 		} else {
 			f, e := root.Open(entry.Name())
 			if e != nil {
 				return e
 			}
-			b, e := io.ReadAll(io.LimitReader(f, (maxStateRecordBytes)+1))
+			limit := int64(maxStateRecordBytes)
+			if isPrescanManifest(entry.Name()) {
+				limit = maxPrescanBytes
+			}
+			b, e := io.ReadAll(io.LimitReader(f, limit+1))
 			closeErr := f.Close()
 			if e != nil || closeErr != nil {
 				return errors.Join(e, closeErr)
 			}
-			if len(b) > maxStateRecordBytes {
+			if int64(len(b)) > limit {
 				parseErr = errors.New("记录超过恢复范围")
 			} else {
 				parseErr = validateStateRecord(entry.Name(), b, target)
@@ -193,6 +213,16 @@ func (a *App) isolateRecords() error {
 		}
 		if entry.Name() == "settings.json" || entry.Name() == "usage.json" {
 			return fmt.Errorf("%s 损坏；为保留授权和预算，需显式修复", entry.Name())
+		}
+		if isPrescanManifest(entry.Name()) {
+			// Source-bearing cache corruption is deleted, never quarantined.
+			if err := root.Remove(entry.Name()); err != nil {
+				return err
+			}
+			if err := a.write(prescanStatusName, prescanState("missing", "缓存损坏已清除")); err != nil {
+				return err
+			}
+			continue
 		}
 		name := "quarantine/" + entry.Name() + "-" + newID() + ".bad"
 		if renameErr := root.Rename(entry.Name(), name); renameErr != nil {

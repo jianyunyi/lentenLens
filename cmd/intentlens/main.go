@@ -72,7 +72,7 @@ type input struct {
 
 func run(args []string, in io.Reader, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | round-detail | round-file | explanation-evidence | index | inspect | call-path | explain | explain-selection | configure | status | test-model | analyze-round | hooks-config | hook")
+		fmt.Fprintln(out, "IntentLens (IDE / Skill / optional Claude): integration-info | capture-event | capture-status | capture-abort | start | stop | abort | rounds | round-detail | round-file | explanation-evidence | prescan | prescan-refresh | prescan-clear | prescan-index | prescan-inspect | index | inspect | call-path | explain | explain-selection | configure | status | test-model | analyze-round | hooks-config | hook")
 		return 0
 	}
 	command := args[0]
@@ -80,6 +80,7 @@ func run(args []string, in io.Reader, out io.Writer) int {
 	flags.SetOutput(io.Discard)
 	root := flags.String("root", ".", "project root")
 	state := flags.String("state", "", "external local state directory")
+	prescanConsent := flags.Bool("consent", false, "authorize local Go/Markdown prescan retention for seven days; no model requests")
 	roundID := flags.String("round", "", "round id")
 	automaticAnalysis := flags.Bool("automatic", false, "deduplicate lifecycle-triggered round analysis")
 	editorModelTarget := flags.String("editor-model-target", "", "VS Code credential's bound provider, base URL, and model")
@@ -221,6 +222,20 @@ func run(args []string, in io.Reader, out io.Writer) int {
 		result, e = a.RoundDetails(request.RoundID, request.Cursor, request.Limit)
 	case "round-file":
 		result, e = a.RoundFile(request.RoundID, request.File, request.Side)
+	case "prescan", "prescan-refresh":
+		var scan app.PrescanResult
+		scan, e = a.Prescan(context.Background(), *prescanConsent, command == "prescan-refresh")
+		result = map[string]any{"prescan": scan.Prescan, "coverage": scan.Coverage, "function_count": len(scan.Go.Functions), "paragraph_count": len(scan.Docs.Paragraphs)}
+	case "prescan-invalidate":
+		e = a.MarkPrescanStale()
+		result = map[string]bool{"invalidated": e == nil}
+	case "prescan-clear":
+		e = a.ClearPrescan()
+		result = map[string]bool{"cleared": e == nil}
+	case "prescan-index":
+		result, e = a.PrescanIndex()
+	case "prescan-inspect":
+		result, e = a.PrescanInspect(request.File, request.Line)
 	case "index":
 		result, e = a.Index()
 	case "inspect":
@@ -287,7 +302,7 @@ func decodeRequest(command string, in io.Reader, roundID *string) (input, error)
 	}
 	// Read stdin only for commands that require it; never hang a background worker.
 	switch command {
-	case "capture-event", "capture-abort", "start", "stop", "inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "explanation-evidence", "round-detail", "round-file", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
+	case "capture-event", "capture-abort", "start", "stop", "inspect", "prescan-inspect", "call-path", "explain", "explain-selection", "configure", "flag", "revise", "share-prepare", "share-confirm", "adopt-shared", "explanation", "explanation-evidence", "round-detail", "round-file", "exercise-generate", "exercise-view", "exercise-plan", "exercise-run", "exercise-apply-preview", "exercise-apply-confirm", "exercise-share-prepare", "exercise-share-confirm", "exercise-import", "exercise-feedback":
 		limit := int64(32768)
 		if command == "explain-selection" {
 			limit = 128 * 1024
