@@ -181,7 +181,8 @@ function coverageHTML(coverage) {
 }
 function renderIndexStatus(data, nonce) {
   const error = data.error ? `<p role="alert">索引失败：${escapeHTML(data.error)}</p><p>请检查工作区信任、CLI 路径和文件访问权限，再执行“刷新轮次与 CodeLens”。失败不会被解释为文件没有函数。</p>` : '';
-  return page('索引范围与遗漏原因', `<p>工作区：${escapeHTML(data.root || '')}</p>${data.file ? `<p>当前文件：${escapeHTML(data.file)}</p>` : ''}${error}${data.error ? '' : coverageHTML(data.coverage)}<p>此页面只显示本地索引诊断，不发送代码、不请求模型、不更改排除规则。</p>`, nonce);
+  const prescan = data.prescan ? `<section><h2>预扫快照</h2><p>${escapeHTML(data.prescan.message)}</p><p>${escapeHTML(data.prescan.generation || '')} · ${escapeHTML(data.prescan.generated || '')}</p>${button('prescan', '', '授权预扫 / 显式刷新')}</section>` : '';
+  return page('索引范围与遗漏原因', `${prescan}<p>工作区：${escapeHTML(data.root || '')}</p>${data.file ? `<p>当前文件：${escapeHTML(data.file)}</p>` : ''}${error}${data.error ? '' : coverageHTML(data.coverage)}<p>此页面只显示本地索引诊断，不发送代码、不请求模型、不更改排除规则。</p>`, nonce);
 }
 function renderInspection(data, nonce) {
   return page(data.function?.name || '函数证据', `<p>本地静态证据 · 已保存的磁盘版本</p>${coverageHTML(data.coverage)}${button('explain', '', '生成解释')}${button('ask', '', '自由提问')}<pre>${escapeHTML(data.function?.source)}</pre><h2>直接依赖</h2>${(data.dependencies || []).map((f, i) => button('dependency', i, `${f.name} · ${f.file}:${f.start_line}`)).join('') || '<p>没有唯一解析的直接依赖。</p>'}<h2>当前证据</h2>${evidenceHTML(data.evidence, 'current')}<h2>分析限制</h2><ul>${(data.issues || []).map(x => `<li>${escapeHTML(x)}</li>`).join('')}</ul>${(data.history || []).map((entry, i) => explanationHTML(entry, String(i))).join('')}`, nonce);

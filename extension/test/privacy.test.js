@@ -36,10 +36,10 @@ function harness(t) {
   const original = Module._load;
   Module._load = function(id, ...args) {
     if (id === 'vscode') return vscode;
-    if (id === './core') return { ...core, runCLI: async (_, __, command, input) => {
-      calls.push({ command, input });
+    if (id === './core') return { ...core, runCLI: async (_, __, command, input, options) => {
+      calls.push({ command, input, options });
       await state.onCLI?.(command, input);
-      if (command === 'inspect') return structuredClone(state.inspection);
+      if (command === 'inspect' || command === 'prescan-inspect') return structuredClone(state.inspection);
       if (command === 'rounds') return structuredClone({ items: state.rounds, next_cursor: undefined });
       if (command === 'round-detail') return structuredClone(state.rounds.find(round => round.id === input.round_id) || { id: input.round_id, changes: [], notes: [] });
       if (command === 'round-file') return structuredClone({ exists: false });
@@ -332,7 +332,7 @@ test('sidebar refresh invalidates old evidence IDs, queued commands, and descend
 
 test('partial index retains function entries and adds visible diagnostics with exact reasons', async t => {
   const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
-  h.state.responses = { index: { functions: [{ file: 'main.go', start_line: 3 }], coverage: { complete: false, scope: 'go-only', budget_bytes: 16777216, captured_bytes: 16777216, omitted_count: 1, excluded_count: 2, omitted: [{ file: 'later.go', reason: 'snapshot_budget' }] } } };
+  h.state.responses = { 'prescan-index': { functions: [{ file: 'main.go', start_line: 3 }], coverage: { complete: false, scope: 'go-only', budget_bytes: 16777216, captured_bytes: 16777216, omitted_count: 1, excluded_count: 2, omitted: [{ file: 'later.go', reason: 'snapshot_budget' }] } } };
   const lenses = await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
   assert.equal(lenses.length, 2);
   assert.equal(lenses[0].command.command, 'intentlens.indexStatus');
@@ -343,13 +343,13 @@ test('partial index retains function entries and adds visible diagnostics with e
   assert.match(h.panels[0].webview.html, /Go 源码总预算已耗尽/);
   assert.match(h.panels[0].webview.html, /later.go/);
   assert.match(h.panels[0].webview.html, /2 项文件或目录/);
-  assert.equal(h.calls.filter(c => c.command === 'index').length, 1, 'cached diagnostic opens without another full scan');
-  assert.ok(h.calls.every(c => c.command === 'index'), 'diagnostics never call a model or change project policy');
+  assert.equal(h.calls.filter(c => c.command === 'prescan-index').length, 1, 'cached diagnostic opens without another full scan');
+  assert.ok(h.calls.every(c => c.command === 'prescan-index'), 'diagnostics never call a model or change project policy');
 });
 
 test('zero functions from intentional exclusions still shows an actionable diagnostic entry', async t => {
   const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
-  h.state.responses = { index: { functions: [], coverage: { complete: false, omitted_count: 0, excluded_count: 1, omitted: [] } } };
+  h.state.responses = { 'prescan-index': { functions: [], coverage: { complete: false, omitted_count: 0, excluded_count: 1, omitted: [] } } };
   const lenses = await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
   assert.equal(lenses.length, 1);
   assert.equal(lenses[0].command.command, 'intentlens.indexStatus');
@@ -373,11 +373,11 @@ test('index CLI failure is visible instead of silently returning zero CodeLens e
 
 test('refresh clears stale diagnostics and a complete new index hides the warning', async t => {
   const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
-  h.state.responses = { index: { functions: [], coverage: { complete: false, omitted_count: 1, excluded_count: 0 } } };
+  h.state.responses = { 'prescan-index': { functions: [], coverage: { complete: false, omitted_count: 1, excluded_count: 0 } } };
   await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
   await h.commands.get('intentlens.refresh')();
   assert.equal(h.state.indexBar.visible, false);
-  h.state.responses.index = { functions: [{ file: 'main.go', start_line: 2 }], coverage: { complete: true, omitted_count: 0, excluded_count: 0 } };
+  h.state.responses['prescan-index'] = { functions: [{ file: 'main.go', start_line: 2 }], coverage: { complete: true, omitted_count: 0, excluded_count: 0 } };
   const lenses = await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
   assert.equal(lenses.length, 1);
   assert.equal(lenses[0].command.command, 'intentlens.inspect');
@@ -392,7 +392,7 @@ test('cancellation and source changes do not publish late index warnings', async
     const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
     let finish;
     h.state.onCLI = () => new Promise(resolve => { finish = resolve; });
-    h.state.responses = { index: { functions: [], coverage: { complete: false, omitted_count: 1 } } };
+    h.state.responses = { 'prescan-index': { functions: [], coverage: { complete: false, omitted_count: 1 } } };
     const token = { isCancellationRequested: false };
     const pending = h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, token);
     while (!finish) await new Promise(resolve => setImmediate(resolve));
@@ -408,7 +408,7 @@ test('cancellation and source changes do not publish late index warnings', async
 test('source changes close current-source diagnostics and details without closing historical rounds', async t => {
   for (const event of ['edit', 'external']) {
     const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
-    h.state.responses = { index: { functions: [], coverage: { complete: false, omitted_count: 1 } } };
+    h.state.responses = { 'prescan-index': { functions: [], coverage: { complete: false, omitted_count: 1 } } };
     await h.commands.get('intentlens.inspectDetails')(uri, 1);
     const details = h.panels.at(-1);
     await h.commands.get('intentlens.indexStatus')(uri);
@@ -437,4 +437,47 @@ test('in-flight inspection or diagnostic cannot reopen stale panels after a sour
     assert.equal(h.panels.length, 0);
     assert.equal(h.state.indexBar.visible, false);
   }
+});
+
+test('background CodeLens uses prescan states and never initiates a scan', async t => {
+  for (const state of ['missing', 'stale', 'unknown', 'hit']) {
+    const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
+    const message = { missing: '关联需先预扫', stale: '索引过期，请显式刷新', unknown: '基于某次预扫、当前性未验证', hit: '按预扫时点' }[state];
+    h.state.responses = { 'prescan-index': { prescan: { state, message, generation: 'g1' }, functions: ['unknown', 'hit'].includes(state) ? [{ file: 'main.go', start_line: 1 }] : [], coverage: { complete: true } } };
+    const lenses = await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
+    assert.ok(lenses.length);
+    if (state !== 'hit') assert.ok(lenses.some(lens => lens.command.title.includes(message)));
+    assert.ok(h.calls.every(call => call.command === 'prescan-index'));
+    await h.commands.get('intentlens.indexStatus')(uri);
+    assert.ok(h.panels[0].webview.html.includes(message));
+    assert.doesNotMatch(h.panels[0].webview.html, /索引失败：/);
+    assert.ok(h.calls.every(call => !['index', 'prescan', 'prescan-refresh', 'inspect'].includes(call.command)));
+  }
+});
+
+test('prescan refresh requires separate retention confirmation and passes the consent flag', async t => {
+  const h = harness(t);
+  await h.commands.get('intentlens.prescan')();
+  assert.equal(h.calls.length, 0, 'cancellation must not scan');
+  h.vscode.window.showWarningMessage = async message => {
+    assert.match(message, /Go.*Markdown.*七天.*不调用模型/);
+    return '授权本地预扫并刷新';
+  };
+  h.state.responses = { 'prescan-refresh': { prescan: { state: 'hit', message: '预扫完成' } } };
+  await h.commands.get('intentlens.prescan')();
+  assert.equal(h.calls.at(-1).command, 'prescan-refresh');
+  assert.deepEqual(h.calls.at(-1).options.args, ['--consent']);
+  await h.commands.get('intentlens.clearPrescan')();
+  assert.equal(h.calls.at(-1).command, 'prescan-clear');
+});
+
+test('observed Markdown change only invalidates and blocks old CodeLens until explicit refresh', async t => {
+  const h = harness(t), uri = h.uri(path.join(h.folder.uri.fsPath, 'main.go'));
+  const watcher = h.watchers.find(w => w.pattern === '**/*.md');
+  await watcher.change(h.uri(path.join(h.folder.uri.fsPath, 'README.md')));
+  assert.deepEqual(h.calls.map(call => call.command), ['prescan-invalidate']);
+  const before = h.calls.length;
+  const lenses = await h.state.codeLensProvider.provideCodeLenses({ uri, isDirty: false }, { isCancellationRequested: false });
+  assert.match(lenses[0].command.title, /过期.*显式刷新/);
+  assert.equal(h.calls.length, before, 'known stale must not fall back to a source scan');
 });

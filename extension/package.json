@@ -78,6 +78,8 @@
                         },
     "contributes":  {
                         "commands":  [
+            {"command":"intentlens.prescan","title":"IntentLens: 授权本地预扫 / 显式刷新"},
+            {"command":"intentlens.clearPrescan","title":"IntentLens: 撤销并清除本地预扫"},
                                          {
                                              "command":  "intentlens.exercises",
                                              "title":  "IntentLens: 查看本地练习"

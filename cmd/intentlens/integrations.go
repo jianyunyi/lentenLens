@@ -2,6 +2,7 @@ package main
 
 func integrationInfo() any {
 	return map[string]any{
+		"prescan":                           map[string]any{"schema": 1, "commands": []string{"prescan", "prescan-refresh", "prescan-clear", "prescan-invalidate", "prescan-index", "prescan-inspect"}, "states": []string{"hit", "unknown", "stale", "missing"}, "consent": "prescan --consent authorizes local Go/Markdown source index retention for seven days; no model requests", "background_reads": "prescan-index/prescan-inspect never capture or hash source files"},
 		"schema":                            1,
 		"entries":                           []string{"ide", "skill", "claude"},
 		"transport":                         "local-process-json-stdio",

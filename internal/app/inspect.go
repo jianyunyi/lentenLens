@@ -89,6 +89,12 @@ func findFunctionByHistoricalID(functions []codeindex.Function, saved Explanatio
 }
 
 func (a *App) Index() (codeindex.Index, error) {
+	// Explicit legacy CLI indexing may verify an already authorized prescan.
+	// Without that separate consent it retains the original Go-only behavior.
+	if _, err := a.prescanPermission(); err == nil {
+		result, err := a.Prescan(context.Background(), false, false)
+		return result.Go, err
+	}
 	idx, _, _, e := a.buildIndex()
 	return idx, e
 }
